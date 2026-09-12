@@ -49,12 +49,38 @@ anything, which is the way to test a change to it.
 
 ## The download page
 
-`landing/index.html` is a static page that offers the build matching the visitor's
-platform and links to the documentation. It is what a public deployment serves:
-`server.py` swaps `/` for it when `CAISSA_LANDING=1`, which `railway.json` and the
-`Procfile` set. Locally the variable is unset, so `py server.py` still serves the
-workbench.
+`deploy/` is a self-contained folder — that is the whole point of it. It holds the page,
+the logo, and a forty-line standard-library server, and nothing else:
 
-The page only links to GitHub Releases — it never hosts the binaries itself, so the host
-serves a few kilobytes rather than hundreds of megabytes. GitHub Pages would do the same
-job for nothing if you would rather not run a host at all.
+```
+deploy/
+  index.html          the page
+  assets/             the logo
+  serve.py            standard library only
+  railway.json        start command and health check
+  Procfile            the same, for hosts that read one
+  requirements.txt    deliberately empty
+```
+
+**Point the host's root directory at `deploy`.** On Railway that is
+*Service → Settings → Source → Root Directory*. The host then builds and copies those
+eighteen kilobytes instead of the whole repository — no engine, no database, no
+dependencies to install, and nothing to keep in step with the application.
+
+The page never hosts a binary. It reads the visitor's platform and points the button at
+the matching asset under
+`https://github.com/H-Bombmxpwr/caissa/releases/latest/download/…`, so GitHub serves the
+files and this stays the same size however large the builds become.
+
+Any static host does the same job: GitHub Pages, Netlify or Cloudflare Pages will serve
+`index.html` and `assets/` for nothing, and then `serve.py` is not needed at all.
+
+```bash
+python deploy/serve.py          # http://localhost:8000, to see it before deploying
+```
+
+> **The asset names are written down twice**
+>
+> `.github/workflows/release.yml` produces them and `deploy/index.html` links to them.
+> Rename one without the other and the button 404s, so `tests/deploy_browser.py` checks
+> that the two agree.

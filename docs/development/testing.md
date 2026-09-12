@@ -44,6 +44,7 @@ These drive a real Edge through Playwright:
 .venv\Scripts\python tests\sounds_browser.py
 .venv\Scripts\python tests\autoimport_browser.py
 .venv\Scripts\python tests\explorer_browser.py
+.venv\Scripts\python tests\deploy_browser.py
 .venv\Scripts\python tests\analysis_quality_browser.py
 ```
 
@@ -61,6 +62,11 @@ off — or forgetting the token — stops the watcher.
 the collection tree, the score follows the named player rather than White, clicking a
 move walks the tree and the breadcrumb walks back, the filters narrow it, the trend is
 per year, and the weakest list names the line that cost the points.
+
+`deploy_browser.py` starts `deploy/serve.py` as its own process with the repository
+kept off the path, so it fails if the download page ever grows a dependency on the
+application. It checks that each platform is offered its own build, that the asset names
+match what the release workflow produces, and that the folder stays small.
 
 `sounds_browser.py` checks the sound catalogue against what is actually on disk, that
 every file it claims is served as audio, that every event resolves to a real sample
