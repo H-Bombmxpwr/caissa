@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Blindfold Trainer — smoke test</title>
+<link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+<!-- Mounts every level in turn, pokes at it, and reports uncaught errors.
+     Run headless:  msedge --headless=new --virtual-time-budget=15000 --dump-dom \
+                      http://localhost:8123/tests/smoke.html  -->
+<header class="top">
+  <div class="brand"><span class="logo">smoke test</span></div>
+  <nav class="levels" id="levels"></nav>
+</header>
+<main>
+  <div class="board-col">
+    <div class="board-holder" id="board"></div>
+    <div id="board-controls"></div>
+  </div>
+  <div id="panel"></div>
+</main>
+<pre id="results" style="padding:16px;white-space:pre-wrap">running…</pre>
+
+<script>
+  window.__errors = [];
+  window.addEventListener('error', function (e) {
+    window.__errors.push('ERROR ' + (e.message || e.error) + ' @' + (e.filename || '').split('/').pop() + ':' + e.lineno);
+  });
+  window.addEventListener('unhandledrejection', function (e) {
+    window.__errors.push('REJECTION ' + (e.reason && e.reason.message ? e.reason.message : e.reason));
+  });
+  /* keep the network out of it */
+  window.fetch = function () { return Promise.reject(new Error('network disabled in smoke test')); };
+</script>
+
+<script src="../js/engine.js"></script>
+<script src="../js/pgn.js"></script>
+<script src="../js/ai.js"></script>
+<script src="../js/stockfish.js"></script>
+<script src="../js/lichess.js"></script>
+<script src="../js/board.js"></script>
+<script src="../js/app.js"></script>
+<script src="../data/openings.js"></script>
+<script src="../data/endgames.js"></script>
+<script src="../data/studies.js"></script>
+<script src="../js/drills/l1.js"></script>
+<script src="../js/drills/l2.js"></script>
+<script src="../js/drills/l3.js"></script>
+<script src="../js/drills/l4.js"></script>
+<script src="../js/drills/l5.js"></script>
+<script src="../js/drills/l6.js"></script>
+<script src="../js/drills/l7.js"></script>
+
+<script>
+(function () {
+  const log = [];
+  function say(s) { log.push(s); document.getElementById('results').textContent = log.join('\n'); }
+
+  function submitFirstForm(text) {
+    const form = document.querySelector('#panel form');
+    if (!form) return false;
+    const input = form.querySelector('input[type="text"]');
+    if (input) { input.value = text; }
+    form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+    return true;
+  }
+
+  function clickFirstListItem() {
+    const li = document.querySelector('#panel ul.list li');
+    if (li) { li.click(); return true; }
+    return false;
+  }
+
+  const plan = [
+    { id: 'colors', act: function () {
+        const btns = document.querySelectorAll('#panel .answer-grid button');
+        btns[0].click(); btns[1].click(); btns[0].click();
+        return 'answered 3 squares';
+      } },
+    { id: 'tours', act: function () {
+        const prompt = document.querySelector('#panel .prompt').textContent;
+        submitFirstForm('a1 b2');                       // deliberately wrong
+        document.querySelectorAll('#panel .controls button')[0].click();  // show solution
+        return 'prompt="' + prompt.replace(/\s+/g, ' ') + '"';
+      } },
+    { id: 'openings', act: function () {
+        clickFirstListItem();
+        submitFirstForm('e4');
+        submitFirstForm('zz9');                          // junk input
+        return 'played e4 into ' + document.querySelector('#panel .prompt').textContent;
+      } },
+    { id: 'endgames', act: function () {
+        clickFirstListItem();
+        submitFirstForm('Qd5');
+        return 'endgame ' + document.querySelector('#panel .prompt').textContent;
+      } },
+    { id: 'knight-tour', act: function () {
+        submitFirstForm('f2');
+        submitFirstForm('d3');                            // attacked by the queen -> refused
+        submitFirstForm('g4');
+        return document.querySelector('#panel .sub-prompt').textContent;
+      } },
+    { id: 'studies', act: function () {
+        clickFirstListItem();
+        submitFirstForm('Kg7');
+        return 'study ' + document.querySelector('#panel .prompt').textContent;
+      } },
+    { id: 'analyze', act: function () {
+        const box = document.querySelector('#panel textarea');
+        box.value = '[Event "Test"]\n[White "Me"]\n[Black "You"]\n[Result "1-0"]\n\n1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 1-0';
+        const buttons = Array.prototype.slice.call(document.querySelectorAll('#panel .controls button'));
+        const use = buttons.find(function (b) { return b.textContent.indexOf('pasted') > -1; });
+        use.click();
+        clickFirstListItem();
+        submitFirstForm('e4');
+        submitFirstForm('e5');
+        return 'analyzed ' + document.querySelector('#panel .prompt').textContent;
+      } }
+  ];
+
+  function run() {
+    plan.forEach(function (stepDef) {
+      const before = window.__errors.length;
+      let detail = '';
+      try {
+        App.go(stepDef.id);
+        detail = stepDef.act() || '';
+      } catch (e) {
+        window.__errors.push('THROWN in ' + stepDef.id + ': ' + e.message);
+      }
+      const added = window.__errors.length - before;
+      say((added ? 'FAIL ' : 'OK   ') + stepDef.id + (detail ? '  — ' + detail : '') +
+        (added ? '\n       ' + window.__errors.slice(before).join('\n       ') : ''));
+    });
+
+    /* lichess PGN -> repertoire tree (fixture, no network) */
+    try {
+      const xhr = new XMLHttpRequest();
+      xhr.open('GET', 'fixture.pgn', false);
+      xhr.send(null);
+      const games = Lichess.splitGames(xhr.responseText).map(function (pgn) {
+        const p = PGN.parse(pgn);
+        return { pgn: pgn, headers: p.headers, root: p.root, errors: p.errors };
+      });
+      const badParse = games.filter(function (g) { return g.errors.length; });
+      const white = Lichess.buildRepertoire(games, { user: 'testplayer', color: 'w', maxPly: 12, minCount: 1 });
+      const black = Lichess.buildRepertoire(games, { user: 'testplayer', color: 'b', maxPly: 12, minCount: 1 });
+      const firstMoves = Lichess.kids(white).map(function (k) { return k.san + '×' + k.count; });
+      const openings = Lichess.openingSummary(white).map(function (o) { return o.name + '×' + o.count; });
+      const italian = Lichess.filterByOpening(white, 'Italian Game: Giuoco Pianissimo');
+      const italianReplies = Lichess.kids(Lichess.kids(Lichess.kids(italian)[0])[0]).length;
+      const ok = games.length === 4 && badParse.length === 0 &&
+        white.gamesUsed === 3 && black.gamesUsed === 1 &&
+        firstMoves.length === 1 && firstMoves[0] === 'e4×3' &&
+        openings.length === 2;
+      say((ok ? 'OK   ' : 'FAIL ') + 'repertoire from lichess-format PGN — ' +
+        games.length + ' games, white ' + white.gamesUsed + '/black ' + black.gamesUsed +
+        ', first moves [' + firstMoves.join(',') + '], openings [' + openings.join(', ') + ']' +
+        ', italian subtree branches at ply 3: ' + italianReplies +
+        (badParse.length ? ', PARSE ERRORS: ' + badParse.length : ''));
+    } catch (e) { say('FAIL repertoire: ' + e.message); }
+
+    /* peek machinery */
+    try {
+      App.go('colors');
+      App.peek.begin();
+      const peeking = App.board.wrap.classList.contains('peeking');
+      App.peek.end();
+      say((peeking ? 'OK   ' : 'FAIL ') + 'peek reveals the board');
+    } catch (e) { say('FAIL peek: ' + e.message); }
+
+    /* peeking must not reveal computed answers */
+    try {
+      App.go('knight-tour');
+      const b = App.board;
+      b.setHighlights({ d5: 'hl-red' }, { answer: true });
+      b.setShapes([{ square: 'd5', brand: 'red' }], { answer: true });
+      const squareOf = function (key) {
+        return Array.prototype.slice.call(b.boardEl.children).find(function (sq) { return sq.dataset.key === key; });
+      };
+      const hiddenNormally = squareOf('d5').classList.contains('hl-red');
+      const shapesBefore = b.svg.querySelectorAll('circle').length;
+      b.setPeeking(true);
+      const duringPeek = squareOf('d5').classList.contains('hl-red');
+      const shapesDuring = b.svg.querySelectorAll('circle').length;
+      b.setPeeking(false);
+      const afterPeek = squareOf('d5').classList.contains('hl-red');
+      const ok = hiddenNormally && !duringPeek && afterPeek && shapesBefore === 1 && shapesDuring === 0;
+      say((ok ? 'OK   ' : 'FAIL ') + 'peek hides answer highlights (marked before/during/after: ' +
+        hiddenNormally + '/' + duringPeek + '/' + afterPeek +
+        ', answer shapes before/during: ' + shapesBefore + '/' + shapesDuring + ')');
+    } catch (e) { say('FAIL answer-hiding: ' + e.message); }
+
+    /* the L / D shortcuts should be visible on the buttons */
+    try {
+      App.go('colors');
+      const keys = Array.prototype.map.call(document.querySelectorAll('#panel .answer-grid .key'),
+        function (k) { return k.textContent; });
+      say(((keys.join('') === 'LD') ? 'OK   ' : 'FAIL ') + 'light/dark buttons show their keys [' + keys.join(',') + ']');
+    } catch (e) { say('FAIL key hints: ' + e.message); }
+
+    /* board animation plumbing: a piece element must be reused across a move */
+    try {
+      App.go('endgames');
+      const b = App.board;
+      b.setPieces({ e1: { type: 'k', color: 'w' }, e8: { type: 'k', color: 'b' } }, { animate: false });
+      const before = b.pieces.e1.el;
+      b.setPieces({ e2: { type: 'k', color: 'w' }, e8: { type: 'k', color: 'b' } }, { animate: true });
+      const same = b.pieces.e2 && b.pieces.e2.el === before;
+      const moved = b.pieces.e2 && /translate/.test(b.pieces.e2.el.style.transform);
+      say(((same && moved) ? 'OK   ' : 'FAIL ') + 'pieces glide (element reused: ' + !!same + ', transform set: ' + !!moved + ')');
+    } catch (e) { say('FAIL animation: ' + e.message); }
+
+    setTimeout(function () {
+      say('\n' + (window.__errors.length ? window.__errors.length + ' ERROR(S):\n' + window.__errors.join('\n')
+                                         : 'no uncaught errors'));
+      say('DONE');
+    }, 2500);
+  }
+
+  setTimeout(run, 300);
+})();
+</script>
+</body>
+</html>

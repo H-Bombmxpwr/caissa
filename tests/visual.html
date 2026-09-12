@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Blindfold Trainer — board preview</title>
+<link rel="stylesheet" href="../css/style.css">
+<style>
+  main { grid-template-columns: 1fr 1fr; }
+  .board-holder { max-width: 460px; }
+</style>
+</head>
+<body>
+<!-- Renderer preview: pieces, coordinates, highlights, dots, arrows, blindfold modes. -->
+<header class="top"><div class="brand"><span class="logo">board preview</span></div></header>
+<main>
+  <div class="board-col">
+    <div class="board-holder" id="b1"></div>
+    <p class="hint">normal · last move · legal-move dots · arrows</p>
+  </div>
+  <div class="board-col">
+    <div class="board-holder" id="b2"></div>
+    <p class="hint">blindfold "hide pieces" (lichess style) · flipped</p>
+  </div>
+</main>
+
+<script src="../js/engine.js"></script>
+<script src="../js/board.js"></script>
+<script>
+  const game = new Chess();
+  ['e4', 'c5', 'Nf3', 'd6', 'd4', 'cxd4', 'Nxd4', 'Nf6', 'Nc3', 'a6'].forEach(function (m) { game.move(m); });
+
+  const b1 = new Board(document.getElementById('b1'), { blindfold: 'off' });
+  b1.setPosition(game, { animate: false, lastMove: ['a7', 'a6'] });
+  b1.setMovable({ color: 'w', dests: game.destinationsMap(), onMove: function () {} });
+  b1.selectSquare('f1');
+  b1.setShapes([{ from: 'f1', to: 'c4', brand: 'green' }, { square: 'd5', brand: 'blue' }]);
+
+  const b2 = new Board(document.getElementById('b2'), { blindfold: 'pieces', orientation: 'b' });
+  b2.setPosition(game, { animate: false, lastMove: ['a7', 'a6'] });
+</script>
+</body>
+</html>

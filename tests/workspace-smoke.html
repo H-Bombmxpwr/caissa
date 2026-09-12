@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Caissa — workspace smoke test</title>
+<base href="../">
+<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/workspace.css">
+<style>
+  #results { position: fixed; right: 0; top: 0; width: 46%; height: 100%; overflow: auto;
+             background: #12110f; color: #ddd; font: 12px/1.5 Consolas, monospace;
+             white-space: pre-wrap; padding: 12px; z-index: 9999; border-left: 1px solid #444; }
+</style>
+</head>
+<body>
+<!-- Loads the real workspace against the real API and walks every module.
+     Run it with the server up:
+       py server.py
+       msedge --headless=new --virtual-time-budget=25000 --dump-dom \
+         http://localhost:8000/tests/workspace-smoke.html          -->
+
+<script>
+  window.__errors = [];
+  window.addEventListener('error', function (e) {
+    window.__errors.push('ERROR ' + (e.message || e.error) +
+      ' @' + (e.filename || '').split('/').pop() + ':' + e.lineno);
+  });
+  window.addEventListener('unhandledrejection', function (e) {
+    const reason = e.reason && e.reason.message ? e.reason.message : String(e.reason);
+    window.__errors.push('REJECTION ' + reason);
+  });
+</script>
+
+<div id="workspace"></div>
+<div id="trainer" hidden>
+  <header class="top">
+    <div class="brand"><span class="logo">Caissa</span><span class="tag">blindfold training</span></div>
+    <nav class="levels" id="levels"></nav>
+  </header>
+  <main>
+    <div class="board-col">
+      <div class="board-holder" id="board"></div>
+      <div id="board-controls"></div>
+    </div>
+    <div id="panel"></div>
+  </main>
+</div>
+<pre id="results">running…</pre>
+
+<script src="js/engine.js"></script>
+<script src="js/pgn.js"></script>
+<script src="js/ai.js"></script>
+<script src="js/stockfish.js"></script>
+<script src="js/lichess.js"></script>
+<script src="js/board.js"></script>
+<script src="js/app.js"></script>
+<script src="data/openings.js"></script>
+<script src="data/endgames.js"></script>
+<script src="data/studies.js"></script>
+<script src="js/drills/l1.js"></script>
+<script src="js/drills/l2.js"></script>
+<script src="js/drills/l3.js"></script>
+<script src="js/drills/l4.js"></script>
+<script src="js/drills/l5.js"></script>
+<script src="js/drills/l6.js"></script>
+<script src="js/drills/l7.js"></script>
+<script src="js/workspace.js"></script>
+
+<script>
+(function () {
+  const log = [];
+  const out = document.getElementById('results');
+  function say(line) { log.push(line); out.textContent = log.join('\n'); }
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+  const views = ['database', 'analysis', 'repertoire', 'masters', 'imports',
+                 'studies', 'training', 'tactics', 'settings'];
+
+  async function run() {
+    if (!window.Caissa) { say('FAIL workspace never booted (window.Caissa missing)'); say('DONE'); return; }
+
+    /* the API calls the workspace depends on */
+    for (const path of ['health', 'collections', 'study/folders', 'stats', 'repertoires']) {
+      try {
+        await Caissa.api(path);
+        say('OK   api/' + path);
+      } catch (err) { say('FAIL api/' + path + ' — ' + err.message); }
+    }
+
+    /* every module renders */
+    for (const view of views) {
+      const before = window.__errors.length;
+      try {
+        await Caissa.go(view);
+        await sleep(260);
+      } catch (err) {
+        window.__errors.push('THROWN in ' + view + ': ' + err.message);
+      }
+      const desk = document.querySelector('.desk-body');
+      const painted = desk && desk.textContent.trim().length > 0;
+      const added = window.__errors.length - before;
+      say((added || !painted ? 'FAIL ' : 'OK   ') + 'view ' + view +
+          (painted ? ' (' + desk.children.length + ' blocks)' : ' — nothing rendered') +
+          (added ? '\n       ' + window.__errors.slice(before).join('\n       ') : ''));
+    }
+
+    /* the training module must still hand the board to the old trainer */
+    try {
+      await Caissa.go('training');
+      await sleep(300);
+      const trainerVisible = !document.getElementById('trainer').hidden;
+      const levels = document.querySelectorAll('#levels button').length;
+      say(((trainerVisible && levels === 7) ? 'OK   ' : 'FAIL ') +
+          'training module shows the trainer (visible: ' + trainerVisible + ', levels: ' + levels + ')');
+      await Caissa.go('database');
+      await sleep(200);
+      say((document.getElementById('trainer').hidden ? 'OK   ' : 'FAIL ') +
+          'leaving training hides the trainer again');
+    } catch (err) { say('FAIL training handover — ' + err.message); }
+
+    /* opening a game from the database into the analysis board */
+    try {
+      const list = await Caissa.api('games?limit=1');
+      if (!list.games.length) {
+        say('SKIP no games in the library to open');
+      } else {
+        await Caissa.openGame(list.games[0].id);
+        await sleep(400);
+        const moves = document.querySelectorAll('.move-tree *').length;
+        say((Caissa.state.parsed ? 'OK   ' : 'FAIL ') + 'opened game #' + list.games[0].id +
+            ' into the analysis board (' + moves + ' move elements)');
+        if (!moves) window.__errors.push('analysis board rendered no moves');
+        const pgn = Caissa.serialize(Caissa.state.parsed);
+        say((pgn.indexOf('[Event ') === 0 ? 'OK   ' : 'FAIL ') + 'serializes back to PGN');
+      }
+    } catch (err) { say('FAIL opening a game — ' + err.message); }
+
+    /* playing a move on the analysis board, and the context tabs beside it */
+    try {
+      await Caissa.go('analysis');
+      await sleep(400);
+      const input = document.querySelector('input[aria-label="Move in SAN"]');
+      const play = Array.from(document.querySelectorAll('button'))
+        .find(b => b.textContent.trim() === 'Play move');
+      if (!input || !play) {
+        say('FAIL analysis board is missing its move input');
+      } else {
+        const before = Caissa.state.node;
+        input.value = 'e4';
+        play.click();
+        await sleep(350);
+        const moved = Caissa.state.node !== before && Caissa.state.node.san === 'e4';
+        say((moved ? 'OK   ' : 'FAIL ') + 'played 1.e4 on the analysis board' +
+            (Caissa.state.node && Caissa.state.node.san ? ' (node: ' + Caissa.state.node.san + ')' : ''));
+
+        input.value = 'e9';                       // nonsense must not throw
+        play.click();
+        await sleep(250);
+        say('OK   an illegal move is refused without breaking the board');
+      }
+
+      for (const tab of ['Library', 'Study', 'History']) {
+        const before = window.__errors.length;
+        const button = Array.from(document.querySelectorAll('.context-tabs button'))
+          .find(b => b.textContent.trim() === tab);
+        if (!button) { say('FAIL context tab missing: ' + tab); continue; }
+        button.click();
+        await sleep(450);
+        const body = document.querySelector('.context-body, .context-tabs + *');
+        say(((window.__errors.length === before) ? 'OK   ' : 'FAIL ') + 'context tab ' + tab +
+            (body ? ' (' + body.textContent.trim().slice(0, 42).replace(/\s+/g, ' ') + '…)' : ''));
+      }
+    } catch (err) { say('FAIL analysis interaction — ' + err.message); }
+
+    /* position study lookup for the starting position */
+    try {
+      const data = await Caissa.api('study/position?fen=' + encodeURIComponent(Chess.DEFAULT_FEN));
+      say('OK   study/position (' + data.games.length + ' games, ' + data.moves.length +
+          ' replies, ' + data.indexed_games + ' indexed)');
+    } catch (err) { say('FAIL study/position — ' + err.message); }
+
+    /* literature for a named opening, offline path */
+    try {
+      const refs = await Caissa.api('literature?' + new URLSearchParams({
+        moves: JSON.stringify(['e4', 'c5']), opening: 'Sicilian Defense', eco: 'B20', offline: '1' }));
+      say((refs.links.length ? 'OK   ' : 'FAIL ') + 'literature returned ' + refs.links.length + ' links');
+    } catch (err) { say('FAIL literature — ' + err.message); }
+
+    say('');
+    say(window.__errors.length ? window.__errors.length + ' UNCAUGHT:\n' + window.__errors.join('\n')
+                               : 'no uncaught errors');
+    say('DONE');
+  }
+
+  setTimeout(run, 900);
+})();
+</script>
+</body>
+</html>

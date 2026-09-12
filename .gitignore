@@ -1,0 +1,35 @@
+# OS / editor noise
+Thumbs.db
+desktop.ini
+.DS_Store
+.vscode/
+.idea/
+*.swp
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# Local test output and scratch
+.smoke/
+*.log
+tmp/
+scratch/
+
+# Keep the vendored Stockfish build — the app needs it offline:
+# !js/vendor/stockfish.js
+
+# Bundled engine (fetched by tools/fetch_stockfish.py, ~100 MB)
+vendor/stockfish/
+
+# The game library itself
+library/
+.apitest/
+
+# Build output
+build/
+dist/
+*.spec.bak

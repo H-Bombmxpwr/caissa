@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Caissa</title>
+<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/workspace.css">
+<link rel="icon" href="assets/caissa.ico" sizes="any">
+<link rel="apple-touch-icon" href="assets/caissa-128.png">
+</head>
+<body>
+
+<div id="workspace"></div>
+<div id="trainer" hidden>
+<header class="top">
+  <div class="brand">
+    <img class="brand-mark" src="assets/caissa-128.png" alt="" width="28" height="28">
+    <span class="logo">Caissa</span>
+    <span class="tag">blindfold training</span>
+  </div>
+  <nav class="levels" id="levels"></nav>
+</header>
+
+<main>
+  <div class="board-col">
+    <div class="board-holder" id="board"></div>
+    <div id="board-controls"></div>
+    <p class="hint">
+      Hold <span class="kbd">Space</span> or the <b>Peek</b> button to reveal the board.
+      Every peek is counted — the fewer the better.
+    </p>
+  </div>
+  <div id="panel"></div>
+</main>
+
+<footer class="bottom">
+  Pieces are cburnett (GPL) from lichess. Openings can be drilled from your own games;
+  endgames use the lichess tablebase when you are online.
+</footer>
+</div>
+
+<script src="js/engine.js"></script>
+<script src="js/pgn.js"></script>
+<script src="js/ai.js"></script>
+<script src="js/stockfish.js"></script>
+<script src="js/lichess.js"></script>
+<script src="js/board.js"></script>
+<script src="js/app.js"></script>
+<script src="data/openings.js"></script>
+<script src="data/endgames.js"></script>
+<script src="data/studies.js"></script>
+<script src="js/drills/l1.js"></script>
+<script src="js/drills/l2.js"></script>
+<script src="js/drills/l3.js"></script>
+<script src="js/drills/l4.js"></script>
+<script src="js/drills/l5.js"></script>
+<script src="js/drills/l6.js"></script>
+<script src="js/drills/l7.js"></script>
+<script src="js/workspace.js"></script>
+</body>
+</html>

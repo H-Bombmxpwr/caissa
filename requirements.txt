@@ -1,0 +1,6 @@
+# Runtime dependency for the desktop window (Edge WebView2 on Windows).
+# Everything else is Python standard library.
+pywebview>=5.0
+
+# Optional: reading lichess .zst database dumps
+# zstandard>=0.22

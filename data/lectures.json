@@ -1,0 +1,36 @@
+{
+  "_comment": [
+    "Curated free study material for openings.",
+    "",
+    "'channels' are teachers whose material is free to watch. Caissa turns each one",
+    "into a channel-scoped search for the opening you are looking at, which is always",
+    "a valid link and always current — no dead video IDs, nothing invented.",
+    "",
+    "'lectures' is for exact links you add yourself. Match an entry either by ECO",
+    "prefix ('B90', 'B9', 'B') or by a phrase that appears in the opening name.",
+    "Edit this file and the app picks it up immediately, no restart needed."
+  ],
+  "channels": [
+    {
+      "name": "Daniel Naroditsky",
+      "query": "@DanielNaroditskyGM",
+      "note": "Speedruns and deep opening explanations"
+    },
+    {
+      "name": "Saint Louis Chess Club",
+      "query": "@STLChessClub",
+      "note": "Grandmaster lectures, full archive free"
+    },
+    {
+      "name": "Hanging Pawns",
+      "query": "@HangingPawns",
+      "note": "Systematic opening series, one variation at a time"
+    },
+    {
+      "name": "John Bartholomew",
+      "query": "@JohnBartholomew",
+      "note": "Climbing the rating ladder, clear positional talk"
+    }
+  ],
+  "lectures": []
+}
