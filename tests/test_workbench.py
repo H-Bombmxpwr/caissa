@@ -1,6 +1,7 @@
 """Import isolation, exact deletion previews, combined filters and online cache."""
 import json
 import os
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -161,6 +162,26 @@ class WorkbenchTests(unittest.TestCase):
     def test_facts_route_needs_something_to_search_for(self):
         with self.assertRaises(ApiError):
             self.call('GET', 'facts', None, {})
+
+    def test_requests_survive_a_windowed_build_with_no_stdout(self):
+        """PyInstaller's console=False gives the process sys.stdout = None."""
+        import threading
+        from functools import partial
+        from http.server import ThreadingHTTPServer
+        import urllib.request
+        import server
+
+        httpd = ThreadingHTTPServer(('127.0.0.1', 0), partial(server.Handler, directory=os.getcwd()))
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        url = 'http://127.0.0.1:%d/api/health' % httpd.server_port
+        try:
+            with patch.object(sys, 'stdout', None):
+                with urllib.request.urlopen(url, timeout=10) as res:
+                    payload = json.loads(res.read().decode('utf-8'))
+            self.assertTrue(payload['ok'], 'health has to answer with no stdout to log to')
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
 
     def test_import_undo_survives_restart_and_preserves_duplicates(self):
         self.call('POST','games',{'pgn':pgn('Existing')})

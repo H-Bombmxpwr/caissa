@@ -136,8 +136,17 @@ class Handler(SimpleHTTPRequestHandler):
         super().end_headers()
 
     def log_message(self, fmt, *args):
-        sys.stdout.write("%s %s\n" % (self.address_string(), fmt % args))
-        sys.stdout.flush()
+        # A windowed build (PyInstaller console=False, launched without a console) has
+        # sys.stdout set to None. Logging must never be able to take a request down with
+        # it: an AttributeError here killed every response, health checks included.
+        stream = sys.stdout
+        if stream is None:
+            return
+        try:
+            stream.write("%s %s\n" % (self.address_string(), fmt % args))
+            stream.flush()
+        except (OSError, ValueError, AttributeError):
+            pass
 
 
 def main():
