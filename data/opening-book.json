@@ -1,0 +1,14 @@
+{
+  "title": "Lichess Elite \u00b7 November 2025",
+  "source": "https://database.nikonoel.fr/lichess_elite_2025-11.zip",
+  "source_page": "https://database.nikonoel.fr/",
+  "license": "CC0-1.0",
+  "games": 280246,
+  "rejected": 0,
+  "positions": 346642,
+  "entries": 450114,
+  "max_plies": 48,
+  "min_games": 2,
+  "selection": "2500+ versus 2300+, excluding bullet; online rated games, not the over-the-board Masters database",
+  "sha256": "1ffa577aa0a1352fa04c9a890a6706049a3a79edc52810b136758d1e2a1a2eab"
+}

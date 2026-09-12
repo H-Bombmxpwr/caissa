@@ -49,6 +49,38 @@ class DesktopSettings:
         return {'path': self.data_dir, 'overridden': self.overridden,
                 'pending': prefs.get('pending', {}).get('target'), 'error': prefs.get('error')}
 
+    def export_pgn(self, text, filename='caissa-study.pgn'):
+        """Native Save As for WebView2, whose blob downloads can be unreliable."""
+        import webview
+        choice=self._window.create_file_dialog(webview.FileDialog.SAVE,save_filename=os.path.basename(filename),file_types=('PGN games (*.pgn)',))
+        if not choice:
+            return {'cancelled':True}
+        path=choice if isinstance(choice,str) else choice[0]
+        if not path.lower().endswith('.pgn'):
+            path+='.pgn'
+        with open(path,'w',encoding='utf-8',newline='\n') as handle:
+            handle.write(str(text))
+        return {'saved':True,'path':path}
+
+    def open_book(self, book_id):
+        """A separate native reading window can be moved to another monitor."""
+        import webview
+        from urllib.parse import urlsplit
+        try:
+            from backend.store import Library
+            from backend.books import Books
+            library=Library(self.data_dir)
+            try:
+                Books(library).file(int(book_id))
+            finally:
+                library.close()
+            current=urlsplit(self._window.get_current_url())
+            url=current.scheme+'://'+current.netloc+'/?reader=1&book='+str(int(book_id))+'#workspace/books'
+            webview.create_window('Caissa — Book',url,width=850,height=1000)
+            return {'opened':True}
+        except (OSError,ValueError) as err:
+            return {'error':str(err)}
+
     def reveal_storage_folder(self):
         """Open the library folder in the desktop's own file manager."""
         if not os.path.isdir(self.data_dir):

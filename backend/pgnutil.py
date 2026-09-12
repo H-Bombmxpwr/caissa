@@ -10,7 +10,7 @@ import re
 TAG_RE = re.compile(r'^\[([A-Za-z0-9_]+)\s+"((?:[^"\\]|\\.)*)"\]\s*$', re.M)
 GAME_SPLIT_RE = re.compile(r"\n(?=\[Event\s)")
 TOKEN_RE = re.compile(
-    r"""(\{[^}]*\})            # comment
+    r"""(\{[^}]*\}|;[^\n]*)   # comment
       | (\()|(\))              # variation
       | (\$\d+)                # nag
       | (1-0|0-1|1/2-1/2|\*)   # result
@@ -118,6 +118,9 @@ def describe(game_text):
         "result": tags.get("Result", "*"),
         "date": normalize_date(tags.get("Date") or tags.get("UTCDate")),
         "event": tags.get("Event", ""),
+        "annotator": tags.get('Annotator', ''),
+        "termination": tags.get('Termination', ''),
+        "has_annotations": int(bool(re.search(r'\{|;|\$\d+|[!?]|\(', movetext(game_text)))),
         "site": site,
         "round": tags.get("Round", ""),
         "eco": tags.get("ECO", ""),

@@ -50,6 +50,23 @@ Caissa.exe            PyInstaller bundle
 
 ## Modules
 
+The shipped offline book contains 280,246 high-rated Lichess games represented by
+346,642 positions and 450,114 continuations through 24 moves. It is prebuilt and
+independent of the personal library; online Masters and rated-game references remain
+available for broader coverage. See `data/OPENING-BOOK-CREDITS.md` for provenance.
+Analysis includes keyboard navigation, collapsible variation trees, native PGN export,
+full-width panels, PGN header display, and configurable move sounds and animation speed.
+Study folders display an explicit nested tree and unfiled collections separately.
+
+The workbench now includes a local PDF Books module and an Opening book with local
+PGN statistics plus cached Lichess Masters and rated-game references, without a fixed depth cutoff;
+both can also be enabled as analysis panels. PDFs can open in a separate reading
+window. ChessBase CTG/CTB/CTO and Polyglot BIN book import are not implemented.
+Database metadata includes tournament, round, annotator and annotation status, with
+combined filters and categorized study folders. Position indexing is accessible from
+Database, Study folders, Opening book and analysis. Imported prose comments and
+termination tags are retained; result codes alone are never treated as resignation.
+
 ### 1. Database (the spine)
 - Collections of games; import, search, sort, tag, delete, export.
 - Search by player, event, ECO, opening, result, year, rating, length, collection.

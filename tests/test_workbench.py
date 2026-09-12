@@ -106,9 +106,8 @@ class WorkbenchTests(unittest.TestCase):
         labels = {g['label']: [i['title'] for i in g['items']] for g in found['groups']}
         self.assertEqual(labels['The players'], ['Anatoly Karpov', 'Garry Kasparov'])
         self.assertNotIn('The event and place', labels, 'a disambiguation page is not a fact')
-        self.assertEqual(labels['Possibly about this game'], ['Game of the Century (chess)'])
-        self.assertIn('judge whether it is this game',
-                      [g for g in found['groups'] if g['label'].startswith('Possibly')][0]['note'])
+        self.assertNotIn('Possibly about this game', labels,
+                         'a 1956 Fischer game is not relevant to Karpov–Kasparov in 1993')
         self.assertEqual(found['query']['white'], 'Anatoly Karpov')
 
     def test_game_facts_says_so_when_there_is_nothing_to_look_up(self):

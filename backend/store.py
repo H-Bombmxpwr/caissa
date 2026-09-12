@@ -105,6 +105,13 @@ class Library:
                   PRIMARY KEY(batch, game_id));
             ''')
             columns = {r[1] for r in conn.execute('PRAGMA table_info(games)')}
+            for name, kind in [('annotator','TEXT'),('termination','TEXT'),('has_annotations','INTEGER')]:
+                if name not in columns:
+                    conn.execute('ALTER TABLE games ADD COLUMN '+name+' '+kind)
+            for row in conn.execute('SELECT id FROM games WHERE has_annotations IS NULL').fetchall():
+                text = self.game_pgn(row['id'])
+                if text:
+                    self._update_extra_metadata(conn, row['id'], text)
             if 'signature' not in columns:
                 conn.execute('ALTER TABLE games ADD COLUMN signature TEXT')
             conn.execute('CREATE INDEX IF NOT EXISTS games_signature ON games(signature)')
@@ -113,6 +120,14 @@ class Library:
                 text = self.game_pgn(row['id'])
                 if text:
                     conn.execute('UPDATE games SET signature=? WHERE id=?', (self.signature(text), row['id']))
+
+    @staticmethod
+    def _update_extra_metadata(conn, ident, text):
+        import re
+        tags = pgnutil.headers(text)
+        annotated = int(bool(re.search(r'\{|;|\$\d+|[!?]|\(', pgnutil.movetext(text))))
+        conn.execute('UPDATE games SET annotator=?,termination=?,has_annotations=? WHERE id=?',
+                     (tags.get('Annotator',''),tags.get('Termination',''),annotated,ident))
 
     @staticmethod
     def signature(text):
@@ -292,6 +307,9 @@ class Library:
                     ),
                 )
                 batch = getattr(self._local, 'batch', None)
+                if cursor.rowcount:
+                    conn.execute('UPDATE games SET annotator=?,termination=?,has_annotations=? WHERE id=?',
+                        (meta['annotator'],meta['termination'],meta['has_annotations'],cursor.lastrowid))
                 if batch and cursor.rowcount:
                     conn.execute('INSERT INTO import_members VALUES (?,?)', (batch, cursor.lastrowid))
             conn.commit()
@@ -337,12 +355,18 @@ class Library:
         "elo": "MAX(COALESCE(white_elo,0), COALESCE(black_elo,0)) DESC",
         "added": "added_at DESC, id DESC",
         "length": "ply_count DESC",
+        "event": "event COLLATE NOCASE ASC, date DESC",
+        "annotator": "annotator COLLATE NOCASE ASC, id DESC",
+        "eco": "eco ASC, date DESC",
     }
 
     def search(self, query=None, collection=None, player=None, white=None, black=None,
                eco=None, result=None, opening=None, min_elo=None, year=None,
                sort="date", limit=100, offset=0, event=None, min_length=None, max_length=None, tag=None,
-               added_from=None, added_to=None, position=None, eco_to=None, max_elo=None, outcome=None):
+               added_from=None, added_to=None, position=None, eco_to=None, max_elo=None, outcome=None,
+               annotator=None, site=None, round=None, termination=None, annotated=None,
+               date_from=None, date_to=None, source=None, category=None,
+               white_min_elo=None, white_max_elo=None, black_min_elo=None, black_max_elo=None):
         where, params = [], []
 
         if collection:
@@ -352,9 +376,10 @@ class Library:
             where.append("collection_id = ?")
             params.append(info["id"])
         if query:
-            like = "%" + query.strip() + "%"
-            where.append("(white LIKE ? OR black LIKE ? OR event LIKE ? OR opening LIKE ? OR eco LIKE ?)")
-            params.extend([like] * 5)
+            for term in query.split():
+                like = "%" + term + "%"
+                where.append("(white LIKE ? OR black LIKE ? OR event LIKE ? OR opening LIKE ? OR eco LIKE ? OR annotator LIKE ? OR site LIKE ?)")
+                params.extend([like] * 7)
         if player:
             like = "%" + player.strip() + "%"
             where.append("(white LIKE ? OR black LIKE ?)")
@@ -402,6 +427,26 @@ class Library:
         if event:
             where.append('event LIKE ?')
             params.append('%'+event+'%')
+        for column,value in [('annotator',annotator),('site',site),('round',round),('termination',termination),('source',source)]:
+            if value:
+                where.append(column+' LIKE ?')
+                params.append('%'+value+'%')
+        if annotated in ('0','1',0,1):
+            where.append('has_annotations=?')
+            params.append(int(annotated))
+        for column,low,high in [('white_elo',white_min_elo,white_max_elo),('black_elo',black_min_elo,black_max_elo)]:
+            for value,op in [(low,'>='),(high,'<=')]:
+                if value is not None and value!='':
+                    where.append(column+' '+op+' ?')
+                    params.append(int(value))
+        for value,op in [(date_from,'>='),(date_to,'<=')]:
+            if value:
+                date=datetime.strptime(value,'%Y-%m-%d').strftime('%Y.%m.%d')
+                where.append('date '+op+' ?')
+                params.append(date)
+        if category:
+            where.append('collection_id IN (SELECT cf.collection_id FROM collection_folders cf JOIN folders f ON f.id=cf.folder_id WHERE f.category=?)')
+            params.append(category)
         if min_length:
             where.append('ply_count >= ?')
             params.append(int(min_length))
@@ -436,7 +481,7 @@ class Library:
         total = conn.execute("SELECT COUNT(*) FROM games" + clause, params).fetchone()[0]
         rows = conn.execute(
             "SELECT id, collection_id, white, black, white_elo, black_elo, result, date, "
-            "event, site, round, eco, opening, ply_count, source, first_moves, added_at, signature, path, byte_offset, byte_length "
+            "event, site, round, annotator, termination, has_annotations, eco, opening, ply_count, source, first_moves, added_at, signature, path, byte_offset, byte_length "
             "FROM games" + clause + " ORDER BY " + order + " LIMIT ? OFFSET ?",
             params + [int(limit), int(offset)],
         ).fetchall()
@@ -507,6 +552,7 @@ class Library:
                     meta["first_moves"], game_id,
                 ),
             )
+            self._update_extra_metadata(conn, game_id, pgn_text)
             # source_id identifies where the game came from and is unique across the
             # library; annotating a game must not let it claim another game's identity.
             conn.execute('UPDATE games SET signature=?, fen=?, variant=? WHERE id=?',

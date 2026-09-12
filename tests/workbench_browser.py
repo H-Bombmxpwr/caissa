@@ -24,7 +24,7 @@ with tempfile.TemporaryDirectory(prefix='caissa-browser-') as data:
             browser=pw.chromium.launch(channel='msedge',headless=True)
             page=browser.new_page(viewport={'width':1600,'height':1100})
             errors=[]
-            page.on('pageerror',lambda e:errors.append(str(e)))
+            page.on('pageerror',lambda e:(errors.append(str(e)),print('Browser error:',e,flush=True)))
             page.on('dialog',lambda d:d.accept())
             page.goto(url)
             page.wait_for_function('window.Caissa && document.querySelector(".games")')
@@ -182,7 +182,7 @@ with tempfile.TemporaryDirectory(prefix='caissa-browser-') as data:
             page.wait_for_function('(Caissa.state.node.shapes||[]).length===1')
             drawn=page.evaluate('Caissa.state.node.shapes[0]')
             assert drawn['from']=='a1' and drawn['to']=='b3' and drawn['brand']=='green',drawn
-            assert page.locator('.move-tree .move-mark').count()>=1,'the move list marks it'
+            assert page.locator('.move-tree .move-drawings').count()>=1,'the move list describes the drawing'
             page.get_by_role('button',name='First position',exact=True).click()
             assert page.locator('.analysis-board .cg-shapes line').count()==0,'other moves keep their own board'
             page.get_by_role('button',name='Next move',exact=True).click()
@@ -263,7 +263,8 @@ with tempfile.TemporaryDirectory(prefix='caissa-browser-') as data:
             page.get_by_role('button',name='Import PGN',exact=True).click()
             page.evaluate('Caissa.state.filters={};Caissa.go("database")')
             page.wait_for_function('document.querySelector(".stat-grid .metric strong").textContent==="1"',timeout=20000)
-            assert page.locator('.player-name').inner_text()=='Alpha - Beta'.replace('-','\u2014'),'the imported game is listed straight away'
+            assert page.locator('table.games tbody tr').first.locator('td').nth(1).inner_text()=='Alpha','the imported White player is listed straight away'
+            assert page.locator('table.games tbody tr').first.locator('td').nth(3).inner_text()=='Beta','the imported Black player is listed straight away'
             # Opening names and their ECO span are offered from the library itself.
             page.get_by_role('button',name='Filters',exact=True).click()
             page.get_by_label('Colour',exact=True).select_option('white')
@@ -286,6 +287,62 @@ with tempfile.TemporaryDirectory(prefix='caissa-browser-') as data:
             page.reload()
             page.wait_for_function('window.Caissa && App.store.stats["persistence-check"].count===7')
             assert page.evaluate('Caissa.state.prefs.darkMode')
+            # Annotated PGNs retain all comments, including those after the result.
+            page.evaluate('''async()=>{
+              const text='[Event "Linares"]\\n[White "Karpov"]\\n[Black "Kasparov"]\\n[Annotator "Knaak"]\\n[Result "0-1"]\\n\\n{Introduction} 1. e4! {First note} {Second note} e5; Not a move: Qh9\\n2. Nf3 Nc6 0-1 {White resigned}';
+              const parsed=PGN.parse(text),line=PGN.mainline(parsed.root);
+              if(parsed.errors.length||!line[0].comment.includes('First note')||!line[0].comment.includes('Second note')||!line[3].comment.includes('White resigned')||line[0].nags[0]!=='$1')throw Error('PGN annotation loss');
+              const roundtrip=PGN.parse(Caissa.serialize(parsed));if(!PGN.mainline(roundtrip.root).at(-1).comment.includes('White resigned'))throw Error('Save loses end comment');
+              await Caissa.api('games',{pgn:text,collection:'Annotated tests'});Caissa.state.filters={annotator:'Knaak'};await Caissa.go('database');
+            }''')
+            assert page.locator('tbody').inner_text().find('Knaak')>=0
+            page.locator('tbody tr').first.dblclick()
+            page.get_by_text('White resigned',exact=True).wait_for()
+            assert page.get_by_text('Introduction',exact=True).count()>0
+            page.evaluate('Caissa.go("masters")')
+            assert page.locator('.desk-body > .page-heading').count()==1
+            assert page.locator('.desk-body').evaluate('(el)=>el.firstElementChild.classList.contains("page-heading")')
+            page.get_by_label('Player surname',exact=True).fill('Fisc')
+            page.wait_for_function('document.querySelector("#master-player-names option[value=Fischer]")')
+            page.evaluate('Caissa.go("books")')
+            pdf=b'%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Count 0/Kids[]>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF'
+            page.get_by_label('Choose PDF',exact=True).set_input_files({'name':'Reading.pdf','mimeType':'application/pdf','buffer':pdf})
+            page.get_by_role('button',name='Add PDF',exact=True).click()
+            page.get_by_text('PDF saved with your library.',exact=True).wait_for()
+            book_id=page.evaluate('async()=>(await Caissa.api("books")).books[0].id')
+            response=page.request.get(url+'/api/books/'+str(book_id)+'/file',headers={'Range':'bytes=0-7'})
+            assert response.status==206 and response.body()==pdf[:8]
+            page.get_by_label('Book page',exact=True).fill('2')
+            page.get_by_role('button',name='Go to page',exact=True).click()
+            page.wait_for_function('async()=>(await Caissa.api("books")).books[0].page===2')
+            page.evaluate('Caissa.go("analysis")')
+            page.get_by_role('button',name='Panels',exact=True).click()
+            page.get_by_label('Books',exact=True).check()
+            page.get_by_label('Opening book',exact=True).check()
+            page.get_by_role('button',name='Done',exact=True).click()
+            page.locator('[data-panel=books]').get_by_label('Book',exact=True).select_option(str(book_id))
+            assert page.locator('[data-panel=books] iframe').is_visible()
+            page.evaluate('Caissa.go("openingbook")')
+            page.get_by_label('Reference database',exact=True).select_option('local')
+            page.get_by_label('Collection to index',exact=True).select_option(label='Annotated tests (1)')
+            page.get_by_role('button',name='Index positions',exact=True).click()
+            page.wait_for_function('async()=>!(await Caissa.api("study/index")).running')
+            page.get_by_role('button',name='Refresh opening book',exact=True).click()
+            page.locator('.book-move').get_by_role('button',name='e4',exact=True).wait_for()
+            page.locator('.book-move').get_by_role('button',name='e4',exact=True).click()
+            page.get_by_text('Position after 1 plies',exact=True).wait_for()
+            page.route('**/api/book?**',lambda r:r.fulfill(json={'source':'masters','total':9000,'cached':True,'moves':[{'san':'e5','games':9000,'white':3000,'draws':4000,'black':2000,'average_elo':2500}],'games':[],'reference_games':[]}))
+            page.get_by_label('Reference database',exact=True).select_option('masters')
+            page.get_by_text('Lichess Masters · 9,000 games · Saved reference',exact=True).wait_for()
+            page.locator('.book-move').get_by_role('button',name='e5',exact=True).click()
+            page.get_by_text('Position after 2 plies',exact=True).wait_for()
+            page.unroute('**/api/book?**')
+            page.evaluate('Caissa.go("repertoire")')
+            page.get_by_text('How to use your repertoire',exact=True).wait_for()
+            page.route('**/api/network',lambda r:r.fulfill(json={'reachable':False}))
+            page.evaluate('Caissa.go("settings")')
+            page.get_by_role('button',name='Check online services',exact=True).click()
+            page.get_by_text('PGN Mentor is unreachable.',exact=False).wait_for()
             for smoke in ['workspace-smoke.html','smoke.html']:
                 page.goto(url+'/tests/'+smoke)
                 page.wait_for_function('document.querySelector("#results").textContent.includes("DONE")',timeout=60000)

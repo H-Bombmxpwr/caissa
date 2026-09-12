@@ -18,6 +18,10 @@ from .store import Library
 from .study import Study
 from . import importers
 from . import literature
+from .books import Books
+
+EXTRA_FILTERS = ('annotator','site','round','termination','annotated','date_from','date_to','source','category',
+                 'white_min_elo','white_max_elo','black_min_elo','black_max_elo')
 
 
 class ApiError(Exception):
@@ -31,6 +35,7 @@ class Api:
     def __init__(self, data_dir):
         self.library = Library(data_dir)
         self.study = Study(self.library)
+        self.books = Books(self.library)
         self.crawler = lichess.MastersCrawler(self.library)
         self.engine = Engine()
         self.live = LiveAnalysis()
@@ -130,6 +135,8 @@ class Api:
                 db.execute('DELETE FROM pins WHERE id=?', (int(rest[1]),))
             return 200, {'deleted': True}
         if action == 'folders':
+            if method == 'PUT' and len(rest) == 2:
+                return 200, self.study.categorize_folder(rest[1], body['category'])
             if method == 'GET':
                 return 200, self.study.folders()
             if method == 'POST':
@@ -161,6 +168,64 @@ class Api:
 
     def _route_stats(self, method, rest, query, body):
         return 200, self.library.stats()
+
+    def _route_books(self, method, rest, query, body):
+        if method=='GET' and not rest:
+            return 200, {'books':self.books.list()}
+        if method=='POST' and not rest:
+            return 200,self.books.add(body or {})
+        if method=='PUT' and len(rest)==1:
+            return 200,self.books.update(rest[0],body or {})
+        raise ApiError('Unsupported books request',405)
+
+    def _route_book(self, method, rest, query, body):
+        from .chess import Chess
+        if method!='GET':
+            raise ApiError('Use GET',405)
+        fen=query.get('fen') or Chess().fen()
+        source=query.get('source','local')
+        if source=='bundled':
+            from .openingbook import lookup
+            return 200,lookup(fen)
+        if source not in ('local','masters','lichess'):
+            raise ApiError('Choose local, masters or lichess')
+        if source!='local':
+            options={key:query[key] for key in ('since','until','ratings','speeds') if query.get(key)}
+            _,data=self._route_explorer('GET',[],dict(options,db=source,fen=fen,moves='50',top='15'),None)
+            return 200,{'fen':fen,'source':source,'cached':data.get('_cached',False),
+                'stale':data.get('_stale',False),'opening':data.get('opening'),
+                'total':sum(data.get(k,0) for k in ('white','draws','black')),
+                'moves':[dict(san=m['san'],games=sum(m.get(k,0) for k in ('white','draws','black')),
+                    white=m.get('white',0),draws=m.get('draws',0),black=m.get('black',0),
+                    average_elo=m.get('averageRating')) for m in data.get('moves',[])],
+                'games':[],'reference_games':data.get('topGames',[])}
+        clause='p.hash=?'
+        params=[Chess(fen).key()]
+        if query.get('collection'):
+            clause+=' AND g.collection_id=?'
+            params.append(int(query['collection']))
+        db=self.library.connect()
+        rows=[dict(r) for r in db.execute('''SELECT next_san AS san, COUNT(*) AS games,
+            SUM(result='1-0') AS white, SUM(result='0-1') AS black,
+            SUM(result='1/2-1/2') AS draws, SUM(result='*') AS unfinished,
+            ROUND(AVG(elo)) AS average_elo FROM (
+              SELECT DISTINCT p.game_id,p.next_san,g.result,
+                (g.white_elo+g.black_elo)/2.0 AS elo
+              FROM positions p JOIN games g ON g.id=p.game_id WHERE '''+clause+'''
+              AND p.next_san IS NOT NULL) GROUP BY next_san ORDER BY games DESC,san''',params)]
+        games=[dict(r) for r in db.execute('''SELECT DISTINCT g.id,g.white,g.black,g.date,g.event,g.result
+            FROM positions p JOIN games g ON g.id=p.game_id WHERE '''+clause+' ORDER BY g.date DESC LIMIT 20',params)]
+        return 200,{'fen':fen,'moves':rows,'games':games}
+
+    def _route_network(self, method, rest, query, body):
+        import urllib.request
+        try:
+            req=urllib.request.Request('https://www.pgnmentor.com/files.html',method='HEAD',headers={'User-Agent':'Caissa/1.0'})
+            with urllib.request.urlopen(req,timeout=4) as response:
+                reachable=response.status<400
+        except Exception:
+            reachable=False
+        return 200,{'reachable':reachable,'service':'PGN Mentor','checked_at':int(time.time())}
 
     def _route_collections(self, method, rest, query, body):
         if method == "GET" and not rest:
@@ -198,6 +263,7 @@ class Api:
             if 'q' in filters:
                 filters['query'] = filters.pop('q')
             allowed = {'query','collection','player','white','black','eco','eco_to','result','opening','min_elo','max_elo','outcome','year','sort','event','min_length','max_length','tag','added_from','added_to','position'}
+            allowed.update(EXTRA_FILTERS)
             if set(filters) - allowed:
                 raise ApiError('Unknown filter')
             found = self.library.search(**filters, limit=-1)
@@ -236,6 +302,7 @@ class Api:
                 max_length=query.get('max_length'), tag=query.get('tag'),
                 added_from=query.get('added_from'), added_to=query.get('added_to'),
                 position=query.get('position'), eco_to=query.get('eco_to'),
+                **{key:query.get(key) for key in EXTRA_FILTERS},
             )
         if method == "GET" and rest:
             game = self.library.game(int(rest[0]))
@@ -391,7 +458,9 @@ class Api:
         headers = {key: query.get(key.lower(), "") for key in ("White", "Black", "Event", "Site", "Date")}
         if not (headers["White"] or headers["Black"] or headers["Event"]):
             raise ApiError("give at least a player or an event to look up")
-        key = "facts:" + json.dumps(headers, sort_keys=True)
+        # Older results trusted Wikipedia's search ranking and could recommend
+        # a different year's championship. Do not reuse those cached suggestions.
+        key = "facts:v2:" + json.dumps(headers, sort_keys=True)
         cached = self.library.setting(key)
         if cached:
             found = json.loads(cached)
@@ -411,10 +480,13 @@ class Api:
             raise ApiError("db must be masters or lichess")
         play = query.get("play", "")
         fen = query.get("fen")
-        cache_key = db + "|" + (fen or play)
+        extra={key:query[key] for key in ('since','until','ratings','speeds') if query.get(key)}
+        if db=='masters':
+            extra={key:value for key,value in extra.items() if key in ('since','until')}
+        cache_key = json.dumps([db,fen,play,query.get('moves','12'),query.get('top','8'),extra],sort_keys=True)
         cached = self.library.cache_explorer(cache_key, db)
         if cached:
-            return 200, json.loads(cached)
+            return 200, dict(json.loads(cached),_cached=True)
         try:
             data = lichess.explorer(
                 db,
@@ -422,16 +494,33 @@ class Api:
                 fen=fen,
                 moves=int(query.get("moves", 12)),
                 top_games=int(query.get("top", 8)),
+                extra=extra,
             )
-        except lichess.RateLimited as err:
-            raise ApiError("explorer is rate limiting us — try again shortly", 429) from err
-        except ConnectionError as err:
-            raise ApiError("could not reach the explorer: %s" % err, 503) from err
+        except Exception as err:
+            stale=self.library.cache_explorer(cache_key,db,max_age=10**12)
+            if stale:
+                return 200,dict(json.loads(stale),_cached=True,_stale=True)
+            if isinstance(err,lichess.RateLimited):
+                raise ApiError("explorer is rate limiting us — try again shortly",429) from err
+            raise ApiError("could not reach the explorer: %s" % err,503) from err
         self.library.cache_explorer(cache_key, db, json.dumps(data))
         return 200, data
 
     def _route_masters(self, method, rest, query, body):
         action = rest[0] if rest else ""
+        if action == 'players' and method == 'GET':
+            names={name:{'name':name,'source':'Master player'} for name in
+                'Carlsen Kasparov Karpov Fischer Spassky Tal Botvinnik Smyslov Petrosian Alekhine Capablanca Lasker Steinitz Anand Kramnik Topalov Polgar Ding Gukesh Nakamura Caruana Aronian Giri So Nepomniachtchi Firouzja Erigaisi Abdusattorov Praggnanandhaa Keymer Short Adams Ivanchuk Shirov Morozevich Svidler Grischuk Gelfand Rubinstein Nimzowitsch Reti Tarrasch Bronstein Korchnoi Reshevsky Najdorf Larsen Euwe'.split()}
+            cached=self.library.setting('mentor_catalog')
+            for player in json.loads(cached or '[]'):
+                names[player['name']]={'name':player['name'],'source':'PGN Mentor collection'}
+            needle=query.get('q','').strip()
+            rows=self.library.connect().execute('''SELECT white AS name FROM games WHERE white LIKE ?
+                UNION SELECT black AS name FROM games WHERE black LIKE ? LIMIT 100''',('%'+needle+'%','%'+needle+'%'))
+            for row in rows:
+                name=row['name'].split(',')[0].strip()
+                if name and name!='?':names.setdefault(name,{'name':name,'source':'Your library'})
+            return 200,{'players':sorted([p for p in names.values() if needle.casefold() in p['name'].casefold()],key=lambda p:p['name'])[:100]}
         if action == 'catalog' and method == 'GET':
             from html.parser import HTMLParser
             class Catalog(HTMLParser):

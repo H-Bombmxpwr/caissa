@@ -63,6 +63,8 @@ def main():
     if not os.path.exists(os.path.join(ROOT, "data", "openings.eco.json")):
         run([PYTHON, os.path.join(ROOT, "tools", "fetch_openings.py")], "Building the opening index")
     check_no_secrets()
+    if not os.path.isfile(os.path.join(ROOT,'data','opening-book.sqlite3')):
+        raise SystemExit('Bundled opening book is missing. Run tools/build_opening_book.py before distributing Caissa.')
 
     if not args.skip_tests:
         run([PYTHON, "-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py"], "Backend tests")

@@ -15,8 +15,8 @@
     const headers = {};
     let body = String(text).replace(/\r/g, '');
 
-    body = body.replace(/^\s*\[([A-Za-z0-9_]+)\s+"([^"]*)"\]\s*$/gm, function (_, k, v) {
-      headers[k] = v;
+    body = body.replace(/^\s*\[([A-Za-z0-9_]+)\s+"((?:[^"\\]|\\.)*)"\]\s*$/gm, function (_, k, v) {
+      headers[k] = v.replace(/\\([\\"])/g,'$1');
       return '';
     });
 
@@ -29,10 +29,10 @@
     const stack = [];
     const errors = [];
 
-    const tokenRe = /(\{[^}]*\})|(\()|(\))|(\$\d+)|(1-0|0-1|1\/2-1\/2|\*)|(\d+\.(?:\.\.)?)|([OoA-Za-z][A-Za-z0-9#+=\-]*)|(\S)/g;
+    const tokenRe = /(\{[^}]*\}|;[^\n]*)|(\()|(\))|(\$\d+|!!|\?\?|!\?|\?!|!|\?)|(1-0|0-1|1\/2-1\/2|\*)|(\d+\.(?:\.\.)?)|([OoA-Za-z][A-Za-z0-9#+=\-]*)|(\S)/g;
     let m;
     while ((m = tokenRe.exec(body)) !== null) {
-      if (m[1]) { cur.comment = m[1].slice(1, -1).trim(); continue; }
+      if (m[1]) { const note=(m[1][0]===';'?m[1].slice(1):m[1].slice(1,-1)).trim();cur.comment=[cur.comment,note].filter(Boolean).join('\n');continue; }
       if (m[2]) {                       // start variation: alternative to cur
         stack.push(cur);
         cur = cur.parent || root;
@@ -44,7 +44,7 @@
         game = new Chess(cur.fenAfter);
         continue;
       }
-      if (m[4]) { cur.nags.push(m[4]); continue; }
+      if (m[4]) { cur.nags.push(({'!':'$1','?':'$2','!!':'$3','??':'$4','!?':'$5','?!':'$6'})[m[4]]||m[4]); continue; }
       if (m[5] || m[6]) continue;       // result / move number
       if (m[7]) {
         const san = m[7];

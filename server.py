@@ -104,11 +104,15 @@ class Handler(SimpleHTTPRequestHandler):
             api.library.close()
 
     def do_GET(self):
+        if __import__('re').fullmatch(r'/api/books/\d+/file(?:\?.*)?',self.path):
+            return self._serve_pdf()
         if self.path.startswith("/api/"):
             return self._serve_api("GET")
         return super().do_GET()
 
     def do_HEAD(self):
+        if __import__('re').fullmatch(r'/api/books/\d+/file(?:\?.*)?',self.path):
+            return self._serve_pdf(head=True)
         if self.path.startswith("/api/"):
             return self._serve_api("GET")
         return super().do_HEAD()
@@ -123,6 +127,46 @@ class Handler(SimpleHTTPRequestHandler):
         return self._serve_api("DELETE")
 
     # ---------- static ----------
+
+    def _serve_pdf(self, head=False):
+        import re
+        try:
+            path=api.books.file(self.path.split('/')[3])
+            with open(path,'rb') as handle:
+                size=os.fstat(handle.fileno()).st_size
+                start,end=0,size-1
+                requested=self.headers.get('Range')
+                if requested:
+                    match=re.fullmatch(r'bytes=(\d*)-(\d*)',requested)
+                    if not match or not any(match.groups()):
+                        self.send_error(416);return
+                    if match[1]:
+                        start=int(match[1]);end=min(end,int(match[2])) if match[2] else end
+                    else:
+                        start=max(0,size-int(match[2]))
+                    if start> end or start>=size:
+                        self.send_response(416);self.send_header('Content-Range',f'bytes */{size}');self.end_headers();return
+                self.send_response(206 if requested else 200)
+                self.send_header('Content-Type','application/pdf')
+                self.send_header('Content-Disposition','inline; filename="caissa-book.pdf"')
+                self.send_header('Accept-Ranges','bytes')
+                self.send_header('Content-Length',str(end-start+1))
+                self.send_header('Cache-Control','private, no-cache')
+                if requested:self.send_header('Content-Range',f'bytes {start}-{end}/{size}')
+                self.end_headers()
+                if head:return
+                handle.seek(start)
+                remaining=end-start+1
+                while remaining:
+                    chunk=handle.read(min(65536,remaining))
+                    if not chunk:break
+                    self.wfile.write(chunk);remaining-=len(chunk)
+        except (ValueError,FileNotFoundError):
+            self.send_error(404,'Book not found')
+        except (BrokenPipeError,ConnectionResetError):
+            pass
+        finally:
+            api.library.close()
 
     def end_headers(self):
         if not self.path.startswith("/api/"):

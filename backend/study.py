@@ -30,6 +30,9 @@ class Study:
     def __init__(self, library):
         self.library = library
         library.connect().executescript(SCHEMA)
+        if 'category' not in {r[1] for r in library.connect().execute('PRAGMA table_info(folders)')}:
+            library.connect().execute("ALTER TABLE folders ADD COLUMN category TEXT NOT NULL DEFAULT 'Games to study'")
+            library.connect().commit()
         self.lock = threading.Lock()
         self.state = {'running': False, 'done': 0, 'errors': 0, 'total': 0, 'collection': None}
 
@@ -78,9 +81,9 @@ class Study:
             g.result,g.eco,g.opening FROM positions p JOIN games g ON g.id=p.game_id
             WHERE p.hash=? ORDER BY CASE WHEN g.date LIKE '0000%' OR g.date='' THEN 1 ELSE 0 END,
             g.date, g.id LIMIT 100''', (key,))]
-        moves = [dict(r) for r in db.execute('''SELECT next_san AS san, COUNT(DISTINCT p.game_id) AS games,
-            SUM(g.result='1-0') AS white, SUM(g.result='1/2-1/2') AS draws, SUM(g.result='0-1') AS black
-            FROM positions p JOIN games g ON g.id=p.game_id WHERE hash=? AND next_san IS NOT NULL
+        moves = [dict(r) for r in db.execute('''SELECT next_san AS san, COUNT(*) AS games,
+            SUM(result='1-0') AS white, SUM(result='1/2-1/2') AS draws, SUM(result='0-1') AS black
+            FROM (SELECT DISTINCT p.game_id,p.next_san,g.result FROM positions p JOIN games g ON g.id=p.game_id WHERE hash=? AND next_san IS NOT NULL)
             GROUP BY next_san ORDER BY games DESC''', (key,))]
         decades = [dict(r) for r in db.execute('''SELECT CAST(substr(g.date,1,4) AS INTEGER)/10*10 AS decade,
             COUNT(DISTINCT g.id) AS games FROM positions p JOIN games g ON g.id=p.game_id
@@ -125,6 +128,7 @@ class Study:
                 raise ValueError('A folder with that name already exists here')
             os.makedirs(target, exist_ok=True)
             cur = db.execute('INSERT INTO folders(name,path,parent_id) VALUES(?,?,?)', (title, relative, parent_id))
+            db.execute('UPDATE folders SET category=? WHERE id=?',(str(body.get('category') or 'Games to study').strip()[:100],cur.lastrowid))
         self.write_manifest(cur.lastrowid)
         return {'id': cur.lastrowid, 'path': target}
 
@@ -193,4 +197,14 @@ class Study:
                               ON c.id=f.collection_id WHERE f.folder_id=?''', (folder_id,)):
             entries.append(dict(name=row['name'], pgn=os.path.relpath(self.library._pgn_path(row['name']), target)))
         with open(os.path.join(target, 'study.json'), 'w', encoding='utf-8') as f:
-            json.dump(dict(name=folder['name'], collections=entries), f, indent=2)
+            json.dump(dict(name=folder['name'], category=folder['category'], collections=entries), f, indent=2)
+
+    def categorize_folder(self, ident, category):
+        category=str(category).strip()[:100]
+        if not category:
+            raise ValueError('Choose a category')
+        with self.library._write_lock, self.library.connect() as db:
+            if not db.execute('UPDATE folders SET category=? WHERE id=?',(category,int(ident))).rowcount:
+                raise ValueError('No such folder')
+        self.write_manifest(int(ident))
+        return {'saved':True}

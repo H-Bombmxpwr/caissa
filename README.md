@@ -5,6 +5,9 @@ PGN files, analyzes them with a bundled Stockfish, builds and drills opening rep
 master games and your own online games, links positions to free study material and chess history,
 and trains blindfold visualization.
 
+Start with [Running it](#running-it), [Your first study session](#your-first-study-session),
+or [Building the .exe](#building-the-exe).
+
 See [SCOPE.md](SCOPE.md) for what the app is, what it is not, and where it is going.
 
 ## Running it
@@ -87,7 +90,174 @@ Compress-Archive -Path .\dist\Caissa -DestinationPath .\dist\Caissa-Windows.zip 
 The build never bundles your personal library. Keep `DATA_DIR` outside the app folder
 if you override it, for example `$env:DATA_DIR = 'D:\ChessLibrary'` before launching.
 
-## Workbench controls
+## Your first study session
+
+1. Open **Settings → Storage location** and choose where your chess library should live.
+2. In **Online & imports**, select or paste a PGN and give its collection a name.
+3. Open **Database**, select a game to preview its final recorded position, and double-click to analyze.
+4. Use the mouse wheel or move buttons to review it. Add notes or variations and **Save game**.
+5. Use **Study folders** to organize the collection, then **Index positions** to make its moves searchable.
+6. Enable **Books** or **Opening book** from the analysis board's **Panels** menu when you want a reference beside the board.
+
+## Find and organize games
+
+The database table shows separate White and Black names and ratings, result, move count,
+ECO/opening, tournament, date, round, annotator, annotation status and date added.
+Scroll horizontally for the full table; its header stays visible while browsing.
+
+**Filters** combines all selected conditions. You can narrow by either player, player color
+and outcome, each side's rating range, tournament, site, round, annotator, termination,
+played-date range, date added, source, collection, study category, annotations, opening/ECO,
+result, game length, tags or an indexed position. Quick search matches each entered word
+across player and game metadata. **Clear filters** starts over. Bulk deletion uses the same
+filters and shows a count and preview before confirmation.
+
+For example, choose Fischer, ECO E60–E99 and annotated games to find annotated King's Indian
+games already in your library. To obtain games first, use **Master games**. Its surname field
+suggests well-known players, names in your library and names from the cached PGN Mentor
+catalog. This is a helpful starting list, not an exhaustive list of everyone in Lichess Masters.
+
+Study folders have categories: **Games to study**, **Chess studies**, **Opening examples**,
+**Model games**, **Endgames**, **Tactics**, and **Tournament preparation**. Change the category
+on the folder card; it is saved in the library and its `study.json` manifest. Assign collections
+to folders to find their games with the database's category filter.
+
+Position indexing is available from **Database → Index positions**, **Study folders →
+Collections & position indexing**, **Opening book**, and the analysis board's **Opening book**
+panel. Analysis **Position context → Library / History** also offers indexing when needed.
+The index covers the full recorded game. Check progress, then refresh the book or context view.
+
+## Imported annotations and game facts
+
+PGN comments before the first move, beside moves and after the final move are shown in
+notation. Adjacent comments are combined instead of overwriting each other; semicolon
+comments, annotation glyphs and variations are retained. Existing imports get searchable
+annotator and annotation metadata from their original PGNs automatically.
+
+A result such as `0-1` establishes who won, but does not establish resignation. Caissa shows
+the result and the PGN's `Termination` tag when present, and preserves explicit comments such
+as “White resigned.” It does not invent a resignation comment when the source contains none.
+
+**Position context → Facts** includes local facts from the recorded main line: move count,
+captures, castling, promotions, checkmate and annotator. Existing Wikipedia background links
+provide further reading online and are cached for later use. Possible game matches are
+labelled as such. Optional generated notes remain separately labelled; see the reference below.
+
+## Books beside the board
+
+Open **Books**, choose a PDF with the file picker, enter its title and optional author, and
+select **Add PDF**. Files up to 128 MB are copied into your library's `books` directory.
+Moving or replacing the original PDF afterward does not remove the library copy.
+
+Select a book to read it in the app. The **Page → Go to page** control saves a page number
+for that book; scrolling inside the PDF viewer does not update this bookmark automatically.
+In analysis, use **Panels → Books** to show the reader beside your board. Resize or move the
+panel with the existing panel controls. **Separate window** opens a dedicated reading window
+that you can move to a second monitor (a separate browser window/tab in browser mode).
+PDF viewing uses the browser/WebView2 PDF viewer; PDFs are not converted to playable games.
+
+## Opening book
+
+**Already installed:** Caissa includes an offline book built from the November 2025
+Lichess Elite game archive: 2500+ versus 2300+ players, excluding bullet. It opens by
+default under **Included book — Lichess Elite (offline)**. No account, download or
+position-indexing step is needed. The included snapshot has **280,246 source games,
+346,642 positions, and 450,114 continuations** in a 20 MB SQLite file. Counts appear
+in the book panel and in [`data/opening-book.json`](data/opening-book.json).
+This snapshot covers the first 48 plies (24 full moves) and keeps continuations played
+in at least two games. For positions beyond its coverage, select an online reference
+or your own indexed collections. It is separate from the over-the-board Masters database.
+See [source and licensing details](data/OPENING-BOOK-CREDITS.md).
+
+The **Opening book** module builds a reference from your own indexed PGN collections.
+Its **Reference database** selector also provides deep online books from **Lichess Masters**
+and **Lichess rated games**, through the [Lichess Opening Explorer API](https://github.com/lichess-org/lila-openingexplorer).
+There is no fixed move-depth cutoff: follow continuations as far as the selected database
+has games. Masters supports year ranges; rated games supports year-month ranges, rating
+bands and time controls. Online results show their source and game count, with reference
+game links. Positions are cached in your library for seven days; if refreshing an older
+position fails, the saved results are shown with an explicit older-cache label. Unvisited
+online positions require internet. This provides a broad reference without downloading
+an entire remote database or limiting you to your two imported collections.
+
+Choose a source collection, index it if necessary, and click a suggested move to explore.
+Each move shows its frequency and White/draw/Black results, with matching games you can open.
+**Back**, **Reset opening**, and **Analyze this position** let you move between exploration
+and analysis. Enable **Panels → Opening book** on any analysis board to follow its position.
+
+These are game statistics, not Stockfish scores or proof that a move wins. The module does
+not import ChessBase CTG/CTB/CTO or Polyglot BIN books. Export games to PGN when available;
+PDF books and the statistical opening book are separate kinds of reference.
+
+## Build and practise a repertoire
+
+1. Open a game or play a line in analysis. Select the last move you want to learn.
+2. Choose **Add to repertoire**, name a repertoire or select one, and choose your playing color.
+3. Open **Repertoire → Browse lines** to study, or **Drill due lines** to practise.
+4. Enter your side's moves; the opponent's moves play automatically. Blindfold mode is optional.
+5. Complete the line and select **Save review**. Successful reviews become less frequent;
+   retries bring the line back tomorrow. Use **Export PGN** for a portable copy.
+
+The same guide appears in the Repertoire module. Blindfold training remains a separate
+seven-level module, and the Tactics module links to Chess Tempo for dedicated tactics practice.
+
+## Online and offline use
+
+**Settings → Connection** shows the device's connection status and updates when it changes.
+**Check online services** checks reachability of PGN Mentor; a failed service check does not
+necessarily mean the whole device is offline. Your stored games, PDFs, repertoire, position
+index and bundled Stockfish work locally. New downloads, Wikipedia lookups and uncached
+tablebase positions require internet. No online account is required for your local library.
+
+## Detailed workbench reference
+
+### Analysis navigation, notation and sounds
+
+Right-click a notation move or a variation heading to delete that move and its
+continuation, trim only following moves, or remove the whole enclosing variation.
+The menu shows the number of moves affected, including nested branches. Other
+branches stay intact; if your current position is removed, the board returns to
+the surviving parent. Choose **Save changes** to persist the edit.
+
+- Click the board or notation, then use **Left / Right** to step through moves,
+  **Up / Down** to select sibling variations, and **Home / End** to reach the start
+  or end of the current line. Typing fields retain their normal keyboard behavior.
+- White and Black share a score-sheet row even when a move has a comment. Turn
+  **One move per line** off for compact prose notation. Variations have labelled,
+  collapsible branches; deeper branches start collapsed. **Expand variations** and
+  **Collapse variations** control the whole tree. Select an alternative and use
+  **Make main line** to promote it without losing the previous continuation.
+- PGN `[%cal]` arrows and `[%csl]` circles appear on their position and as colored
+  square/arrow labels beneath the move. Evaluations appear once as score badges.
+  **Annotate game** updates evaluations while keeping prose and variations; it
+  preserves existing annotation glyphs. Save the game to persist these changes.
+- **Game tags** shows the PGN headers, including tournament and annotator, followed
+  by your separate library labels. **Export PGN** opens native Save As in the desktop
+  app and downloads a file in browser mode, including notes and variations.
+- The **↔** panel control spans both columns beside the board. Toggle it again to
+  return the panel to its original column. Full-width panels form a stack above the
+  two smaller columns; arrangements are remembered per analysis tab.
+- **Settings → Move sounds** offers included Caissa wood/digital sounds or Off, volume,
+  and individual move/capture/castle/check/promotion/game-end/illegal-move toggles.
+  Preview each sound there. Lichess, Chess.com, ChessBase and Custom profiles accept
+  your own audio samples (up to 1 MB per event); their original sound packs are not
+  bundled. Samples are stored in your library preferences. **Animate moves and
+  captures** and **Animation duration** control piece glides and capture fades.
+
+### Understanding folders and example games
+
+**Study folders** displays a nested tree. Top-level folders contain indented
+subfolders and collection entries, each showing its kind and count. Use the disclosure
+arrows or **Expand all / Collapse all**. **Unfiled collections** are outside study
+folders, at library level. Repertoires are a separate practice library. The collapsed
+**All collections** section provides export, deletion and position-indexing tools.
+
+In analysis, **Position context → Library** shows the number of candidate moves and
+their game results, then example games reaching the current position. Filter examples
+by player/tournament/annotator text, result, annotations and collection. These filters
+search the whole position index, not just the initially displayed examples.
+
+### Database and import management
 
 - Database previews show the last recorded mainline position, including the final
   position of full games. The preview stays beside the list while scrolling.
@@ -112,13 +282,16 @@ if you override it, for example `$env:DATA_DIR = 'D:\ChessLibrary'` before launc
   added by that batch. Existing duplicates survive. History persists across restarts;
   partially completed archive imports can also be undone. Imports made before this
   feature have no batch history: use collection/date filters for those.
-- Index a collection from **Study folders** before searching its positions. Indexing
+- Index a collection from **Database → Index positions**, **Study folders**, or **Opening book** before searching its positions. Indexing
   now includes the entire game; re-index older collections to include their endgames.
 - **Study folders → Delete** removes a folder and everything nested inside it. The
   collections filed there are only released, never deleted: their games and PGN files
   stay in the library. On disk Caissa takes back the `study.json` manifest it wrote and
   the directories it created; a directory holding files you put there yourself is left
   alone and reported in the confirmation.
+
+### Board controls and analysis tabs
+
 - On the analysis board, scroll the wheel to step through moves. Drawing follows
   [chessground](https://github.com/lichess-org/chessground), the library lichess draws
   with, so the habits carry over: right-drag (or shift-drag) paints an arrow that follows
@@ -129,11 +302,14 @@ if you override it, for example `$env:DATA_DIR = 'D:\ChessLibrary'` before launc
 - The analysis board opens in tabs. **＋** adds one, and opening a game from the database
   or from **Master games** puts it on its own tab rather than displacing your work. Each
   tab keeps its own game and its own panel arrangement.
-- **Panels** chooses which of Notation, Stockfish, Game tags, Position context and Endgame
-  tablebase a board shows. The arrows in a panel's head reorder it or send it across to the
+- **Panels** chooses which of Notation, Stockfish, Game tags, Position context, Endgame
+  tablebase, Books and Opening book a board shows. The arrows in a panel's head reorder it or send it across to the
   other column, the grip along its bottom edge sets its height, and the divider between the
   two columns sets their widths. Only one arrangement is remembered for new tabs: the tab
   you close last, or tab one if several are open when the app exits.
+
+### Notes, variations and position context
+
 - Annotations are saved into the game as you type them; there is no Keep button. **Save
   game** still writes the PGN to disk.
 - Arrows and circles belong to the move you drew them on. Step away and back and they
@@ -169,6 +345,9 @@ if you override it, for example `$env:DATA_DIR = 'D:\ChessLibrary'` before launc
   disambiguation pages are skipped. A game with no players or event recorded says so
   instead of guessing. Results are cached in your library, so a game you have looked up
   once reads offline; a failed or offline lookup is never cached as the answer.
+
+### Engine analysis and endgames
+
 - Each Stockfish line carries its depth as a chip and an **Add to tree** button that grafts
   the line into the notation as a variation — up to ten moves of it, or the whole line if
   it is shorter — and puts you on its first move so the arrow keys walk through it.
@@ -191,6 +370,9 @@ if you override it, for example `$env:DATA_DIR = 'D:\ChessLibrary'` before launc
   the side-to-move perspective, including each candidate move's result for that player.
   Cursed wins and blessed losses account for the 50-move rule. No large tablebase files
   are bundled. API semantics: [lichess tablebase](https://github.com/lichess-org/lila-tablebase#http-api).
+
+### Finding master games and appearance
+
 - **Master games** searches the [PGN Mentor catalog](https://www.pgnmentor.com/files.html),
   imports the selected player collection, then applies local filters. For Fischer's
   King's Indian games, use Fischer and ECO E60–E99. This works even without opening
@@ -220,12 +402,14 @@ backend/
   api.py              JSON API routes
   chess.py            chess rules in Python (0x88, perft-verified)
   study.py            position index, pins, study folders on disk
+  books.py            PDF library metadata and file storage
   literature.py       free study material for a position
   importers.py        PGN / ZIP / GZ / BZ2 / ZST / EPD / CSV, folders, URLs, chess.com
   pgnutil.py          PGN splitting, tag parsing, move extraction
   engine.py           bundled Stockfish over UCI, plus batch annotation
   lichess.py          throttled lichess client, masters crawler, dump importer
 js/
+  library-tools.js    PDF reader, opening book and connection status
   workspace.js        the desktop workspace: database, analysis, repertoire, studies
   engine.js           chess rules in the browser (0x88, perft-verified)
   board.js            chessground-style board: transforms, drag, shapes, blindfold
@@ -259,10 +443,12 @@ For the workbench interaction regressions (requires installed Microsoft Edge):
 ```powershell
 .venv\Scripts\python -m pip install playwright
 .venv\Scripts\python tests\workbench_browser.py
+.venv\Scripts\python tests\analysis_quality_browser.py
 ```
 
 This uses a temporary library and checks import undo, filtered deletion, board controls,
-continuous Stockfish, tablebase UI, settings persistence, and both browser smoke suites.
+continuous Stockfish, tablebase UI, settings persistence, annotation round-trips, master
+suggestions, PDF upload/range serving, opening-book navigation, and both browser smoke suites.
 
 `tests/run.ps1` puts the JavaScript rules engine through the same perft positions under Windows
 Script Host (no Node needed on this machine), plus SAN round-trips and a legality check of every

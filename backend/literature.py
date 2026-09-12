@@ -14,6 +14,7 @@ Nothing here scrapes, and nothing here invents a link it has not checked.
 """
 
 import json
+import re
 import os
 import urllib.error
 import urllib.parse
@@ -242,6 +243,15 @@ def _wikipedia(titles):
             "extract": page["extract"].strip(),
             "url": page.get("fullurl") or "https://en.wikipedia.org/wiki/" + urllib.parse.quote(page["title"].replace(" ", "_")),
         }
+    aliases = {item['from']: item['to'] for kind in ('normalized', 'redirects')
+               for item in data.get('query', {}).get(kind, [])}
+    for title in titles:
+        resolved, seen = title, set()
+        while resolved in aliases and resolved not in seen:
+            seen.add(resolved)
+            resolved = aliases[resolved]
+        if resolved in found:
+            found[title] = found[resolved]
     return found
 
 
@@ -274,7 +284,7 @@ def game_facts(headers, online=True):
     event = _named(headers.get("Event"))
     site = _named(headers.get("Site"))
     year = (headers.get("Date") or "")[:4]
-    if not year.isdigit():
+    if not year.isdigit() or year == '0000':
         year = ""
 
     query = {"white": white, "black": black, "event": event, "year": year}
@@ -291,25 +301,62 @@ def game_facts(headers, online=True):
             event_titles.append(name)
             if "chess" not in name.lower():
                 event_titles.append(name + " chess tournament")
+    # Ask for the recorded edition, rather than a player's best-known match.
+    event_candidates = _wikipedia_search('%s %s chess tournament' % (event, year)) if event and year else []
+    if event and year and re.search(r'\bcand(?:idates)?\b', event, re.I):
+        event_titles.extend(['Candidates Tournament '+year, year+' Candidates Tournament'])
     wanted.extend(event_titles)
+    wanted.extend(event_candidates)
 
     # A game famous enough to have its own article usually carries both names.
     candidates = []
     if white and black:
-        candidates = _wikipedia_search("%s %s %s chess game" % (white, black, year))
+        candidates = _wikipedia_search("%s %s %s %s chess game" % (white, black, event, year))
         wanted.extend(candidates)
 
     pages = _wikipedia(wanted)
 
+    def same_year(page, require=False):
+        title_years = re.findall(r'\b(?:18|19|20)\d{2}\b', page['title'])
+        if year and title_years and year not in title_years:
+            return False
+        return not require or bool(year and re.search(r'\b'+year+r'\b', page['title']+' '+page['extract']))
+
+    def words(value):
+        import unicodedata
+        value = ''.join(c for c in unicodedata.normalize('NFKD', value) if not unicodedata.combining(c))
+        return set(re.findall(r"[a-z]+", value.lower()))
+
+    def matches_game(page):
+        # Search ranking alone is not evidence. Require the date and both players
+        # in the returned article, not merely in the query we sent Wikipedia.
+        text = words(page['title']+' '+page['extract'])
+        surnames = [words(name.split()[-1]) for name in (white, black) if name]
+        return (same_year(page, require=True) and len(surnames) == 2
+                and all(name and name <= text for name in surnames))
+
+    event_words = words(event) - {'chess', 'tournament', 'the', 'th', 'st', 'nd', 'rd'}
+    if 'cand' in event_words:
+        event_words.add('candidates')
+    matched_events = [t for t in event_candidates if t in pages and same_year(pages[t], require=True)
+                      and event_words & words(pages[t]['title'])]
+    event_titles = [t for t in event_titles if t in pages and same_year(pages[t])]
+
     def group(label, titles, note=None):
-        items = [pages[t] for t in dict.fromkeys(titles) if t in pages]
+        items, seen = [], set()
+        for title in titles:
+            page = pages.get(title)
+            if page and page['url'] not in seen:
+                items.append(page)
+                seen.add(page['url'])
         return {"label": label, "note": note, "items": items} if items else None
 
     groups = [
         group("The players", [white, black]),
-        group("The event and place", event_titles),
-        group("Possibly about this game", [t for t in candidates if t not in (white, black)],
-              "Found by searching Wikipedia for these players; read the article to judge whether it is this game."),
+        group("The event and place", event_titles + matched_events),
+        group("Possibly about this game", [t for t in candidates if t in pages and t not in (white, black)
+                                           and matches_game(pages[t]) and t not in event_titles + matched_events],
+              "The article mentions both players and the recorded year; read it to judge whether it is this exact game."),
     ]
     groups = [g for g in groups if g]
 
@@ -330,6 +377,8 @@ GEMINI_PROMPT = (
     "describe the event and the players at that time instead.\n"
     "- Never state moves, results, dates, rounds or ratings that are not given below. Do "
     "not correct or contradict the tags given below.\n"
+    "- Anchor the context to the recorded event and year. Do not substitute a later "
+    "famous championship involving either player for this tournament.\n"
     "- No speculation presented as fact, and no praise of the app or the user.\n\n"
 )
 
