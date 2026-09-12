@@ -25,6 +25,61 @@ class WorkbenchTests(unittest.TestCase):
     def call(self, method, path, body=None, query=None):
         return self.api.handle(method, '/api/'+path, query or {}, body)[1]
 
+    def rated(self, white, black, result, welo, belo, eco='B90', opening='Sicilian, Najdorf'):
+        return (f'[Event "Rated"]\n[White "{white}"]\n[Black "{black}"]\n[Result "{result}"]\n'
+                f'[WhiteElo "{welo}"]\n[BlackElo "{belo}"]\n[ECO "{eco}"]\n[Opening "{opening}"]\n\n1. e4 c5 {result}')
+
+    def test_outcome_reads_from_the_named_player(self):
+        self.call('POST','games',{'pgn':self.rated('Carlsen','Nepo','1-0',2850,2790)})
+        self.call('POST','games',{'pgn':self.rated('Nepo','Carlsen','1-0',2790,2850)})
+        self.call('POST','games',{'pgn':self.rated('Carlsen','Ding','1/2-1/2',2850,2780)})
+        wins=self.call('GET','games',None,{'player':'Carlsen','outcome':'win'})
+        self.assertEqual(wins['total'],1)
+        self.assertEqual(wins['games'][0]['white'],'Carlsen')
+        self.assertEqual(self.call('GET','games',None,{'player':'Carlsen','outcome':'loss'})['total'],1)
+        self.assertEqual(self.call('GET','games',None,{'player':'Carlsen','outcome':'draw'})['total'],1)
+        # As White only, the same player has one win and no losses.
+        self.assertEqual(self.call('GET','games',None,{'white':'Carlsen','outcome':'win'})['total'],1)
+        self.assertEqual(self.call('GET','games',None,{'white':'Carlsen','outcome':'loss'})['total'],0)
+
+    def test_rating_range_has_a_floor_and_a_ceiling(self):
+        self.call('POST','games',{'pgn':self.rated('Top','Also','1-0',2850,2790)})
+        self.call('POST','games',{'pgn':self.rated('Club','Player','0-1',1600,1550,'C50','Italian Game')})
+        self.assertEqual(self.call('GET','games',None,{'min_elo':'2000'})['total'],1)
+        self.assertEqual(self.call('GET','games',None,{'max_elo':'2000'})['total'],1)
+        self.assertEqual(self.call('GET','games',None,{'min_elo':'1000','max_elo':'3000'})['total'],2)
+
+    def test_opening_names_come_with_the_eco_span_they_cover(self):
+        self.call('POST','games',{'pgn':self.rated('A','B','1-0',2000,2000,'B90','Sicilian, Najdorf')})
+        self.call('POST','games',{'pgn':self.rated('C','D','0-1',2000,2000,'B97','Sicilian, Najdorf')})
+        self.call('POST','games',{'pgn':self.rated('E','F','1-0',2000,2000,'C50','Italian Game')})
+        names={o['name']:o for o in self.call('GET','openings')['openings']}
+        self.assertEqual(names['Sicilian, Najdorf']['eco_from'],'B90')
+        self.assertEqual(names['Sicilian, Najdorf']['eco_to'],'B97')
+        self.assertEqual(names['Sicilian, Najdorf']['games'],2)
+        self.assertEqual([o['name'] for o in self.call('GET','openings',None,{'q':'Italian'})['openings']],['Italian Game'])
+
+    def test_import_reports_progress_and_settles(self):
+        self.assertFalse(self.call('GET','import/status')['running'])
+        self.call('POST','games',{'pgn':pgn('Progress'),'collection':'Watched'})
+        status=self.call('GET','import/status')
+        self.assertFalse(status['running'])
+        self.assertEqual(status['label'],'Watched')
+        self.assertEqual(status['added'],1)
+        self.assertEqual(status['total'],1)
+        self.assertIsNone(status['error'])
+
+    def test_a_deleted_collection_does_not_come_back(self):
+        self.call('POST','games',{'pgn':pgn('Doomed'),'collection':'Scratch'})
+        scratch=[c for c in self.call('GET','collections')['collections'] if c['name']=='Scratch'][0]
+        self.call('DELETE','collections/%d'%scratch['id'])
+        self.assertNotIn('Scratch',[c['name'] for c in self.call('GET','collections')['collections']])
+        # A restart re-opens the same library; only an empty one gets a starter collection.
+        from backend.api import Api
+        self.api.library.close()
+        self.api=Api(self.temp.name)
+        self.assertNotIn('Scratch',[c['name'] for c in self.call('GET','collections')['collections']])
+
     def test_import_undo_survives_restart_and_preserves_duplicates(self):
         self.call('POST','games',{'pgn':pgn('Existing')})
         r=self.call('POST','games',{'pgn':pgn('Existing')+'\n\n'+pgn('New')})

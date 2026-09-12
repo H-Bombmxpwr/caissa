@@ -1,7 +1,7 @@
 /* Workbench controls and palettes. */
 .library-aside{position:sticky;top:18px;align-self:start}
 .library-aside .note-card{display:none}
-.analysis-grid{grid-template-columns:minmax(260px,var(--board-size,1fr)) minmax(280px,.85fr) minmax(230px,.65fr)}
+.analysis-grid{grid-template-columns:minmax(260px,var(--board-size,1fr)) minmax(0,var(--dock-main,.85fr)) auto minmax(0,var(--dock-side,.65fr))}
 .analysis-board{max-width:none;min-width:0}
 .board-resize{position:absolute;right:-8px;bottom:-8px;width:25px;height:25px;z-index:8;cursor:nwse-resize;touch-action:none;border:1px solid var(--border);background:var(--bg-2);color:var(--text-strong);border-radius:4px;padding:0}
 .filters input[type=checkbox],input[type=checkbox]{flex:none;width:16px;min-width:16px;height:16px;margin:0;accent-color:var(--accent)}
@@ -22,6 +22,36 @@
 .piece-swatch .treat-outline img{filter:var(--treat-outline)}
 .piece-swatch .treat-wood img{filter:var(--treat-wood)}
 .piece-swatch .treat-slate img{filter:var(--treat-slate)}
+/* Analysis boards: tabs across the top, two docks of movable panels beside the board. */
+.board-tabs{display:flex;align-items:stretch;gap:5px;flex-wrap:wrap;margin:0 0 16px}
+.board-tab{display:flex;align-items:stretch;border:1px solid var(--border);border-radius:7px 7px 0 0;background:var(--bg-2);overflow:hidden}
+.board-tab.active{border-color:var(--accent);box-shadow:inset 0 -3px 0 var(--accent)}
+.board-tab .tab-label{border:0;background:none;color:var(--text);padding:8px 6px 8px 13px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.board-tab.active .tab-label{color:var(--text-strong);font-weight:600}
+.board-tab .tab-close{border:0;background:none;color:var(--text-dim);padding:0 10px;font-size:11px}
+.board-tab .tab-close:hover{color:#a44c42}
+.tab-new{border:1px dashed var(--border);border-radius:7px;background:none;color:var(--text-dim);padding:0 14px}
+.tab-new:hover{color:var(--text-strong);border-color:var(--accent)}
+.dock{display:grid;gap:18px;align-content:start;min-width:0}
+.dock:empty{display:none}
+.dock-splitter{width:9px;cursor:col-resize;border-radius:5px;background:linear-gradient(var(--border),var(--border)) center/2px 46px no-repeat;align-self:stretch;touch-action:none}
+.dock-splitter:hover{background:linear-gradient(var(--accent),var(--accent)) center/3px 80px no-repeat}
+.panel{position:relative;min-width:0}
+.panel .card-head{gap:10px;flex-wrap:wrap}
+.panel .panel-body{overflow:auto;min-height:0}
+.panel-controls{gap:1px;margin-left:auto}
+.panel-btn{border:0;background:none;color:var(--text-dim);padding:2px 5px;border-radius:4px;font-size:11px;line-height:1}
+.panel-btn:hover{background:var(--bg-3);color:var(--text-strong)}
+.panel-grip{position:absolute;left:0;right:0;bottom:0;height:9px;border:0;padding:0;background:none;cursor:ns-resize;touch-action:none}
+.panel-grip:hover{background:linear-gradient(var(--accent),var(--accent)) center/60px 3px no-repeat}
+/* Import progress, pinned to the window so it outlives the view that started it. */
+.import-banner{position:fixed;right:22px;bottom:22px;z-index:40;width:288px;padding:14px 16px;border:1px solid var(--border);border-radius:9px;background:var(--bg-2);box-shadow:0 14px 40px #132d2933}
+.import-banner strong{display:block;font-size:12px;color:var(--text-strong);margin-bottom:9px}
+.import-banner small{display:block;margin-top:7px;font-size:11px;color:var(--text-dim)}
+.import-banner .progress-track span{transition:width 200ms linear}
+.import-banner .progress-track.indeterminate span{width:38%;animation:caissa-drift 1.2s ease-in-out infinite}
+@keyframes caissa-drift{0%{margin-left:0}50%{margin-left:62%}100%{margin-left:0}}
+@media(prefers-reduced-motion:reduce){.import-banner .progress-track.indeterminate span{animation:none;width:100%}}
 .eco-code{display:inline-block;margin-right:7px;padding:1px 5px;border-radius:3px;background:var(--bg-3);color:var(--text-dim);font:600 10px Consolas,monospace;letter-spacing:.5px;vertical-align:1px}
 .line-rank{display:inline-block;min-width:17px;height:17px;line-height:17px;margin-right:9px;border-radius:50%;background:var(--line-color,var(--accent));color:#fff;font-size:10px;font-weight:600;text-align:center;vertical-align:1px}
 .cg-shapes .shape-label{fill:#fff;stroke:none;font:600 .21px 'Segoe UI',sans-serif;text-anchor:middle;dominant-baseline:central}
@@ -48,6 +78,6 @@ html{background:transparent}
 .dark-theme .status-message{color:var(--accent)}
 .bottom img{vertical-align:middle;margin-right:12px}.sidebar-foot img{display:block;margin:0 auto 12px}
 .cg-wrap{touch-action:none}.cg-pieces piece.dragging{will-change:transform}
-@media(max-width:1400px){.analysis-grid{grid-template-columns:minmax(260px,var(--board-size,1fr)) minmax(280px,1fr)}.analysis-context{grid-column:1/-1}}
-@media(max-width:950px){.library-grid{grid-template-columns:minmax(0,1fr) 220px}.library-aside{display:grid}.analysis-grid{grid-template-columns:minmax(0,1fr)}.analysis-board{width:min(100%,var(--board-size,650px))}}
+@media(max-width:1400px){.analysis-grid{grid-template-columns:minmax(260px,var(--board-size,1fr)) minmax(0,1fr)}.dock-splitter{display:none}.dock-side{grid-column:1/-1}}
+@media(max-width:950px){.library-grid{grid-template-columns:minmax(0,1fr) 220px}.library-aside{display:grid}.analysis-grid{grid-template-columns:minmax(0,1fr)}.analysis-board{width:min(100%,var(--board-size,650px))}.dock-main,.dock-side{grid-column:auto}}
 @media(max-width:700px){.library-grid{display:flex;flex-direction:column}.library-aside{order:-1;position:static}.library-aside .preview{display:grid;grid-template-columns:140px 1fr;gap:10px}.library-aside .preview .board-holder{grid-column:1}.library-aside .preview>h3,.library-aside .preview>.eyebrow,.library-aside .preview>p{display:none}}

@@ -91,10 +91,23 @@ if you override it, for example `$env:DATA_DIR = 'D:\ChessLibrary'` before launc
 
 - Database previews show the last recorded mainline position, including the final
   position of full games. The preview stays beside the list while scrolling.
-- **Filters** combine player, opening/ECO range, event, result, rating, move length,
-  tags, date added, collection, and position. **Delete matching games** previews the
+- **Filters** combine player, colour, outcome, opening/ECO range, event, result, rating
+  range, move length, tags, date added, collection, and position. Colour and outcome are
+  read from the player you name, so *Carlsen · Played White · Won* means exactly that. A
+  rating floor asks that at least one player is above it; a ceiling asks that neither is.
+  Opening names autocomplete from the games already in your library and fill in the ECO
+  range they cover there, which then finds the same openings in PGNs that carry no opening
+  name. **Clear all fields** empties the lot. The same picker drives **Master games**. **Delete matching games** previews the
   count and examples, then deletes exactly those unchanged entries after confirmation.
   Deleted entries leave their original PGN text on disk; collection exports omit them.
+- Imports report progress in a corner of the window and keep running if you move to
+  another view; when one finishes, the library counts and the open view refresh themselves.
+- Pasted and loaded PGN needs a collection name — choosing a file fills it in from the file
+  name. Online games go to their own collection (`lichess imports`, `chess.com imports`)
+  rather than mixing into `My games`.
+- **Study folders → Collections** can delete a collection, with the choice of whether its
+  PGN files go with it. A collection you delete stays deleted; only an empty library is
+  given a starter one.
 - **Online & imports → Recent imports → Undo import** removes only games newly
   added by that batch. Existing duplicates survive. History persists across restarts;
   partially completed archive imports can also be undone. Imports made before this
@@ -109,6 +122,16 @@ if you override it, for example `$env:DATA_DIR = 'D:\ChessLibrary'` before launc
 - On the analysis board, scroll the wheel to step through moves. Right-drag draws an
   arrow; right-click draws a circle. Shift uses blue, Ctrl red, Alt yellow; unmodified
   drawing uses green. Repeat a shape to remove it, or use **Clear arrows**.
+- The analysis board opens in tabs. **＋** adds one, and opening a game from the database
+  or from **Master games** puts it on its own tab rather than displacing your work. Each
+  tab keeps its own game and its own panel arrangement.
+- **Panels** chooses which of Notation, Stockfish, Game tags, Position context and Endgame
+  tablebase a board shows. The arrows in a panel's head reorder it or send it across to the
+  other column, the grip along its bottom edge sets its height, and the divider between the
+  two columns sets their widths. Only one arrangement is remembered for new tabs: the tab
+  you close last, or tab one if several are open when the app exits.
+- Annotations are saved into the game as you type them; there is no Keep button. **Save
+  game** still writes the PGN to disk.
 - Drag the board's lower-right corner to resize it. **Copy FEN**, **Reset board**, and
   **Board editor** are available directly in analysis. Editing starts a new study;
   save it to keep it. Blindfold controls belong to the trainer.

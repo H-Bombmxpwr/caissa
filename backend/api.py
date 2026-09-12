@@ -37,7 +37,12 @@ class Api:
         self.annotation = AnnotationJob(self.engine, self.library)
         self.import_lock = threading.Lock()
         self.delete_previews = {}
-        self.library.ensure_collection("My games")
+        # A starter collection for an empty library only. Re-creating one the user has
+        # deleted would make "delete collection" look broken after every restart.
+        if not self.library.collections():
+            self.library.ensure_collection("My games")
+        self.import_status = {'running': False, 'label': '', 'done': 0, 'total': 0,
+                              'added': 0, 'duplicates': 0, 'skipped': 0, 'error': None, 'batch_id': None}
 
     # ---------- dispatch ----------
 
@@ -56,16 +61,54 @@ class Api:
         try:
             is_import = method == 'POST' and ((head == 'import' and rest[1:] != ['undo']) or (head == 'games' and len(rest) == 1))
             if is_import:
-                batch = self.library.begin_import((body or {}).get('collection') or 'Import')
+                label = (body or {}).get('collection') or 'Import'
+                batch = self.library.begin_import(label)
+                # Imports run inside the request, so the only way a view that has been
+                # navigated away from can still report one is to publish progress here.
+                self.import_status = {'running': True, 'label': label, 'done': 0, 'total': 0,
+                                      'added': 0, 'duplicates': 0, 'skipped': 0, 'error': None, 'batch_id': batch}
+                self.library.on_progress = self._import_progress
                 try:
                     status, payload = handler(method, rest[1:], query, body)
                     payload['batch_id'] = batch
+                    for key in ('added', 'duplicates', 'skipped'):
+                        self.import_status[key] = payload.get(key, 0)
                     return status, payload
+                except (ApiError, ValueError, KeyError, OSError) as err:
+                    self.import_status['error'] = getattr(err, 'message', str(err))
+                    raise
                 finally:
+                    self.library.on_progress = None
+                    self.import_status['running'] = False
                     self.library.end_import(batch)
             return handler(method, rest[1:], query, body)
         except (ValueError, KeyError) as err:
             raise ApiError(str(err)) from err
+
+    def _route_openings(self, method, rest, query, body):
+        """Opening names actually present in the library, with the ECO span each covers.
+
+        There is no bundled ECO table and inventing one would be worse than useless, so
+        the suggestions and the ranges behind them come from the games already imported.
+        """
+        if method != 'GET':
+            raise ApiError('unsupported openings request', 405)
+        term = (query.get('q') or '').strip()
+        sql = ["SELECT opening AS name,",
+               "MIN(CASE WHEN eco GLOB '[A-E][0-9][0-9]' THEN eco END) AS eco_from,",
+               "MAX(CASE WHEN eco GLOB '[A-E][0-9][0-9]' THEN eco END) AS eco_to,",
+               "COUNT(*) AS games FROM games WHERE opening IS NOT NULL AND opening <> ''"]
+        params = []
+        if term:
+            sql.append('AND opening LIKE ?')
+            params.append('%' + term + '%')
+        sql.append('GROUP BY opening ORDER BY games DESC, name LIMIT 40')
+        rows = [dict(r) for r in self.library.connect().execute(' '.join(sql), params)]
+        return 200, {'openings': rows}
+
+    def _import_progress(self, done, total):
+        self.import_status['done'] = done
+        self.import_status['total'] = total
 
     def _route_study(self, method, rest, query, body):
         action = rest[0] if rest else 'position'
@@ -134,7 +177,12 @@ class Api:
             text = "\n\n".join(c for c in chunks if c) + "\n"
             return 200, (text.encode("utf-8"), "application/x-chess-pgn")
         if method == "DELETE" and rest:
+            info = self.library.collection(rest[0])
+            folder = self.library.connect().execute(
+                'SELECT folder_id FROM collection_folders WHERE collection_id=?', (info['id'],)).fetchone() if info else None
             removed = self.library.delete_collection(rest[0], remove_files=query.get("files") == "1")
+            if removed and folder:
+                self.study.write_manifest(folder['folder_id'])
             if not removed:
                 raise ApiError("no such collection", 404)
             return 200, {"deleted": True}
@@ -147,7 +195,7 @@ class Api:
             filters.pop('offset', None)
             if 'q' in filters:
                 filters['query'] = filters.pop('q')
-            allowed = {'query','collection','player','white','black','eco','eco_to','result','opening','min_elo','year','sort','event','min_length','max_length','tag','added_from','added_to','position'}
+            allowed = {'query','collection','player','white','black','eco','eco_to','result','opening','min_elo','max_elo','outcome','year','sort','event','min_length','max_length','tag','added_from','added_to','position'}
             if set(filters) - allowed:
                 raise ApiError('Unknown filter')
             found = self.library.search(**filters, limit=-1)
@@ -174,7 +222,7 @@ class Api:
                 player=query.get("player"),
                 white=query.get("white"),
                 black=query.get("black"),
-                eco=query.get("eco"),
+                eco=query.get("eco"), max_elo=query.get("max_elo"), outcome=query.get("outcome"),
                 result=query.get("result"),
                 opening=query.get("opening"),
                 min_elo=query.get("min_elo"),
@@ -216,6 +264,8 @@ class Api:
         raise ApiError("unsupported games request", 405)
 
     def _route_import(self, method, rest, query, body):
+        if method == 'GET' and rest == ['status']:
+            return 200, dict(self.import_status)
         if method == 'GET' and rest == ['history']:
             return 200, {'batches': self.library.import_history()}
         if method == 'POST' and rest == ['undo']:
@@ -235,7 +285,7 @@ class Api:
                         raise ApiError('Give a local path or download URL')
                     return 200, importers.import_source(self.library, source, body.get('collection') or 'My games')
                 user = str(body.get('user', '')).strip()
-                return 200, importers.chesscom(self.library, user, body.get('collection') or user+' (chess.com)',
+                return 200, importers.chesscom(self.library, user, body.get('collection') or 'chess.com imports',
                                               max(1, min(int(body.get('max', 100)), 2000)))
             except OSError as err:
                 raise ApiError('Could not import source: '+str(err), 503) from err
@@ -262,7 +312,7 @@ class Api:
                     token=token,
                 )
                 result = self.library.add_games(
-                    pgn, collection=body.get("collection") or ("%s (lichess)" % user), source="lichess"
+                    pgn, collection=body.get("collection") or "lichess imports", source="lichess"
                 )
                 result["user"] = user
                 return 200, result

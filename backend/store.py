@@ -216,8 +216,12 @@ class Library:
                     ).fetchall()
                 }
 
+            report = getattr(self, "on_progress", None)
             with open(path, "a", encoding="utf-8", newline="\n") as handle:
-                for text in texts:
+                for position, text in enumerate(texts):
+                    # Coarse enough that a 100k-game archive does not pay for a callback a game.
+                    if report and position % 25 == 0:
+                        report(position, len(texts))
                     meta = pgnutil.describe(text)
                     if meta['variant'].lower() not in ('standard', 'chess', 'from position'):
                         skipped += 1
@@ -263,6 +267,8 @@ class Library:
                     conn.execute('INSERT INTO import_members VALUES (?,?)', (batch, cursor.lastrowid))
             conn.commit()
 
+        if report:
+            report(len(texts), len(texts))
         return {
             "added": added,
             "duplicates": duplicates,
@@ -307,7 +313,7 @@ class Library:
     def search(self, query=None, collection=None, player=None, white=None, black=None,
                eco=None, result=None, opening=None, min_elo=None, year=None,
                sort="date", limit=100, offset=0, event=None, min_length=None, max_length=None, tag=None,
-               added_from=None, added_to=None, position=None, eco_to=None):
+               added_from=None, added_to=None, position=None, eco_to=None, max_elo=None, outcome=None):
         where, params = [], []
 
         if collection:
@@ -342,6 +348,25 @@ class Library:
         if min_elo:
             where.append("(COALESCE(white_elo,0) >= ? OR COALESCE(black_elo,0) >= ?)")
             params.extend([int(min_elo), int(min_elo)])
+        if max_elo:
+            # A ceiling means nobody above it; an unrated player is not treated as 9999.
+            where.append("(COALESCE(white_elo,0) <= ? AND COALESCE(black_elo,0) <= ?)")
+            params.extend([int(max_elo), int(max_elo)])
+        if outcome == 'draw':
+            where.append("result = '1/2-1/2'")
+        elif outcome in ('win', 'loss'):
+            # Win and loss only mean something from somebody's side of the board.
+            won, lost = ('1-0', '0-1') if outcome == 'win' else ('0-1', '1-0')
+            if white:
+                where.append("result = ?")
+                params.append(won)
+            elif black:
+                where.append("result = ?")
+                params.append(lost)
+            elif player:
+                like = "%" + player.strip() + "%"
+                where.append("((white LIKE ? AND result = ?) OR (black LIKE ? AND result = ?))")
+                params.extend([like, won, like, lost])
         if year:
             where.append("date LIKE ?")
             params.append(str(year) + "%")

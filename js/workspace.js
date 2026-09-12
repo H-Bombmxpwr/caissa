@@ -3,7 +3,8 @@
   'use strict';
   const h = App.h;
   const state = {view:'database', collections:[], folders:[], assignments:[], offset:0, filters:{},
-    selected:null, parsed:null, node:null, dirty:false, context:'Library', route:0, prefs:{}, rep:null};
+    selected:null, parsed:null, node:null, dirty:false, context:'Library', route:0, prefs:{}, rep:null,
+    boards:[], boardIndex:0};
   // Light squares first, then dark. The last four are dark palettes; they stay light enough
   // that the black pieces' outlines still read against the dark squares.
   const themes = {Sage:['#ecebd9','#73917c'], Walnut:['#f0d9b5','#b58863'], Slate:['#e3e7eb','#8293a2'],
@@ -36,6 +37,54 @@
   function link(text,url) {return h('a',{text,href:url,target:'_blank',rel:'noopener noreferrer'});}
   function field(label, control) {if(/INPUT|SELECT|TEXTAREA/.test(control.tagName)&&!control.hasAttribute('aria-label'))control.setAttribute('aria-label',label);return h('label.field',[h('span',{text:label}),control]);}
   function select(options,value,onchange) {const el=h('select',{onchange},options.map(o=>h('option',{value:Array.isArray(o)?o[0]:o,text:Array.isArray(o)?o[1]:o})));el.value=value;return el;}
+  /* ---------- imports in flight ---------- */
+  // An import finishes on the server whether or not the view that started it is still on
+  // screen, so the progress and the refresh that follows it live outside any one view.
+  let importBanner=null,importPoll=null,importSeen=false;
+  function importProgress(status){
+    if(!importBanner){importBanner=h('div.import-banner',{role:'status'},[h('strong'),h('div.progress-track',[h('span')]),h('small')]);document.body.append(importBanner);}
+    const [label,track,note]=importBanner.children;
+    label.textContent='Importing into '+(status.label||'your library')+'…';
+    const percent=status.total?Math.round(status.done/status.total*100):0;
+    track.classList.toggle('indeterminate',!status.total);
+    track.firstChild.style.width=status.total?Math.max(percent,2)+'%':'';
+    note.textContent=status.total?status.done.toLocaleString()+' of '+status.total.toLocaleString()+' games · '+percent+'%':'Fetching games…';
+  }
+  function watchImport(){
+    if(importPoll)return;
+    importPoll=setInterval(act(async()=>{
+      const status=await api('import/status');
+      if(status.running){importSeen=true;importProgress(status);return;}
+      clearInterval(importPoll);importPoll=null;
+      if(importBanner){importBanner.remove();importBanner=null;}
+      if(!importSeen)return;
+      importSeen=false;
+      if(status.error){App.toast('Import failed: '+status.error,6000);return;}
+      App.toast('Imported '+status.added+' games · '+status.duplicates+' duplicates'+(status.skipped?' · '+status.skipped+' skipped':''),6000);
+      await refreshMeta();
+      if(state.view==='database'||state.view==='imports')await go(state.view);
+    }),700);
+  }
+  // Opening suggestions come from the library's own games, and carry the ECO span each
+  // name covers so the range fields can fill themselves in.
+  function openingPicker(onPick,initial){
+    const id='openings-'+Math.random().toString(36).slice(2,9);
+    const list=h('datalist',{id});
+    const input=h('input',{list:id,value:initial||'',autocomplete:'off',placeholder:'Start typing: Sicilian, King’s Indian…'});
+    let known=[],timer;
+    async function load(){
+      const data=await api('openings?'+new URLSearchParams({q:input.value.trim()}));
+      known=data.openings;
+      list.replaceChildren(...known.map(o=>h('option',{value:o.name,
+        label:(o.eco_from?(o.eco_from===o.eco_to?o.eco_from:o.eco_from+'–'+o.eco_to)+' · ':'')+o.games+' games'})));
+    }
+    input.addEventListener('input',()=>{clearTimeout(timer);timer=setTimeout(act(async()=>{
+      await load();const hit=known.find(o=>o.name===input.value);if(hit&&onPick)onPick(hit);}),220);});
+    load().catch(()=>{});
+    return {input,list,match:()=>known.find(o=>o.name===input.value)||null};
+  }
+  function colourSelect(current){return select([['','Either colour'],['white','Played White'],['black','Played Black']],current||'');}
+  function outcomeSelect(current){return select([['','Any outcome'],['win','Won'],['loss','Lost'],['draw','Drew']],current||'');}
   // Nobody remembers 500 ECO codes. Show the PGN's own opening name when it has one,
   // and otherwise the volume the code belongs to, with the code itself always in view.
   const ECO_VOLUMES = {A:'Flank openings', B:'Semi-open games', C:'Open games and the French',
@@ -145,13 +194,90 @@
         state.selected=null;state.parsed=PGN.parse('[Event "Edited position"]\n[White "White"]\n[Black "Black"]\n[SetUp "1"]\n[FEN "'+g.fen()+'"]\n[Result "*"]\n\n*');state.node=state.parsed.root;state.dirty=true;close();go('analysis');
       },'primary')]));b.setPieces(map);
   });}
+  function filterDialog(reload){modal('Find the games that matter',(body,close)=>{
+    const f=state.filters,inputs={};
+    function text(key,label,extra){const el=h('input',Object.assign({value:f[key]||''},extra||{}));inputs[key]=el;return field(label,el);}
+    const player=h('input',{value:f.player||f.white||f.black||'',placeholder:'Fischer'});
+    const colour=colourSelect(f.white?'white':f.black?'black':'');
+    const outcome=outcomeSelect(f.outcome);
+    const result=select([['','Any result'],'1-0','0-1','1/2-1/2','*'],f.result||'');
+    const eco=h('input',{value:f.eco||'',placeholder:'E60','aria-label':'ECO from'}),ecoEnd=h('input',{value:f.eco_to||'',placeholder:'E99','aria-label':'ECO through'});
+    const picker=openingPicker(hit=>{if(hit.eco_from){eco.value=hit.eco_from;ecoEnd.value=hit.eco_to||hit.eco_from;}},f.opening);
+    body.append(h('p.muted',{text:'Every field narrows the same search. Colour and outcome are read from the player you name, and choosing an opening fills in the ECO range it covers in your library.'}),
+      field('Player',player),h('div.toolbar',[field('Colour',colour),field('Outcome',outcome),field('Result',result)]),
+      field('Opening',picker.input),picker.list,
+      h('div.toolbar',[field('ECO from',eco),field('ECO through',ecoEnd)]),
+      h('div.toolbar',[text('min_elo','Minimum rating',{type:'number',min:0}),text('max_elo','Maximum rating',{type:'number',min:0})]),
+      text('event','Event'),text('year','Year'),
+      h('div.toolbar',[text('min_length','Minimum plies',{type:'number',min:0}),text('max_length','Maximum plies',{type:'number',min:0})]),
+      text('tag','Tag'),
+      h('div.toolbar',[text('added_from','Added on or after',{type:'date'}),text('added_to','Added on or before',{type:'date'})]),
+      text('position','Position FEN (indexed positions)'),
+      h('div.dialog-actions',[
+        button('Clear all fields',()=>{state.filters={};state.offset=0;close();go('database');}),
+        button('Cancel',close),
+        button('Apply',()=>{
+          const next={};
+          for(const [key,el] of Object.entries(inputs))if(String(el.value).trim())next[key]=String(el.value).trim();
+          if(player.value.trim())next[colour.value||'player']=player.value.trim();
+          if(picker.input.value.trim())next.opening=picker.input.value.trim();
+          if(eco.value.trim())next.eco=eco.value.trim().toUpperCase();
+          if(ecoEnd.value.trim())next.eco_to=ecoEnd.value.trim().toUpperCase();
+          if(result.value)next.result=result.value;
+          if(outcome.value)next.outcome=outcome.value;
+          for(const keep of ['collection','q','sort'])if(f[keep])next[keep]=f[keep];
+          state.filters=next;state.offset=0;close();return reload();},'primary')]));
+  });}
   async function mentorSearch(){
-    const player=h('input',{placeholder:'Fischer',value:'Fischer'}),opening=h('input',{placeholder:"King's Indian",value:"King's Indian"}),eco=h('input',{value:'E60'}),ecoEnd=h('input',{value:'E99'}),results=h('div');
-    content.append(card('Search PGN Mentor player collections',h('div.card-pad',[field('Player surname',player),field('Opening name (when no ECO range)',opening),h('div.toolbar',[field('ECO from',eco),field('ECO through',ecoEnd)]),button('Find collections',async()=>{
-      results.textContent='Searching PGN Mentor…';const data=await api('masters/catalog?'+new URLSearchParams({q:player.value}));results.replaceChildren(...data.players.map(p=>h('div.context-item',[h('b',{text:p.name}),button('Import & find matching games',async()=>{
-        const collection='Masters / '+p.name;await api('import/source',{path:p.url,collection});state.filters={collection,player:player.value,eco:eco.value,eco_to:ecoEnd.value};if(!eco.value)state.filters.opening=opening.value;state.offset=0;await go('database');
-      })])));if(!data.players.length)results.textContent='No player collections found. Try a surname.';
-    },'primary'),h('p.muted',{text:'Downloads the selected player collection, then combines your filters locally. E60–E99 finds King’s Indian games even when the PGN has no opening name.'}),results])));
+    const player=h('input',{placeholder:'Fischer',value:'Fischer'});
+    const eco=h('input',{value:'E60',placeholder:'E60','aria-label':'ECO from'}),ecoEnd=h('input',{value:'E99',placeholder:'E99','aria-label':'ECO through'});
+    const picker=openingPicker(hit=>{if(hit.eco_from){eco.value=hit.eco_from;ecoEnd.value=hit.eco_to||hit.eco_from;}},'King’s Indian');
+    const colour=colourSelect(''),outcome=outcomeSelect(''),results=h('div');
+    function filtersFor(collection){
+      const next={collection};
+      if(player.value.trim())next[colour.value||'player']=player.value.trim();
+      if(outcome.value)next.outcome=outcome.value;
+      if(eco.value.trim())next.eco=eco.value.trim().toUpperCase();
+      if(ecoEnd.value.trim())next.eco_to=ecoEnd.value.trim().toUpperCase();
+      if(!eco.value.trim()&&picker.input.value.trim())next.opening=picker.input.value.trim();
+      return next;
+    }
+    content.append(card('Search PGN Mentor player collections',h('div.card-pad',[
+      field('Player surname',player),
+      h('div.toolbar',[field('Colour',colour),field('Outcome',outcome)]),
+      field('Opening name',picker.input),picker.list,
+      h('div.toolbar',[field('ECO from',eco),field('ECO through',ecoEnd)]),
+      h('div.toolbar',[
+        button('Find collections',async()=>{
+          results.textContent='Searching PGN Mentor…';
+          const data=await api('masters/catalog?'+new URLSearchParams({q:player.value}));
+          results.replaceChildren(...data.players.map(p=>h('div.context-item',[h('b',{text:p.name}),
+            button('Import & find matching games',async()=>{
+              const collection='Masters / '+p.name;
+              watchImport();
+              await api('import/source',{path:p.url,collection});
+              state.filters=filtersFor(collection);state.offset=0;await go('database');
+            })])));
+          if(!data.players.length)results.textContent='No player collections found. Try a surname.';
+        },'primary'),
+        button('Clear all fields',()=>{player.value='';picker.input.value='';eco.value='';ecoEnd.value='';colour.value='';outcome.value='';results.replaceChildren();})]),
+      h('p.muted',{text:'Downloads the selected collection, then combines your filters locally. Picking an opening fills the ECO range from the games you already have, which finds the same openings in PGNs that carry no opening name.'}),
+      results])));
+    const lookup=h('input',{placeholder:'Kasparov Topalov, Wijk aan Zee, Najdorf…','aria-label':'Find a game in your library'});
+    const found=h('div');
+    content.append(card('Find a game you already have',h('div.card-pad',[
+      field('Player, event or opening',lookup),
+      button('Search my library',async()=>{
+        const term=lookup.value.trim();
+        if(!term)throw new Error('Type a player, event or opening to look for.');
+        found.textContent='Searching your library…';
+        const data=await api('games?'+new URLSearchParams({q:term,limit:12,offset:0}));
+        if(!data.total){found.textContent='Nothing in your library matches that yet. Import the collection first.';return;}
+        found.replaceChildren(h('p.muted',{text:data.total.toLocaleString()+' matching games · opening one puts it on a new analysis tab'}),
+          ...data.games.map(g=>h('div.context-item',[button(g.white+' — '+g.black,()=>openGame(g.id)),
+            h('div.muted',{text:[g.event,g.date,g.result].filter(Boolean).join(' · ')})])),
+          data.total>12?button('See all '+data.total.toLocaleString()+' in the database',()=>{state.filters={q:term};state.offset=0;return go('database');}):null);
+      },'primary'),found])));
   }
   function applyPrefs() {
     Board.setPieceSet(state.prefs.pieceSet||'cburnett');
@@ -174,13 +300,68 @@
     const esc=s=>String(s).replace(/\\/g,'\\\\').replace(/"/g,'\\"');
     return Object.entries(parsed.headers).map(([k,v])=>'['+k+' "'+esc(v)+'"]').join('\n')+'\n\n'+comment(parsed.root)+' '+branch(parsed.root)+' '+(parsed.headers.Result||'*')+'\n';
   }
-  function newGame() {state.selected=null;state.parsed=PGN.parse('[Event "Study"]\n[White "White"]\n[Black "Black"]\n[Result "*"]\n\n*');state.node=state.parsed.root;state.dirty=false;}
+  function newGame() {state.selected=null;state.parsed=PGN.parse('[Event "Study"]\n[White "White"]\n[Black "Black"]\n[Result "*"]\n\n*');state.node=state.parsed.root;state.dirty=false;activeBoard();}
   async function openGame(id) {
-    if(state.dirty&&!confirm('Discard unsaved changes to the current analysis?'))return;
     const {game}=await api('games/'+id);const parsed=PGN.parse(game.pgn);
     if(parsed.errors.length)throw new Error('This PGN contains unrecognized moves: '+parsed.errors.slice(0,5).join(', '));
-    state.selected=game;state.parsed=parsed;state.node=parsed.root;state.dirty=false;await go('analysis');
+    // A tab already holding work of its own steps aside; an untouched one is reused.
+    const current=activeBoard();stashBoard();
+    if(current.selected||current.dirty||current.parsed?.root.children.length)state.boards.splice(++state.boardIndex,0,makeBoard());
+    state.selected=game;state.parsed=parsed;state.node=parsed.root;state.dirty=false;stashBoard();
+    await go('analysis');
   }
+  /* ---------- analysis boards ---------- */
+  // Every analysis tab owns its game and its own panel arrangement. Only one arrangement
+  // is remembered for new tabs: the board closed last, or board one when the app exits
+  // with several open.
+  const PANELS=[['notation','Notation'],['engine','Stockfish · local analysis'],['tags','Game tags'],
+    ['context','Position context'],['tablebase','Endgame tablebase']];
+  const DEFAULT_LAYOUT={main:['notation','engine','tags'],side:['context','tablebase']};
+  let boardSeq=0;
+  function normalizeLayout(saved){
+    const source=saved&&typeof saved==='object'?saved:DEFAULT_LAYOUT;
+    const layout={main:[],side:[],hidden:[],heights:{...(source.heights||{})},cols:{...(source.cols||{})}},placed=new Set();
+    for(const dock of ['main','side'])for(const id of Array.isArray(source[dock])?source[dock]:[])
+      if(PANELS.some(p=>p[0]===id)&&!placed.has(id)){placed.add(id);layout[dock].push(id);}
+    // A panel a later version adds joins the dock it was designed for rather than vanishing.
+    for(const [id] of PANELS)if(!placed.has(id))layout[DEFAULT_LAYOUT.main.includes(id)?'main':'side'].push(id);
+    layout.hidden=(Array.isArray(source.hidden)?source.hidden:[]).filter(id=>PANELS.some(p=>p[0]===id));
+    return layout;
+  }
+  function makeBoard(){return {id:++boardSeq,parsed:null,node:null,selected:null,dirty:false,layout:normalizeLayout(state.prefs.analysisLayout)};}
+  function activeBoard(){if(!state.boards.length){state.boards.push(makeBoard());state.boardIndex=0;}
+    state.boardIndex=Math.max(0,Math.min(state.boardIndex,state.boards.length-1));return state.boards[state.boardIndex];}
+  function stashBoard(){const b=activeBoard();b.parsed=state.parsed;b.node=state.node;b.selected=state.selected;b.dirty=state.dirty;}
+  function adoptBoard(index){state.boardIndex=index;const b=activeBoard();
+    state.selected=b.selected;state.dirty=b.dirty;
+    if(b.parsed){state.parsed=b.parsed;state.node=b.node||b.parsed.root;}else newGame();}
+  function boardTitle(b){const white=b.parsed?.headers?.White,black=b.parsed?.headers?.Black;
+    return white&&white!=='White'?white+' — '+black:'New study';}
+  async function closeBoard(index){
+    if(index===state.boardIndex)stashBoard();
+    const b=state.boards[index];
+    if(b.dirty&&!confirm('Discard unsaved changes to '+boardTitle(b)+'?'))return;
+    state.prefs.analysisLayout=b.layout;                 // the board closed last is the one remembered
+    state.boards.splice(index,1);
+    if(!state.boards.length)state.boards.push(makeBoard());
+    adoptBoard(index<state.boardIndex?state.boardIndex-1:Math.min(state.boardIndex,state.boards.length-1));
+    await savePrefs();
+    await go('analysis');
+  }
+  function boardTabs(){
+    const strip=h('div.board-tabs',{role:'tablist','aria-label':'Analysis boards'});
+    state.boards.forEach((b,index)=>{
+      const title=boardTitle(b);
+      const tab=h('div.board-tab'+(index===state.boardIndex?'.active':''),[
+        h('button.tab-label',{type:'button',role:'tab','aria-selected':String(index===state.boardIndex),text:title+(b.dirty?' *':''),
+          onclick:act(async()=>{if(index===state.boardIndex)return;stashBoard();adoptBoard(index);await go('analysis');})})]);
+      if(state.boards.length>1)tab.append(h('button.tab-close',{type:'button',text:'✕',title:'Close this board','aria-label':'Close '+title,onclick:act(()=>closeBoard(index))}));
+      strip.append(tab);
+    });
+    strip.append(h('button.tab-new',{type:'button',text:'＋',title:'Open another analysis board','aria-label':'New analysis board',onclick:act(newBoard)}));
+    return strip;
+  }
+  function newBoard(){stashBoard();state.boards.splice(++state.boardIndex,0,makeBoard());adoptBoard(state.boardIndex);return go('analysis');}
   async function go(view) {
     if(state.analysisCleanup){state.analysisCleanup();state.analysisCleanup=null;}
     clearInterval(poll);clearTimeout(liveTimer);const ticket=++state.route;state.view=view;
@@ -195,17 +376,22 @@
     }catch(err){if(ticket===state.route)content.replaceChildren(h('div.view-error',[h('h2',{text:'Could not open this view'}),h('p.error-message',{text:err.message}),button('Try again',()=>go(view))]));}
   }
   async function database() {
-    const stats=await api('stats');
     content.append(heading('Your chess, collected','Game database','A home for every game and every idea worth keeping.',[
       button('New study',()=>{if(state.dirty&&!confirm('Discard unsaved analysis?'))return;newGame();go('analysis');}),button('＋ Import games',()=>go('imports'),'primary')]));
-    const reps=await api('repertoires');
-    content.append(h('div.stat-grid',[[stats.games,'Games in your library','Searchable, portable PGN'],[stats.collections.length,'Collections','Organized your way'],[reps.repertoires.length,'Repertoires','Your opening preparation'],[state.folders.length,'Study folders','A place for your next idea']].map(([n,t,s])=>h('div.card.metric',[h('small',{text:t}),h('strong',{text:Number(n).toLocaleString()}),h('span',{text:s})]))));
+    const statGrid=h('div.stat-grid');content.append(statGrid);
+    // The tiles are counts of the whole library, not of the current filter, so they have
+    // to be re-read whenever the library itself changes rather than on every table load.
+    let stats={games:0};
+    async function refreshStats(){const [fresh,reps]=await Promise.all([api('stats'),api('repertoires')]);stats=fresh;
+      statGrid.replaceChildren(...[[fresh.games,'Games in your library','Searchable, portable PGN'],[fresh.collections.length,'Collections','Organized your way'],[reps.repertoires.length,'Repertoires','Your opening preparation'],[state.folders.length,'Study folders','A place for your next idea']]
+        .map(([n,t,sub])=>h('div.card.metric',[h('small',{text:t}),h('strong',{text:Number(n).toLocaleString()}),h('span',{text:sub})])));}
+    await refreshStats();
     const q=h('input',{placeholder:'Search players, openings, events…',value:state.filters.q||'',type:'search','aria-label':'Search games'});
     let timer;q.addEventListener('input',()=>{clearTimeout(timer);timer=setTimeout(()=>{state.filters.q=q.value;state.offset=0;loadGames();},250);});
     const cols=select([['','All collections'],...state.collections.map(c=>[String(c.id),c.name])],state.filters.collection||'',()=>{state.filters.collection=cols.value;state.offset=0;loadGames();});
     const sort=select([['added','Recently added'],['date','Newest played'],['date_asc','Oldest played'],['elo','Highest rated'],['white','White player'],['length','Longest games']],state.filters.sort||'date',()=>{state.filters.sort=sort.value;loadGames();});
     const rows=h('tbody'),count=h('span'),pager=h('div.pagination');
-    const filters=h('div.filters',[q,cols,sort,button('Filters',()=>filterDialog(loadGames)),button('Delete matching games',()=>deleteMatching(loadGames),'danger')]);
+    const filters=h('div.filters',[q,cols,sort,button('Filters',()=>filterDialog(loadGames)),button('Delete matching games',()=>deleteMatching(async()=>{await refreshStats();await loadGames();}),'danger')]);
     const table=h('div.table-scroll',[h('table.games',[h('thead',[h('tr',['Players','Result','Opening','Date'].map(t=>h('th',{text:t})))]),rows])]);
     const list=h('section.card',[filters,table,pager]);
     const aside=h('div.library-aside.section-stack');
@@ -227,16 +413,22 @@
     async function showPreview(g){const id=++previewRequest;try{const {game}=await api('games/'+g.id);if(id!==previewRequest)return;const parsed=PGN.parse(game.pgn);const line=PGN.mainline(parsed.root);preview.setPosition(line[line.length-1]?.fenAfter||parsed.startFen);previewDetails.replaceChildren(h('h3',{text:g.white+' — '+g.black}),h('p.muted',{text:g.event+' · '+g.date}),button('Open analysis →',()=>openGame(g.id),'primary'));}catch(err){App.toast(err.message);}}
     await loadGames();
   }
-  function filterDialog(reload){modal('Find the games that matter',(body,close)=>{const inputs={};[['player','Player'],['eco','ECO prefix'],['opening','Opening'],['year','Year'],['min_elo','Minimum rating'],['event','Event'],['min_length','Minimum plies'],['max_length','Maximum plies'],['tag','Tag'],['added_from','Added on or after (YYYY-MM-DD)'],['added_to','Added on or before (YYYY-MM-DD)'],['position','Position FEN (indexed positions)'],['eco_to','ECO range end (optional)']].forEach(([k,t])=>{inputs[k]=h('input',{value:state.filters[k]||''});body.append(field(t,inputs[k]));});const result=select([['','Any result'],'1-0','0-1','1/2-1/2','*'],state.filters.result||'');body.append(field('Result',result),h('div.dialog-actions',[button('Clear',()=>{state.filters={};state.offset=0;close();go('database');}),button('Apply',()=>{Object.entries(inputs).forEach(([k,v])=>state.filters[k]=v.value);state.filters.result=result.value;state.offset=0;close();return reload();},'primary')]));});}
   async function analysis() {
     if(!state.parsed)newGame();
-    const parsed=state.parsed;
+    stashBoard();
+    const parsed=state.parsed, layout=activeBoard().layout;
     const saveBtn=button(state.dirty?'Save changes *':'Save game',saveGame,'primary');
     content.append(heading('Understand every move',parsed.headers.White+' — '+parsed.headers.Black,[parsed.headers.Event,parsed.headers.Date].filter(Boolean).join(' · ')||'An open board for your ideas',[
-      button('Reset board',()=>{if(state.dirty&&!confirm('Discard unsaved analysis and reset to the starting position?'))return;newGame();go('analysis');}),button('Board editor',boardEditor),button('Export PGN',()=>download(serialize(parsed),'caissa-study.pgn')),button('Add to repertoire',addToRepertoire),saveBtn]));
+      button('Panels',panelDialog),button('Reset board',()=>{if(state.dirty&&!confirm('Discard unsaved analysis and reset to the starting position?'))return;newGame();go('analysis');}),button('Board editor',boardEditor),button('Export PGN',()=>download(serialize(parsed),'caissa-study.pgn')),button('Add to repertoire',addToRepertoire),saveBtn]));
+    content.append(boardTabs());
     const holder=h('div.board-holder'),moves=h('div.move-tree'),engineBody=h('div',[h('p.muted',{style:{padding:'16px'},text:'Analyze a position with your bundled Stockfish.'})]),contextBody=h('div.context-body');
-    const comment=h('textarea',{rows:3,placeholder:'What is the idea in this position?','aria-label':'Position comment'});
-    const nag=select([['','No annotation'],['$1','! Good move'],['$2','? Mistake'],['$3','!! Brilliant'],['$4','?? Blunder'],['$5','!? Interesting'],['$6','?! Inaccuracy']], '');
+    // Annotations belong to the game the moment they are typed; there is nothing to press.
+    let commentTimer;
+    const comment=h('textarea',{rows:3,placeholder:'What is the idea in this position?','aria-label':'Position comment',
+      oninput:()=>{const target=state.node;clearTimeout(commentTimer);commentTimer=setTimeout(()=>{const text=comment.value.trim();
+        if((target.comment||'')===text)return;target.comment=text||null;markDirty();renderMoves();},250);}});
+    const nag=select([['','No annotation'],['$1','! Good move'],['$2','? Mistake'],['$3','!! Brilliant'],['$4','?? Blunder'],['$5','!? Interesting'],['$6','?! Inaccuracy']],'',
+      ()=>{state.node.nags=nag.value?[nag.value]:[];markDirty();renderMoves();});
     let live=false,evalRequest=0,contextRequest=0,liveId=null,livePoll=null,closed=false,latestLines=[],tbRequest=0;
     const resources=h('p.muted',{text:'CPU and memory appear during live analysis.'});
     const arrows=h('input',{type:'checkbox',checked:state.prefs.bestArrows!==false,onchange:act(async()=>{state.prefs.bestArrows=arrows.checked;drawBest();await savePrefs();})});
@@ -244,26 +436,94 @@
     const liveBox=h('input',{type:'checkbox',onchange:()=>{live=liveBox.checked;if(live)evaluate();else {clearTimeout(liveTimer);clearTimeout(livePoll);++evalRequest;liveId=null;api('engine/live',null,'DELETE').catch(()=>{});}}});
     const pv=select(['1','2','3','5'],'3');
     const rowsBox=h('input',{type:'checkbox',checked:state.prefs.moveRows!==false,onchange:act(async()=>{state.prefs.moveRows=rowsBox.checked;renderMoves();await savePrefs();})});
-    const notation=card('Notation',h('div',[moves,h('div.editor',[field('Position comment',comment),nag,h('div.toolbar',[
-      button('Keep annotation',()=>{state.node.comment=comment.value;state.node.nags=nag.value?[nag.value]:[];markDirty();renderMoves();}),
-      button('Remove branch',()=>{const n=state.node;if(!n.parent)return;if(!confirm('Remove this move and everything following it in this branch?'))return;n.parent.children=n.parent.children.filter(c=>c!==n);state.node=n.parent;markDirty();render();})])])]),[h('label.toolbar',[rowsBox,'One move per line'])]);
     const contextTabs=h('div.context-tabs');['Library','Study','History'].forEach(t=>contextTabs.append(h('button',{text:t,onclick:()=>{state.context=t;renderContext();}})));
     const controls=h('div.board-navigation',[button('⏮',()=>jump(parsed.root)),button('←',()=>jump(state.node.parent||state.node)),button('→',()=>jump(state.node.children[0]||state.node)),button('⏭',()=>{let n=state.node;while(n.children.length)n=n.children[0];jump(n);}),button('Flip',()=>board.toggleOrientation())]);
     controls.querySelectorAll('button').forEach((b,i)=>b.setAttribute('aria-label',['First position','Previous move','Next move','Last move','Flip board'][i]));
     const fen=h('div.fen');const sanInput=h('input',{placeholder:'Enter a move, e.g. Nf3','aria-label':'Move in SAN'});
     const moveForm=h('form.toolbar',{onsubmit:act(e=>{e.preventDefault();play(sanInput.value);sanInput.value='';})},[sanInput,h('button.btn',{text:'Play move',type:'submit'})]);
     const tablebaseBody=h('div.card-pad');const tablebaseToggle=h('input',{type:'checkbox',onchange:()=>renderTablebase()});
-    const tablebaseCard=card('Endgame tablebase',h('div',[h('label.toolbar.card-pad',[tablebaseToggle,'Show exact endgame results (online)']),tablebaseBody]));
-    content.append(h('div.analysis-grid',[h('div.analysis-board',[
+
+    /* ---------- dockable panels ---------- */
+    const built={};
+    function panel(id,title,body,actions){
+      const head=h('div.card-head',[h('h2',{text:title}),h('div.toolbar.panel-actions',actions||[])]);
+      const box=h('div.panel-body',[body]);
+      const handle=h('button.panel-grip',{type:'button',title:'Drag to set the height','aria-label':'Resize '+title});
+      built[id]={id,title,head,box,handle,node:h('section.card.panel',{'data-panel':id},[head,box,handle])};
+    }
+    panel('notation','Notation',h('div',[moves,h('div.editor',[field('Position comment',comment),nag,h('div.toolbar',[
+      button('Remove branch',()=>{const n=state.node;if(!n.parent)return;if(!confirm('Remove this move and everything following it in this branch?'))return;n.parent.children=n.parent.children.filter(c=>c!==n);state.node=n.parent;markDirty();render();})])])]),[h('label.toolbar',[rowsBox,'One move per line'])]);
+    panel('engine','Stockfish · local analysis',h('div',[h('div.filters',[h('label.toolbar',[liveBox,'Live analysis']),field('Lines',pv),button('Analyze',evaluate),h('label.toolbar',[arrows,'Best move arrows']),h('label.toolbar',[colorLines,'Color variations'])]),resources,engineBody]),[button('Annotate game',annotate)]);
+    panel('tags','Game tags',h('div.card-pad',[button('Edit tags',editTags),button('Delete game',deleteGame,'danger')]));
+    panel('context','Position context',h('div',[contextTabs,contextBody]));
+    panel('tablebase','Endgame tablebase',h('div',[h('label.toolbar.card-pad',[tablebaseToggle,'Show exact endgame results (online)']),tablebaseBody]));
+    const tablebaseCard=built.tablebase.node;
+    const dockMain=h('div.dock.dock-main'),dockSide=h('div.dock.dock-side');
+    const splitter=h('div.dock-splitter',{title:'Drag to divide the two columns'});
+    const grid=h('div.analysis-grid',[h('div.analysis-board',[
       h('div.player-strip',[h('b',{text:parsed.headers.Black||'Black'}),h('span.muted',{text:parsed.headers.BlackElo||''})]),holder,
-      h('div.player-strip',[h('b',{text:parsed.headers.White||'White'}),h('span.muted',{text:parsed.headers.WhiteElo||''})]),controls,moveForm,h('div.toolbar',[button('Copy FEN',async()=>{await navigator.clipboard.writeText(state.node.fenAfter);App.toast('FEN copied');}),button('Clear arrows',()=>board.setShapes([]))]),h('p.muted',{text:'Wheel: moves · Right drag: arrows · Shift: blue · Ctrl: red · Alt: yellow'}),fen,tablebaseCard]),
-      h('div.section-stack',[notation,card('Stockfish · local analysis',h('div',[h('div.filters',[h('label.toolbar',[liveBox,'Live analysis']),field('Lines',pv),button('Analyze',evaluate),h('label.toolbar',[arrows,'Best move arrows']),h('label.toolbar',[colorLines,'Color variations'])]),resources,engineBody]),[button('Annotate game',annotate)]),
-      card('Game tags',h('div.card-pad',[button('Edit tags',editTags),button('Delete game',deleteGame,'danger')]))]),
-      h('aside.analysis-context.card',[contextTabs,contextBody]) ]));
+      h('div.player-strip',[h('b',{text:parsed.headers.White||'White'}),h('span.muted',{text:parsed.headers.WhiteElo||''})]),controls,moveForm,h('div.toolbar',[button('Copy FEN',async()=>{await navigator.clipboard.writeText(state.node.fenAfter);App.toast('FEN copied');}),button('Clear arrows',()=>board.setShapes([]))]),h('p.muted',{text:'Wheel: moves · Right drag: arrows · Shift: blue · Ctrl: red · Alt: yellow'}),fen]),
+      dockMain,splitter,dockSide]);
+    content.append(grid);
+    function panelControls(id){
+      const where=layout.main.includes(id)?'main':'side',list=layout[where],at=list.indexOf(id),title=built[id].title;
+      const step=delta=>{const to=at+delta;if(to<0||to>=list.length)return;list.splice(at,1);list.splice(to,0,id);applyLayout();};
+      return h('div.toolbar.panel-controls',[
+        h('button.panel-btn',{type:'button',text:'▲',title:'Move up','aria-label':'Move '+title+' up',onclick:()=>step(-1)}),
+        h('button.panel-btn',{type:'button',text:'▼',title:'Move down','aria-label':'Move '+title+' down',onclick:()=>step(1)}),
+        h('button.panel-btn',{type:'button',text:where==='main'?'▶':'◀',title:where==='main'?'Send to the right column':'Send to the left column','aria-label':'Move '+title+' to the other column',
+          onclick:()=>{list.splice(at,1);layout[where==='main'?'side':'main'].push(id);applyLayout();}}),
+        h('button.panel-btn',{type:'button',text:'✕',title:'Hide this panel','aria-label':'Hide '+title,
+          onclick:()=>{if(!layout.hidden.includes(id))layout.hidden.push(id);applyLayout();}})]);
+    }
+    function applyLayout(){
+      for(const where of ['main','side']){
+        const dock=where==='main'?dockMain:dockSide;
+        dock.replaceChildren(...layout[where].filter(id=>!layout.hidden.includes(id)).map(id=>built[id].node));
+      }
+      for(const [id] of PANELS){
+        const spot=built[id];
+        spot.box.style.maxHeight=layout.heights[id]?layout.heights[id]+'px':'';
+        const stale=spot.head.querySelector('.panel-controls');if(stale)stale.remove();
+        if(!layout.hidden.includes(id))spot.head.append(panelControls(id));
+      }
+      // An emptied column collapses rather than leaving a gap the board cannot use.
+      grid.style.setProperty('--dock-main',dockMain.children.length?(layout.cols.main||0.85)+'fr':'0fr');
+      grid.style.setProperty('--dock-side',dockSide.children.length?(layout.cols.side||0.65)+'fr':'0fr');
+      splitter.hidden=!(dockMain.children.length&&dockSide.children.length);
+    }
+    function panelDialog(){modal('Analysis panels',(body,close)=>{
+      body.append(h('p.muted',{text:'Choose what this board shows. The arrows in each panel head reorder it or send it across to the other column, and the grip along its bottom edge sets its height. Every tab keeps its own arrangement; the tab you close last is the one remembered for new boards.'}));
+      for(const [id,title] of PANELS){
+        const box=h('input',{type:'checkbox',checked:!layout.hidden.includes(id),onchange:()=>{
+          if(box.checked)layout.hidden=layout.hidden.filter(x=>x!==id);
+          else if(!layout.hidden.includes(id))layout.hidden.push(id);
+          applyLayout();}});
+        body.append(field(title,box));
+      }
+      body.append(h('div.dialog-actions',[button('Reset arrangement',()=>{Object.assign(layout,normalizeLayout(null));applyLayout();close();}),button('Done',close,'primary')]));
+    });}
+    function bindGrip(id){
+      const spot=built[id];
+      spot.handle.addEventListener('pointerdown',event=>{event.preventDefault();spot.handle.setPointerCapture(event.pointerId);
+        const startY=event.clientY,startHeight=spot.box.getBoundingClientRect().height;
+        const move=ev=>{const next=Math.max(90,Math.round(startHeight+ev.clientY-startY));layout.heights[id]=next;spot.box.style.maxHeight=next+'px';};
+        const end=()=>{spot.handle.removeEventListener('pointermove',move);spot.handle.removeEventListener('pointerup',end);spot.handle.removeEventListener('pointercancel',end);};
+        spot.handle.addEventListener('pointermove',move);spot.handle.addEventListener('pointerup',end);spot.handle.addEventListener('pointercancel',end);});
+    }
+    for(const [id] of PANELS)bindGrip(id);
+    splitter.addEventListener('pointerdown',event=>{event.preventDefault();splitter.setPointerCapture(event.pointerId);
+      const startX=event.clientX,mainWidth=dockMain.getBoundingClientRect().width,total=mainWidth+dockSide.getBoundingClientRect().width;
+      const move=ev=>{const next=Math.max(150,Math.min(total-150,mainWidth+ev.clientX-startX));
+        layout.cols.main=Number((next/total*1.5).toFixed(3));layout.cols.side=Number(((total-next)/total*1.5).toFixed(3));
+        grid.style.setProperty('--dock-main',layout.cols.main+'fr');grid.style.setProperty('--dock-side',layout.cols.side+'fr');};
+      const end=()=>{splitter.removeEventListener('pointermove',move);splitter.removeEventListener('pointerup',end);splitter.removeEventListener('pointercancel',end);};
+      splitter.addEventListener('pointermove',move);splitter.addEventListener('pointerup',end);splitter.addEventListener('pointercancel',end);});
+    applyLayout();
     board=new Board(holder,{viewOnly:false});applyPrefs();resizeBoard(holder);
     let wheelAt=0;holder.addEventListener('wheel',e=>{e.preventDefault();if(!e.deltaY||Date.now()-wheelAt<100)return;wheelAt=Date.now();jump(e.deltaY>0?(state.node.children[0]||state.node):(state.node.parent||state.node));},{passive:false});
     pv.addEventListener('change',()=>{if(live)evaluate();});
-    function markDirty(){state.dirty=true;saveBtn.textContent='Save changes *';}
+    function markDirty(){state.dirty=true;activeBoard().dirty=true;saveBtn.textContent='Save changes *';}
     function jump(n){if(n===state.node)return;state.node=n;board.setShapes([]);render();}
     function play(input){const g=new Chess(state.node.fenAfter);const moved=g.move(input);if(!moved)throw new Error('That move is not legal in this position.');let n=state.node.children.find(c=>c.san===moved.san);if(!n){n={san:moved.san,move:moved,parent:state.node,children:[],fenAfter:g.fen(),comment:null,nags:[],ply:state.node.ply+1};state.node.children.push(n);markDirty();}jump(n);}
     // Two notations over the same tree: a running paragraph, or one row per move
@@ -325,7 +585,7 @@
     body.append(h('label.toolbar',[blind,'Blindfold mode']),holder,prompt,form,feedback,h('div.dialog-actions',[peek,button('Close',close),finish]));advance();});}
   async function studies(){content.append(heading('A place for your ideas','Study folders','Organize preparation into real folders, with portable PGNs behind every collection.',[button('Create collection',collectionDialog),button('＋ Study folder',()=>folderDialog(),'primary')]));content.append(h('p.muted',{text:state.studyRoot}));const grid=h('div.cards-grid');content.append(grid);if(!state.folders.length)grid.append(empty('Build your study space','Create a folder such as Tournament preparation, then add White repertoire, Black repertoire, Model games, and Endgames beneath it.',[button('Create study structure',async()=>{const root=await api('study/folders',{name:'Chess study'});for(const name of ['White repertoire','Black repertoire','Annotated games','Model games','Endgames','Tactics'])await api('study/folders',{name,parent_id:root.id});await go('studies');},'primary')]));
     for(const folder of state.folders){const collections=state.assignments.filter(a=>a.folder_id===folder.id).map(a=>state.collections.find(c=>c.id===a.collection_id)).filter(Boolean);grid.append(h('section.card.study-card',[h('div.folder-icon',{text:'▱'}),h('div.eyebrow',{text:folder.path}),h('h3',{text:folder.name}),h('p.muted',{text:collections.length+' collections · '+collections.reduce((n,c)=>n+c.games,0)+' games'}),...collections.map(c=>button(c.name+'  ('+c.games+')',()=>{state.filters={collection:String(c.id)};state.offset=0;go('database');})),h('div.toolbar',[button('Add collection',()=>assignDialog(folder)),button('Subfolder',()=>folderDialog(folder.id)),button('Delete',()=>deleteFolderDialog(folder),'danger')])]));}
-    const collections=h('div.card-pad');for(const c of state.collections)collections.append(h('div.context-item',[h('b',{text:c.name+' · '+c.games+' games'}),h('div.toolbar',[button('Browse',()=>{state.filters={collection:String(c.id)};state.offset=0;go('database');}),button('Index positions',async()=>{await api('study/index',{collection:c.id});App.toast('Position indexing started');watchIndex();}),h('a.btn',{href:'/api/collections/'+c.id+'/pgn',download:c.name+'.pgn',text:'Export PGN'})])]));const status=h('p.status-message');collections.append(status);content.append(h('div',{style:{marginTop:'24px'}},[card('Collections & position indexing',collections)]));
+    const collections=h('div.card-pad');for(const c of state.collections)collections.append(h('div.context-item',[h('b',{text:c.name+' · '+c.games+' games'}),h('div.toolbar',[button('Browse',()=>{state.filters={collection:String(c.id)};state.offset=0;go('database');}),button('Index positions',async()=>{await api('study/index',{collection:c.id});App.toast('Position indexing started');watchIndex();}),h('a.btn',{href:'/api/collections/'+c.id+'/pgn',download:c.name+'.pgn',text:'Export PGN'}),button('Delete',()=>collectionDeleteDialog(c),'danger')])]));const status=h('p.status-message');collections.append(status);content.append(h('div',{style:{marginTop:'24px'}},[card('Collections & position indexing',collections)]));
     function watchIndex(){clearInterval(poll);poll=setInterval(act(async()=>{const s=await api('study/index');status.textContent=s.running?`Indexing ${s.collection}: ${s.done} / ${s.total} games`:`Indexed ${s.done} games; ${s.errors} could not be indexed.`;if(s.error)status.textContent=s.error;if(!s.running)clearInterval(poll);}),700);}if((await api('study/index')).running)watchIndex();}
   function folderDialog(parent){modal('Create a study folder',(body,close)=>{const name=h('input',{placeholder:'e.g. Autumn tournament preparation'}),parents=select([['','Top level'],...state.folders.map(f=>[String(f.id),f.path])],parent?String(parent):'');body.append(field('Folder name',name),field('Inside',parents),h('div.dialog-actions',[button('Cancel',close),button('Create folder',async()=>{await api('study/folders',{name:name.value,parent_id:parents.value?Number(parents.value):null});close();go('studies');},'primary')]));});}
   function deleteFolderDialog(folder){
@@ -345,15 +605,32 @@
     });
   }
   function collectionDialog(){modal('Create a collection',(body,close)=>{const name=h('input',{placeholder:'e.g. My annotated tournament games'});body.append(field('Collection name',name),h('div.dialog-actions',[button('Cancel',close),button('Create',async()=>{await api('collections',{name:name.value});close();go('studies');},'primary')]));});}
+  function collectionDeleteDialog(c){
+    modal('Delete '+c.name+'?',(body,close)=>{
+      const files=h('input',{type:'checkbox'});
+      body.append(h('p',{text:c.games?'This removes '+c.games.toLocaleString()+' games from your library index, the collection itself, and any position index built from it.':'This collection holds no games.'}),
+        field('Also delete this collection\u2019s PGN files on disk',files),
+        h('p.muted',{text:'Left unticked, the original PGN text stays in your library folder and only the index entries go. Study folders that referenced this collection are rewritten either way.'}),
+        h('div.dialog-actions',[button('Cancel',close),button('Delete collection',async()=>{
+          await api('collections/'+c.id+(files.checked?'?files=1':''),null,'DELETE');close();
+          App.toast(c.name+' deleted');await go('studies');},'danger')]));
+    });
+  }
   function assignDialog(folder){modal('Add a collection to '+folder.name,(body,close)=>{const choices=select(state.collections.map(c=>[String(c.id),c.name]),String(state.collections[0]?.id||''));body.append(field('Collection',choices),h('p.muted',{text:'A collection belongs to one study folder. Its PGN remains in the library’s collections directory; the folder manifest records its location.'}),h('div.dialog-actions',[button('Cancel',close),button('Save',async()=>{if(!choices.value)throw new Error('Create a collection first.');await api('study/assign',{folder_id:folder.id,collection_id:Number(choices.value)});close();go('studies');},'primary')]));});}
-  async function imports(){await importHistory();content.append(heading('Bring your chess home','Import games','PGN files, master collections, and your own online games — together in one library.'));const collection=h('input',{value:'My games'}),status=h('div.status-message'),pgn=h('textarea',{rows:9,placeholder:'Paste one game or an entire collection in PGN format…'}),files=h('input',{type:'file',accept:'.pgn',multiple:true});
+  async function imports(){await importHistory();content.append(heading('Bring your chess home','Import games','PGN files, master collections, and your own online games — together in one library.'));const collection=h('input',{placeholder:'e.g. Tournament games'}),status=h('div.status-message'),pgn=h('textarea',{rows:9,placeholder:'Paste one game or an entire collection in PGN format…'}),files=h('input',{type:'file',accept:'.pgn',multiple:true});
+    // The file names itself; a name you typed yourself is never overwritten.
+    let namedByHand=false;collection.addEventListener('input',()=>{namedByHand=true;});
+    files.addEventListener('change',()=>{if(!files.files.length)return;
+      if(!namedByHand||!collection.value.trim())collection.value=files.files[0].name.replace(/\.[^.]*$/,'').trim()||'Imported games';});
     async function imported(data){status.textContent=`Added ${data.added} games · ${data.duplicates} duplicates · ${data.skipped||0} skipped`;await refreshMeta();await importHistory();}
-    const paste=card('PGN files & clipboard',h('div.card-pad',[field('Save into collection',collection),field('Choose PGN files',files),pgn,h('div.toolbar',{style:{marginTop:'12px'}},[button('Import PGN',async()=>{status.textContent='Importing…';if(files.files.length){let totals={added:0,duplicates:0,skipped:0};for(const f of files.files){const result=await api('games',{pgn:await f.text(),collection:collection.value});for(const k of Object.keys(totals))totals[k]+=result[k]||0;}await imported(totals);}else await imported(await api('games',{pgn:pgn.value,collection:collection.value}));},'primary')]),status]));
-    const source=select([['lichess','lichess'],['chesscom','chess.com']],'lichess'),user=h('input',{placeholder:'Username'}),max=h('input',{type:'number',value:100,min:1,max:2000}),token=h('input',{type:'password',placeholder:'Optional lichess token',autocomplete:'off'}),onlineStatus=h('p.status-message');
-    const online=card('Your online games',h('div.card-pad',[field('Service',source),field('Username',user),field('Maximum games',max),field('lichess token',token),button('Import account games',async()=>{onlineStatus.textContent='Downloading games…';const result=await api('import/'+source.value,{user:user.value,max:Number(max.value),token:token.value,collection:collection.value});onlineStatus.textContent=`Added ${result.added} games · ${result.duplicates} duplicates`;},'primary'),onlineStatus,h('p.muted',{text:'Downloads need a connection. Imported games stay available offline.'})]));
-    const path=h('input',{placeholder:'C:\\Chess\\TWIC or https://…/games.zip'}),pathStatus=h('p.status-message');const bulk=card('Archives, folders & URLs',h('div.card-pad',[field('Local path or URL',path),h('p.muted',{text:'Stream PGN, ZIP, GZ, BZ2 or optional ZST archives. A folder is scanned recursively. For CBH, CBV and SI4, export to PGN in the originating application.'}),button('Import source',async()=>{pathStatus.textContent='Reading source…';const result=await api('import/source',{path:path.value,collection:collection.value});pathStatus.textContent=`Added ${result.added} games · ${result.duplicates} duplicates`;},'primary'),pathStatus]));content.append(h('div.settings-grid',[paste,h('div.section-stack',[online,bulk])]));}
+    const paste=card('PGN files & clipboard',h('div.card-pad',[field('Collection name (required)',collection),field('Choose PGN files',files),pgn,h('div.toolbar',{style:{marginTop:'12px'}},[button('Import PGN',async()=>{if(!collection.value.trim())throw new Error('Name the collection these games should go into.');status.textContent='Importing…';watchImport();if(files.files.length){let totals={added:0,duplicates:0,skipped:0};for(const f of files.files){const result=await api('games',{pgn:await f.text(),collection:collection.value});for(const k of Object.keys(totals))totals[k]+=result[k]||0;}await imported(totals);}else await imported(await api('games',{pgn:pgn.value,collection:collection.value}));},'primary')]),status]));
+    const source=select([['lichess','lichess'],['chesscom','chess.com']],'lichess'),online_collection=h('input',{value:'lichess imports'}),user=h('input',{placeholder:'Username'}),max=h('input',{type:'number',value:100,min:1,max:2000}),token=h('input',{type:'password',placeholder:'Optional lichess token',autocomplete:'off'}),onlineStatus=h('p.status-message');
+    let onlineNamedByHand=false;online_collection.addEventListener('input',()=>{onlineNamedByHand=true;});
+    source.addEventListener('change',()=>{if(!onlineNamedByHand)online_collection.value=source.value==='lichess'?'lichess imports':'chess.com imports';});
+    const online=card('Your online games',h('div.card-pad',[field('Service',source),field('Collection name',online_collection),field('Username',user),field('Maximum games',max),field('lichess token',token),button('Import account games',async()=>{onlineStatus.textContent='Downloading games…';watchImport();if(!online_collection.value.trim())throw new Error('Name the collection these games should go into.');const result=await api('import/'+source.value,{user:user.value,max:Number(max.value),token:token.value,collection:online_collection.value.trim()});onlineStatus.textContent=`Added ${result.added} games · ${result.duplicates} duplicates`;},'primary'),onlineStatus,h('p.muted',{text:'Downloads need a connection. Imported games stay available offline.'})]));
+    const path=h('input',{placeholder:'C:\\Chess\\TWIC or https://…/games.zip'}),pathStatus=h('p.status-message');const bulk=card('Archives, folders & URLs',h('div.card-pad',[field('Local path or URL',path),h('p.muted',{text:'Stream PGN, ZIP, GZ, BZ2 or optional ZST archives. A folder is scanned recursively. For CBH, CBV and SI4, export to PGN in the originating application.'}),button('Import source',async()=>{pathStatus.textContent='Reading source…';watchImport();const result=await api('import/source',{path:path.value,collection:collection.value});pathStatus.textContent=`Added ${result.added} games · ${result.duplicates} duplicates`;},'primary'),pathStatus]));content.append(h('div.settings-grid',[paste,h('div.section-stack',[online,bulk])]));}
   async function masters(){await mentorSearch();content.append(heading('Learn from the great games','Master games','Build your own reference library from freely available PGN collections.'));const week=h('input',{type:'number',placeholder:'TWIC issue number',min:1}),status=h('p.status-message');content.append(h('div.cards-grid',[
-    h('section.card.study-card',[h('div.eyebrow',{text:'Weekly tournament games'}),h('h3',{text:'The Week in Chess'}),h('p.muted',{text:'Choose an issue to download its PGN archive into your Masters collection.'}),field('Issue number',week),button('Import issue',async()=>{if(!Number(week.value))throw new Error('Enter a TWIC issue number.');status.textContent='Downloading and importing…';const r=await api('import/source',{path:'https://theweekinchess.com/zips/twic'+Number(week.value)+'g.zip',collection:'Masters / TWIC'});status.textContent=`${r.added} games added · ${r.duplicates} duplicates`;},'primary'),status,link('Browse TWIC issues','https://theweekinchess.com/twic')]),
+    h('section.card.study-card',[h('div.eyebrow',{text:'Weekly tournament games'}),h('h3',{text:'The Week in Chess'}),h('p.muted',{text:'Choose an issue to download its PGN archive into your Masters collection.'}),field('Issue number',week),button('Import issue',async()=>{if(!Number(week.value))throw new Error('Enter a TWIC issue number.');status.textContent='Downloading and importing…';watchImport();const r=await api('import/source',{path:'https://theweekinchess.com/zips/twic'+Number(week.value)+'g.zip',collection:'Masters / TWIC'});status.textContent=`${r.added} games added · ${r.duplicates} duplicates`;},'primary'),status,link('Browse TWIC issues','https://theweekinchess.com/twic')]),
     h('section.card.study-card',[h('div.eyebrow',{text:'Players & tournaments'}),h('h3',{text:'PGN Mentor'}),h('p.muted',{text:'Find a player or event collection, then paste its download URL in Online & imports.'}),link('Browse free PGN collections','https://www.pgnmentor.com/files.html'),button('Import a collection',()=>go('imports'))]),
     h('section.card.study-card',[h('div.eyebrow',{text:'Your offline reference'}),h('h3',{text:'Explore by position'}),h('p.muted',{text:'After import, index a collection from Study folders. The analysis board will show continuations, results, and the earliest dated games at each position.'}),button('Manage position indexes',()=>go('studies'))]) ]));}
   async function tactics(){content.append(heading('Recognize the opportunity','Tactics','Train online with Chess Tempo, or work through your own local problem sets.'));const grid=h('div.cards-grid');content.append(grid);grid.append(h('section.card.study-card',[h('div.eyebrow',{text:'Chess Tempo'}),h('h3',{text:'Your tactics trainer'}),h('p.muted',{text:'We recommend Chess Tempo as the best place to train tactics. Use your own account and training history. The native app opens the trainer in its own embedded window.'}),button('Open Chess Tempo',async()=>{if(window.pywebview?.api?.open_tactics)await window.pywebview.api.open_tactics();else window.open('https://chesstempo.com/chess-tactics/','_blank','noopener');},'primary')]));const puzzles=state.collections.filter(c=>c.kind==='puzzles'||/tactic|puzzle|problem/i.test(c.name));grid.append(h('section.card.study-card',[h('div.eyebrow',{text:'Offline problem sets'}),h('h3',{text:'Train your own positions'}),h('p.muted',{text:'Import your authorized PGN exports into a collection named Tactics. Open a problem and choose Train blindfolded to recall its solution.'}),button('Import problem set',()=>go('imports')),...puzzles.map(c=>button(c.name+' · '+c.games,()=>{state.filters={collection:String(c.id)};go('database');}))]));}
@@ -384,7 +661,11 @@
       h('div',[h('div.nav-label',{text:'Workspace'}),nav]),h('div.sidebar-foot',[h('img',{src:'assets/caissa-128.png',alt:'Caissa',width:48,height:48}),h('b',{text:'Your chess. Your library.'}),h('span',{text:'Local files · portable PGN'})])]),
       h('div.desk',[h('header.desk-top',[h('div.crumb',['Workspace  /  ',crumb]),h('span.local-badge',{text:'Local library'})]),content]));
     try{const pref=await api('settings/appearance');state.prefs=JSON.parse(pref.value||'{}');}catch(err){/* Defaults remain usable if settings are unavailable. */}applyPrefs();
-    window.Caissa={state,api,go,serialize,openGame};window.addEventListener('beforeunload',e=>{if(state.dirty){e.preventDefault();e.returnValue='';}});
+    window.Caissa={state,api,go,serialize,openGame};window.addEventListener('beforeunload',e=>{
+      if(state.boards.length){stashBoard();state.prefs.analysisLayout=state.boards[0].layout;
+        fetch('/api/settings/appearance',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:JSON.stringify(state.prefs)}),keepalive:true}).catch(()=>{});}
+      if(state.dirty||state.boards.some(b=>b.dirty)){e.preventDefault();e.returnValue='';}});
+    watchImport();
     await go(initial.startsWith('#workspace/')?initial.split('/')[1]:'database');
   });
 })();

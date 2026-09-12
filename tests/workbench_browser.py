@@ -64,8 +64,28 @@ with tempfile.TemporaryDirectory(prefix='caissa-browser-') as data:
             page.get_by_text('White to move: draw',exact=True).wait_for()
             page.get_by_role('button',name='Analyze',exact=True).click()
             page.wait_for_selector('.engine-line',timeout=30000)
-            page.wait_for_function('document.querySelector(".section-stack").textContent.includes("Memory")')
+            page.wait_for_function('document.querySelector(".dock-main").textContent.includes("Memory")')
             page.get_by_label('Live analysis',exact=True).uncheck()
+            # Annotations land in the game as they are typed - there is no Keep button.
+            assert page.get_by_role('button',name='Keep annotation').count()==0
+            page.get_by_label('Position comment',exact=True).fill('key idea')
+            page.wait_for_function('Caissa.state.node.comment==="key idea"')
+            # Panels hide and cross between the two docks, and each tab keeps its own layout.
+            assert page.locator('.dock-main [data-panel=notation]').count()==1
+            page.locator('[data-panel=tags] .panel-btn[aria-label="Hide Game tags"]').click()
+            assert page.locator('[data-panel=tags]').count()==0
+            page.locator('[data-panel=notation] .panel-btn[aria-label="Move Notation to the other column"]').click()
+            assert page.locator('.dock-side [data-panel=notation]').count()==1
+            page.get_by_role('button',name='New analysis board',exact=True).click()
+            page.wait_for_function('document.querySelectorAll(".board-tab").length===2')
+            # A new tab starts from the remembered arrangement, not the neighbour's edits.
+            assert page.locator('.dock-main [data-panel=notation]').count()==1,'new tab uses the saved layout'
+            assert page.locator('[data-panel=tags]').count()==1
+            page.locator('.board-tab').first.locator('.tab-label').click()
+            page.wait_for_function('document.querySelector(".dock-side [data-panel=notation]")!==null')
+            assert page.locator('[data-panel=tags]').count()==0,'each tab restores its own layout'
+            page.locator('.board-tab').nth(1).locator('.tab-close').click()
+            page.wait_for_function('document.querySelectorAll(".board-tab").length===1')
             page.evaluate('Caissa.go("settings")')
             page.get_by_label('Dark theme',exact=True).check()
             page.wait_for_function('document.body.classList.contains("dark-theme")')
@@ -107,9 +127,36 @@ with tempfile.TemporaryDirectory(prefix='caissa-browser-') as data:
                 page.evaluate('(view)=>Caissa.go(view)',view)
                 assert page.locator('.view-error').count()==0,view
             page.evaluate('''async()=>{await Caissa.api('games',{pgn:'[Event "Delete me"]\\n[White "Match"]\\n[Result "*"]\\n\\n1. e4 e5 *'});Caissa.state.filters={event:'Delete me'};await Caissa.go('database');}''')
+            before=page.locator('.stat-grid .metric strong').first.inner_text()
             page.get_by_role('button',name='Delete matching games',exact=True).click()
             page.get_by_role('button',name='Delete 1 games',exact=True).click()
             page.wait_for_function('document.querySelector(".pagination").textContent.includes("0 games")')
+            # The library total is a whole-library count, so it has to fall without a reload.
+            page.wait_for_function('(was)=>document.querySelector(".stat-grid .metric strong").textContent!==was',arg=before)
+            assert page.locator('.stat-grid .metric strong').first.inner_text()=='0',page.locator('.stat-grid').inner_text()
+            # An import started in one view has to land in the database without a reload,
+            # even when the user walks away from the view that kicked it off.
+            page.evaluate('Caissa.go("imports")')
+            page.get_by_label('Collection name (required)',exact=True).fill('Fresh import')
+            page.locator('#workspace textarea').first.fill('[Event "Fresh"]\n[White "Alpha"]\n[Black "Beta"]\n[Result "1-0"]\n\n1. d4 d5 1-0')
+            page.get_by_role('button',name='Import PGN',exact=True).click()
+            page.evaluate('Caissa.state.filters={};Caissa.go("database")')
+            page.wait_for_function('document.querySelector(".stat-grid .metric strong").textContent==="1"',timeout=20000)
+            assert page.locator('.player-name').inner_text()=='Alpha - Beta'.replace('-','\u2014'),'the imported game is listed straight away'
+            # Opening names and their ECO span are offered from the library itself.
+            page.get_by_role('button',name='Filters',exact=True).click()
+            page.get_by_label('Colour',exact=True).select_option('white')
+            page.get_by_label('Outcome',exact=True).select_option('win')
+            page.get_by_label('Player',exact=True).fill('Alpha')
+            page.get_by_role('button',name='Apply',exact=True).click()
+            page.wait_for_function('Caissa.state.filters.outcome==="win"')
+            matched=page.evaluate('async()=>(await Caissa.api("games?"+new URLSearchParams({...Caissa.state.filters,limit:1,offset:0}))).total')
+            assert matched==1,matched
+            assert page.evaluate('Caissa.state.filters.white')=='Alpha'
+            assert page.evaluate('Caissa.state.filters.outcome')=='win'
+            page.get_by_role('button',name='Filters',exact=True).click()
+            page.get_by_role('button',name='Clear all fields',exact=True).click()
+            page.wait_for_function('Object.keys(Caissa.state.filters).length===0')
             page.evaluate('''async()=>{Caissa.state.dirty=false;await Caissa.go('analysis');}''')
             page.get_by_role('button',name='Reset board',exact=True).click()
             page.wait_for_function('Caissa.state.node.fenAfter === Chess.DEFAULT_FEN')
@@ -124,7 +171,7 @@ with tempfile.TemporaryDirectory(prefix='caissa-browser-') as data:
                 result=page.locator('#results').inner_text()
                 assert 'FAIL' not in result and 'no uncaught errors' in result,result
             assert not errors,errors
-            print('PASS: final preview, navigation, arrows, resize, editor, tablebase, live engine, appearance, import undo, bulk delete, reset, persistence, workspace and trainer smokes')
+            print('PASS: final preview, navigation, arrows, resize, editor, tablebase, live engine, live annotation, panels, board tabs, appearance, import undo, bulk delete, reset, persistence, workspace and trainer smokes')
             browser.close()
     finally:
         server.api.live.stop()
