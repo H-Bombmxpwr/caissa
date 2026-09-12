@@ -1,9 +1,10 @@
-"""Your openings, judged by how they actually went.
+"""One player's openings, judged by how they actually went.
 
-A reference database answers "what do strong players play here". This answers a
-different and more useful question: *when you played this, what happened to you*.
-Every number here is from the chosen player's side of the board, so a 38% score is
-38% for them, not for White.
+A reference database answers "what is played here". This answers a different and
+often more useful question: *when this player played it, what happened to them*.
+That player may be the reader, and may just as easily be Fischer or whoever a
+collection was imported for. Every number is from the named player's side of the
+board, so a 38% score is 38% for them, not for White.
 
 It reads the position index, so a collection has to be indexed before it has
 anything to say. Two things fall out of that design:
@@ -14,7 +15,7 @@ anything to say. Two things fall out of that design:
   every game, so walking twenty moves deep is the same query as walking one.
 
 The weakest-line scan is the part worth explaining. Ranking by score alone surfaces
-a 0% line played twice; ranking by volume surfaces your main line, which is fine.
+a 0% line played twice; ranking by volume surfaces the main line, which is no news.
 What a reader wants is where the points actually went, so lines are ranked by
 *points dropped* — games multiplied by the shortfall against an even score — and a
 line has to clear a minimum number of games before it is listed at all.
@@ -189,7 +190,7 @@ def _tally(rows):
 
 
 def position(library, fen, filters):
-    """What happened from this position, move by move, from the report's side."""
+    """What happened from this position, move by move, from the named player's side."""
     key = Chess(fen).key()
     inner, params = _rows_sql(filters, "p.hash = ?", [key])
     scored = _scored(inner)
@@ -297,7 +298,7 @@ def _collapse(entries):
       reports those same seven games, so an uncollapsed list is one answer printed
       five times at increasing depth. Only the deepest of such a chain is kept,
       because that is the one that names the line rather than gesturing at it.
-    * **Pure aggregates.** "1.e4 cost you 3.5 points" is just its children added up.
+    * **Pure aggregates.** "1.e4 cost 3.5 points" is just its children added up.
       A node is dropped when the lines kept beneath it account for all of its games;
       if some of its games are not explained further down, it stays.
     """

@@ -46,11 +46,11 @@ library/
   books/              PDFs you have added
 ```
 
-:::{important}
-`library.db` is an *index*, not the library. Every game is a run of bytes inside a
-`games.pgn` file, and the database only records where. If the index is lost you have
-lost search, not chess — re-import the PGN files and everything comes back.
-:::
+> **Important**
+>
+> `library.db` is an *index*, not the library. Every game is a run of bytes inside a
+> `games.pgn` file, and the database only records where. If the index is lost you have
+> lost search, not chess — re-import the PGN files and everything comes back.
 
 Move the library somewhere else from **Settings → Storage folder**. The change takes
 effect at the next launch, and the current library stays active until then.

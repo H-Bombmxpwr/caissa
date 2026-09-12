@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Caissa — a desktop chess workbench</title>
+<meta name="description" content="A desktop chess workbench. Your games as ordinary PGN on your own disk, analysed by a bundled Stockfish.">
+<link rel="icon" href="/assets/caissa-128.png">
+<style>
+  :root{
+    --bg:#fbfaf5; --card:#fffefb; --ink:#23281f; --dim:#6a7667;
+    --line:#e3e5d8; --accent:#315e48; --accent-ink:#fffdf3;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{--bg:#171c19; --card:#1f2622; --ink:#e6ebe3; --dim:#a3ada0;
+          --line:#333d36; --accent:#8fc0a0; --accent-ink:#12201a;}
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+  .wrap{max-width:760px;margin:0 auto;padding:64px 20px 80px}
+  header{text-align:center}
+  header img{width:104px;height:104px}
+  h1{font:700 44px/1.1 Georgia,"Times New Roman",serif;margin:18px 0 6px;letter-spacing:-.5px}
+  .tagline{font-size:19px;color:var(--dim);margin:0 auto 8px;max-width:30ch}
+  .lede{color:var(--dim);max-width:56ch;margin:22px auto 0}
+  .download{display:flex;flex-direction:column;align-items:center;gap:12px;margin:38px 0 10px}
+  .btn{display:inline-flex;align-items:center;gap:10px;background:var(--accent);
+    color:var(--accent-ink);text-decoration:none;font-weight:600;font-size:17px;
+    padding:15px 30px;border-radius:10px;border:1px solid var(--accent)}
+  .btn:hover{filter:brightness(1.07)}
+  .btn svg{width:20px;height:20px;fill:currentColor}
+  .others{font-size:14px;color:var(--dim)}
+  .others a{color:inherit}
+  .note{font-size:13px;color:var(--dim);text-align:center;margin-top:6px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
+    gap:14px;margin:46px 0 0}
+  .cell{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:18px 20px}
+  .cell h3{margin:0 0 6px;font-size:15px}
+  .cell p{margin:0;font-size:14px;color:var(--dim)}
+  .links{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:40px}
+  .links a{border:1px solid var(--line);background:var(--card);color:var(--ink);
+    text-decoration:none;padding:10px 18px;border-radius:8px;font-size:14px}
+  .links a:hover{border-color:var(--accent)}
+  footer{text-align:center;color:var(--dim);font-size:13px;margin-top:48px}
+  footer a{color:inherit}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <img src="/assets/caissa-128.png" alt="Caissa, muse of chess">
+    <h1>Caissa</h1>
+    <p class="tagline">A desktop chess workbench — a lighter ChessBase.</p>
+    <p class="lede">
+      Your games stay on your own disk as ordinary PGN. A bundled Stockfish analyses them,
+      the explorer walks your openings and shows how they actually went, and your
+      repertoire drills itself. No account, no cloud library, no telemetry.
+    </p>
+  </header>
+
+  <div class="download">
+    <a class="btn" id="download" href="https://github.com/H-Bombmxpwr/caissa/releases/latest">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v10.6l3.3-3.3 1.4 1.4L12 17.4l-4.7-5.7 1.4-1.4 3.3 3.3V3h2zM5 19h14v2H5z"/></svg>
+      <span id="download-label">Download</span>
+    </a>
+    <p class="others">
+      Also for
+      <a href="https://github.com/H-Bombmxpwr/caissa/releases/latest">Windows, macOS and Linux</a>
+      · <a href="https://github.com/H-Bombmxpwr/caissa#install">run from source</a>
+    </p>
+    <p class="note" id="note"></p>
+  </div>
+
+  <div class="grid">
+    <div class="cell">
+      <h3>A database you own</h3>
+      <p>PGN files in folders you can read and back up. The index is only an index.</p>
+    </div>
+    <div class="cell">
+      <h3>Openings, judged</h3>
+      <p>Walk a collection's tree and see the score, the trend, and where the points went.</p>
+    </div>
+    <div class="cell">
+      <h3>Repertoires that drill</h3>
+      <p>A lichess study becomes spaced-repetition lines you play blindfold.</p>
+    </div>
+    <div class="cell">
+      <h3>Works offline</h3>
+      <p>The engine, your games, the opening book and every exercise need no connection.</p>
+    </div>
+  </div>
+
+  <div class="links">
+    <a href="https://h-bombmxpwr.github.io/caissa/">Documentation</a>
+    <a href="https://h-bombmxpwr.github.io/caissa/guide/getting-started.html">Getting started</a>
+    <a href="https://github.com/H-Bombmxpwr/caissa">Source on GitHub</a>
+  </div>
+
+  <footer>
+    Free software under the GPLv3. Built on
+    <a href="https://github.com/official-stockfish/Stockfish">Stockfish</a> and the open
+    work of <a href="https://lichess.org">lichess</a>.
+  </footer>
+
+</div>
+
+<script>
+// Offer the build for the visitor's machine, without hiding the other two: a guess
+// from the user agent is a good default and a bad certainty.
+(function () {
+  var base = 'https://github.com/H-Bombmxpwr/caissa/releases/latest/download/';
+  var ua = navigator.userAgent;
+  var platform = (navigator.userAgentData && navigator.userAgentData.platform) || ua;
+  var builds = {
+    windows: ['Caissa-windows-x64.zip', 'Download for Windows',
+              'Windows may warn about an unsigned app — choose More info, then Run anyway.'],
+    macos:   ['Caissa-macos-arm64.zip', 'Download for macOS',
+              'Not notarised yet, so the first launch needs right-click → Open.'],
+    linux:   ['Caissa-linux-x64.tar.gz', 'Download for Linux',
+              'Needs WebKitGTK: sudo apt install gir1.2-webkit2-4.1 python3-gi.']
+  };
+  var pick = /Win/i.test(platform) ? 'windows'
+           : /Mac|iPhone|iPad/i.test(platform) ? 'macos'
+           : /Linux|X11|Android/i.test(platform) ? 'linux' : null;
+  if (!pick) return;                       // unknown: the button keeps its releases link
+  var build = builds[pick];
+  document.getElementById('download').href = base + build[0];
+  document.getElementById('download-label').textContent = build[1];
+  document.getElementById('note').textContent = build[2];
+})();
+</script>
+</body>
+</html>

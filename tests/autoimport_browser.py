@@ -13,7 +13,9 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / 'tests'))
 from playwright.sync_api import sync_playwright
+from browser_util import wait_until, wait_for_index
 
 ACCOUNT = {'username': 'Ada', 'id': 'ada', 'title': None, 'url': 'https://lichess.org/@/Ada',
            'scopes': ['study:read'], 'can_read_studies': True}
@@ -71,13 +73,14 @@ with tempfile.TemporaryDirectory(prefix='caissa-autoimport-') as data:
                 page.fill('.autoimport input[aria-label="Collection"]', 'Blitz')
                 page.locator('.autoimport input[aria-label="Collection"]').dispatch_event('change')
                 page.get_by_label('Rated games only').check()
-                page.wait_for_function(
+                wait_until(page,
                     '''async()=>{const s=await Caissa.api('lichess/autoimport');
-                       return s.interval_minutes===60&&s.collection==='Blitz'&&s.rated_only===true;}''')
+                       return s.interval_minutes===60&&s.collection==='Blitz'&&s.rated_only===true;}''',
+                    what='interval, collection and rated_only to all persist')
 
                 # "Check now" imports and reports, and the games land in the collection.
                 page.get_by_role('button', name='Check lichess now', exact=True).click()
-                page.wait_for_function(
+                wait_until(page, 
                     '''async()=>((await Caissa.api('games?'+new URLSearchParams({collection:'Blitz'}))).total)===2''')
                 page.wait_for_function(
                     '''()=>document.querySelector('.autoimport .status-message').textContent.includes('2 games imported')''')
@@ -94,7 +97,7 @@ with tempfile.TemporaryDirectory(prefix='caissa-autoimport-') as data:
 
                 # Switching it off stops the watcher and hides the options again.
                 page.get_by_label('Import my games as they are played').uncheck()
-                page.wait_for_function('''async()=>{const s=await Caissa.api('lichess/autoimport');
+                wait_until(page, '''async()=>{const s=await Caissa.api('lichess/autoimport');
                                           return s.enabled===false&&s.running===false;}''')
                 assert page.locator('.autoimport select[aria-label="How often"]').is_visible() is False
 

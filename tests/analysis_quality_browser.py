@@ -7,9 +7,11 @@ import threading
 from functools import partial
 from http.server import ThreadingHTTPServer
 from playwright.sync_api import sync_playwright
+from browser_util import wait_until, wait_for_index
 
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
+sys.path.insert(0,str(ROOT/'tests'))
 PGN='''[Event "Annotated model game"]
 [White "Alpha"]
 [Black "Beta"]
@@ -95,7 +97,7 @@ with tempfile.TemporaryDirectory(prefix='caissa-quality-') as data:
             page.get_by_role('button',name='Expand all',exact=True).click()
             page.screenshot(path=str(ROOT/'tmp/study-hierarchy.png'),full_page=True)
             page.evaluate('''async()=>{await Caissa.api('study/index',{collection:window.__qualityCollection});await Caissa.go('analysis');}''')
-            page.wait_for_function('async()=>!(await Caissa.api("study/index")).running')
+            wait_until(page, 'async()=>!(await Caissa.api("study/index")).running')
             page.get_by_role('button',name='Library',exact=True).click()
             page.get_by_label('Example search',exact=True).fill('Teacher')
             page.get_by_role('button',name='Find examples',exact=True).click()

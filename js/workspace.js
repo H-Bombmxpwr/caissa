@@ -1133,25 +1133,32 @@
       if(seconds<5400)return Math.round(seconds/60)+' minutes ago';
       return Math.round(seconds/3600)+' hours ago';
     }
-    function show(data){
-      enabled.checked=!!data.enabled;every.value=String(data.interval_minutes);
-      collection.value=data.collection;most.value=String(data.max_games);
-      rated.checked=!!data.rated_only;indexAfter.checked=!!data.index_after;
-      options.hidden=!data.enabled;
+    // Controls are only filled from the server on the first read. Echoing every
+    // response back into them makes a second change race the first one's reply and
+    // lose it — and makes the inputs jump under the reader's hands.
+    function show(data,initial){
+      if(initial){
+        enabled.checked=!!data.enabled;every.value=String(data.interval_minutes);
+        collection.value=data.collection;most.value=String(data.max_games);
+        rated.checked=!!data.rated_only;indexAfter.checked=!!data.index_after;
+      }
+      options.hidden=!enabled.checked;
       const brought=data.total_added===1?'1 game':data.total_added+' games';
       report.textContent=data.last_error?'Last check failed: '+data.last_error
         :data.enabled?'Watching '+(data.user||'your account')+' · last checked '+ago(data.last_checked)
           +' · '+brought+' imported since this app started'
         :'Off. Your games arrive only when you import them by hand.';
     }
-    async function save(changes){show(await api('lichess/autoimport',changes,'PUT'));}
-    enabled.addEventListener('change',act(()=>save({enabled:enabled.checked})));
-    every.addEventListener('change',act(()=>save({interval_minutes:Number(every.value)})));
-    most.addEventListener('change',act(()=>save({max_games:Number(most.value)})));
-    collection.addEventListener('change',act(()=>save({collection:collection.value})));
-    rated.addEventListener('change',act(()=>save({rated_only:rated.checked})));
-    indexAfter.addEventListener('change',act(()=>save({index_after:indexAfter.checked})));
-    api('lichess/autoimport').then(show).catch(err=>{report.textContent=err.message;});
+    // Send the whole form on any change, so two quick edits cannot overwrite each other.
+    async function save(){
+      show(await api('lichess/autoimport',{
+        enabled:enabled.checked,interval_minutes:Number(every.value),
+        collection:collection.value,max_games:Number(most.value),
+        rated_only:rated.checked,index_after:indexAfter.checked},'PUT'));
+    }
+    for(const control of [enabled,every,most,collection,rated,indexAfter])
+      control.addEventListener('change',act(save));
+    api('lichess/autoimport').then(data=>show(data,true)).catch(err=>{report.textContent=err.message;});
     return root;
   }
   async function lichessAccount(){
@@ -1276,6 +1283,9 @@
     LibraryTools.init({h,api,button,field,select,heading,openGame,resizeBoard,
       // From a node in the tree to the games that made it, without retyping a FEN.
       browsePosition:fen=>{state.filters={position:fen,kind:''};state.offset=0;return go('database');},
+      // The explorer keeps its own orientation, separate from the analysis board's.
+      explorerOrientation:()=>state.prefs.explorerOrientation||state.prefs.orientation||'w',
+      saveExplorerOrientation:act(async side=>{state.prefs.explorerOrientation=side;await savePrefs();}),
       analyzeFen:fen=>{
       stashBoard();state.boards.splice(++state.boardIndex,0,makeBoard());adoptBoard(state.boardIndex);
       state.parsed=PGN.parse('[Event "Opening exploration"]\n[White "White"]\n[Black "Black"]\n[SetUp "1"]\n[FEN "'+fen+'"]\n[Result "*"]\n\n*');state.node=state.parsed.root;state.selected=null;state.dirty=true;stashBoard();return go('analysis');
@@ -1283,10 +1293,15 @@
     const initial=location.hash;const originalGo=go; // App boots first so the original trainer stays intact.
     const root=document.getElementById('workspace');nav=h('nav.module-nav',{'aria-label':'Workspace'});
     modules.forEach(([id,icon,title])=>{const b=h('button',{onclick:()=>{if(state.analysisCleanup){state.analysisCleanup();state.analysisCleanup=null;}go(id);}},[h('span',{'aria-hidden':true,text:icon}),title]);b.dataset.view=id;nav.append(b);});
-    crumb=h('strong',{text:'Database'});content=h('div.desk-body');root.append(h('aside.sidebar',[
+    // The same masthead the trainer has always had, so every section is branded the
+    // same way instead of one reading "Workspace / Database" and another "Caissa".
+    crumb=h('span.tag',{text:'Database'});content=h('div.desk-body');root.append(h('aside.sidebar',[
       h('div.caissa-brand',[h('img',{src:'assets/caissa-128.png',alt:'Caissa, muse of chess'}),h('div',[h('strong',{text:'Caissa'}),h('small',{text:'THE CHESS STUDY'})])]),
       h('div',[h('div.nav-label',{text:'Workspace'}),nav]),h('div.sidebar-foot',[h('img',{src:'assets/caissa-128.png',alt:'Caissa',width:48,height:48}),h('b',{text:'Your chess. Your library.'}),h('span',{text:'Local files · portable PGN'})])]),
-      h('div.desk',[h('header.desk-top',[h('div.crumb',['Workspace  /  ',crumb]),h('span.local-badge',{text:'Local library'})]),content]));
+      h('div.desk',[h('header.desk-top',[
+        h('div.brand',[h('img.brand-mark',{src:'assets/caissa-128.png',alt:'',width:28,height:28}),
+          h('span.logo',{text:'Caissa'}),crumb]),
+        h('span.local-badge',{text:'Local library'})]),content]));
     try{const pref=await api('settings/appearance');state.prefs=JSON.parse(pref.value||'{}');}catch(err){/* Defaults remain usable if settings are unavailable. */}applyPrefs();ChessSounds.configure(state.prefs);
     window.Caissa={state,api,go,serialize,openGame};window.addEventListener('beforeunload',e=>{
       if(state.boards.length){stashBoard();state.prefs.analysisLayout=state.boards[0].layout;

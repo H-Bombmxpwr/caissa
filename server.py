@@ -29,6 +29,10 @@ from backend.paths import default_data_dir
 DATA_DIR = default_data_dir()
 MAX_BODY = 256 * 1024 * 1024                   # PGN pastes can be large
 
+# Set on a public host (see railway.json). Locally it is unset, so `py server.py`
+# still serves the workbench itself.
+LANDING_ONLY = os.environ.get("CAISSA_LANDING") == "1"
+
 NO_CACHE = {".html", ".json", ".pgn", ".js", ".css"}
 LONG_CACHE_SECONDS = 60 * 60 * 24 * 7
 
@@ -109,6 +113,11 @@ class Handler(SimpleHTTPRequestHandler):
             return self._serve_pdf()
         if self.path.startswith("/api/"):
             return self._serve_api("GET")
+        # A public deployment is a download page, not the application: the app is a
+        # desktop program that reads your own disk, and there is nothing useful it can
+        # do for a stranger over the internet.
+        if LANDING_ONLY and self.path.split('?')[0] in ('/', '/index.html'):
+            self.path = '/landing/index.html'
         return super().do_GET()
 
     def do_HEAD(self):

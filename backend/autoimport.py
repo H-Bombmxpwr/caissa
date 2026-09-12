@@ -47,6 +47,10 @@ class AutoImport:
         self.token = token           # callable returning the stored token, or None
         self.study = study
         self.lock = threading.Lock()
+        # Settings are read-modify-write, and the interface fires one request per
+        # control. Three changes made in quick succession would otherwise interleave
+        # and quietly lose two of them.
+        self.settings_lock = threading.RLock()
         self.wake = threading.Event()
         self.thread = None
         self.stopping = False
@@ -68,6 +72,10 @@ class AutoImport:
 
     def save(self, changes):
         """Validate and store the watcher's settings, then start or stop it to match."""
+        with self.settings_lock:
+            return self._save(changes)
+
+    def _save(self, changes):
         values = self.settings()
         if "interval_minutes" in changes:
             try:
@@ -209,9 +217,12 @@ class AutoImport:
                 self.library.end_import(batch)
 
     def save_cursor(self, values, stamp):
-        values = dict(values)
-        values["since"] = stamp
-        self.library.setting(KEY, json.dumps(values))
+        # Re-read under the lock: a poll finishing while somebody edits the settings
+        # must move the cursor without undoing their change.
+        with self.settings_lock:
+            fresh = self.settings()
+            fresh["since"] = stamp
+            self.library.setting(KEY, json.dumps(fresh))
 
     # ---------- what the interface shows ----------
 

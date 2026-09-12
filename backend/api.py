@@ -193,10 +193,12 @@ class Api:
         raise ApiError('Unsupported books request',405)
 
     def _route_tree(self, method, rest, query, body):
-        """Your own openings: what you played, and how it went for you.
+        """One player's openings: what was played, and how it went for them.
 
-        The same filters drive all three views, so the weakest-line list and the
-        position report are always talking about the same set of games.
+        The player may be the reader or anyone else in the library — a collection of
+        Fischer's games is exactly what this is for. The same filters drive all three
+        views, so the weakest-line list and the position report are always talking
+        about the same set of games.
         """
         from .chess import Chess
         if method != "GET":
@@ -591,6 +593,8 @@ class Api:
                 moves=int(query.get("moves", 12)),
                 top_games=int(query.get("top", 8)),
                 extra=extra,
+                # lichess requires a signed-in account on the explorer endpoints now.
+                token=self._lichess_token(),
             )
         except Exception as err:
             stale=self.library.cache_explorer(cache_key,db,max_age=10**12)

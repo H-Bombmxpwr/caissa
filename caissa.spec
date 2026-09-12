@@ -2,7 +2,15 @@
 # PyInstaller spec for Caissa. Build with: .\build.ps1
 import os
 
+import sys
+
 ROOT = os.path.abspath(SPECPATH)
+
+# PyInstaller cannot cross-compile: each platform's build runs on that platform, and
+# only the icon format differs. A missing icon is not worth failing a build over.
+_icon = os.path.join(ROOT, 'assets', 'caissa.icns' if sys.platform == 'darwin'
+                     else 'caissa.ico' if sys.platform == 'win32' else 'caissa.png')
+ICON = _icon if os.path.exists(_icon) else None
 
 datas = [
     (os.path.join(ROOT, 'index.html'), '.'),
@@ -45,8 +53,16 @@ exe = EXE(
     strip=False,
     upx=False,
     console=False,
-    icon=os.path.join(ROOT, 'assets', 'caissa.ico'),
+    icon=ICON,
 )
+
+# macOS expects an .app bundle; the others ship the collected folder as it is.
+if sys.platform == 'darwin':
+    app = BUNDLE(EXE(pyz, a.scripts, [], exclude_binaries=True, name='Caissa',
+                     debug=False, strip=False, upx=False, console=False, icon=ICON),
+                 a.binaries, a.datas, name='Caissa.app', icon=ICON,
+                 bundle_identifier='org.caissa.workbench',
+                 info_plist={'NSHighResolutionCapable': True, 'LSMinimumSystemVersion': '11.0'})
 
 coll = COLLECT(
     exe,

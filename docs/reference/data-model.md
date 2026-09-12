@@ -31,28 +31,14 @@ fixed thereafter. See [The game database](../guide/database.md#collections-and-w
 The index row for one game. Beyond the location fields (`path`, `byte_offset`,
 `byte_length`, `signature`):
 
-:::{list-table}
-:header-rows: 1
-:widths: 34 66
-
-* - Columns
-  - From
-* - `white`, `black`, `white_elo`, `black_elo`, `result`, `date`, `event`, `site`,
-    `round`, `eco`, `opening`, `variant`, `time_control`, `fen`, `ply_count`
-  - the standard PGN seven-tag roster and its usual companions
-* - `annotator`, `termination`, `has_annotations`
-  - annotation provenance; `has_annotations` is derived from the movetext
-* - `event_date`, `event_type`, `white_team`, `black_team`, `white_title`, `black_title`,
-    `white_fide_id`, `black_fide_id`, `source_title`, `variation`
-  - ChessBase's richer tag set — see [Importing games](../guide/importing.md#the-tags-chessbase-writes)
-* - `speed`, `rated`
-  - derived at import from `TimeControl` and the event name, so the
-    [explorer](../guide/explorer.md) can filter by them
-* - `first_moves`
-  - the opening moves, for naming openings without replaying the game
-* - `source`, `source_id`, `added_at`
-  - where it came from and when
-:::
+| Columns | From |
+| --- | --- |
+| `white`, `black`, `white_elo`, `black_elo`, `result`, `date`, `event`, `site`, `round`, `eco`, `opening`, `variant`, `time_control`, `fen`, `ply_count` | the standard PGN seven-tag roster and its usual companions |
+| `annotator`, `termination`, `has_annotations` | annotation provenance; `has_annotations` is derived from the movetext |
+| `event_date`, `event_type`, `white_team`, `black_team`, `white_title`, `black_title`, `white_fide_id`, `black_fide_id`, `source_title`, `variation` | ChessBase's richer tag set — see [Importing games](../guide/importing.md#the-tags-chessbase-writes) |
+| `speed`, `rated` | derived at import from `TimeControl` and the event name, so the [explorer](../guide/explorer.md) can filter by them |
+| `first_moves` | the opening moves, for naming openings without replaying the game |
+| `source`, `source_id`, `added_at` | where it came from and when |
 
 `source_id` is unique where present (`lichess:<id>`, `chesscom:<id>`). Where a file
 carries no such id, `signature` — a hash over the identifying tags and the moves —

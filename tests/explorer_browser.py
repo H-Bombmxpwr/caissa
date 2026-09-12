@@ -12,7 +12,9 @@ from http.server import ThreadingHTTPServer
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / 'tests'))
 from playwright.sync_api import sync_playwright
+from browser_util import wait_until, wait_for_index
 
 
 def game(white, black, result, moves, date='2024.01.01', tc='300+0'):
@@ -52,8 +54,9 @@ with tempfile.TemporaryDirectory(prefix='caissa-explorer-') as data:
               const cols=await Caissa.api('collections');
               const mine=cols.collections.find(c=>c.name==='Mine');
               await Caissa.api('study/index',{collection:mine.id});}''', PGN)
-            page.wait_for_function(
-                '''async()=>{const s=await Caissa.api('study/index');return !s.running&&s.done>0;}''')
+            wait_until(page, 
+                '''async()=>{const s=await Caissa.api('study/index');
+                   return !s.running&&s.total>0&&s.done===s.total;}''')
 
             # The explorer opens on the collection tree, not on a reference database.
             page.evaluate('Caissa.go("openingbook")')
@@ -125,6 +128,84 @@ with tempfile.TemporaryDirectory(prefix='caissa-explorer-') as data:
             page.locator('.tree-weak .linkish').first.click()
             page.wait_for_function(
                 '''()=>document.querySelector('.tree-path').textContent.includes('c5')''')
+
+            # Arrow keys walk the tree without the mouse.
+            page.locator('.key-hint').click()
+            page.keyboard.press('Home')
+            # Wait for the report to catch up with the board before pressing a key:
+            # the handler deliberately ignores a list that belongs to another position.
+            page.wait_for_function('''()=>!document.querySelector('.tree-path')''')
+            page.wait_for_function(
+                '''()=>[...document.querySelectorAll('.tree-move .tree-san')]
+                        .map(b=>b.textContent).join()==='e4,d4' ''')
+            page.keyboard.press('ArrowRight')            # most played continuation: 1.e4
+            page.wait_for_function(
+                '''()=>document.querySelector('.tree-path')&&
+                       document.querySelector('.tree-path').textContent.includes('e4')''')
+            page.wait_for_function(
+                '''()=>[...document.querySelectorAll('.tree-move .tree-san')]
+                        .map(b=>b.textContent).join()==='c5,e5' ''')
+            page.keyboard.press('ArrowDown')             # pick the second continuation
+            page.wait_for_selector('.tree-move.chosen')
+            chosen=page.locator('.tree-move.chosen .tree-san').inner_text()
+            assert chosen=='e5',chosen                   # c5 is first, e5 second
+            page.keyboard.press('ArrowRight')
+            page.wait_for_function(
+                '''()=>document.querySelector('.tree-path').textContent.includes('e5')''')
+            page.keyboard.press('ArrowLeft')
+            page.wait_for_function(
+                '''()=>!document.querySelector('.tree-path').textContent.includes('e5')''')
+
+            # Changing the collection re-reads everything that depends on it.
+            page.evaluate('''async(pgn)=>{
+              await Caissa.api('games',{pgn,collection:'Elsewhere'});
+              const cols=await Caissa.api('collections');
+              await Caissa.api('study/index',{collection:cols.collections.find(c=>c.name==='Elsewhere').id});}''',
+                          game('Zoya', 'Quinn', '1-0', '1. c4 e5'))
+            wait_until(page, 
+                '''async()=>{const s=await Caissa.api('study/index');
+                   return !s.running&&s.total>0&&s.done===s.total;}''')
+            page.evaluate('Caissa.go("database")')
+            page.evaluate('Caissa.go("openingbook")')
+            page.wait_for_selector('input[aria-label="Player"]')
+            page.fill('input[aria-label="Player"]', 'Ada')
+            page.locator('input[aria-label="Player"]').dispatch_event('change')
+            page.wait_for_selector('.tree-move')
+            names=lambda: page.evaluate(
+                '''()=>[...document.querySelectorAll('#tree-player-names option')].map(o=>o.value)''')
+            assert 'Ada' in names(),names()
+            elsewhere=page.evaluate('''async()=>{const c=await Caissa.api('collections');
+                return String(c.collections.find(x=>x.name==='Elsewhere').id);}''')
+            page.locator('select[aria-label="Collection"]').first.select_option(elsewhere)
+            # The suggestions follow the collection...
+            page.wait_for_function(
+                '''()=>{const o=[...document.querySelectorAll('#tree-player-names option')].map(x=>x.value);
+                        return o.includes('Zoya')&&!o.includes('Ada');}''')
+            # ...and a player with no games there is cleared rather than left reporting zero.
+            page.wait_for_function('''()=>!document.querySelector('input[aria-label="Player"]').value''')
+
+            # Flipping the board sticks, including after leaving and returning.
+            def bottom_left():
+                return page.evaluate(
+                    '''()=>document.querySelector('.opening-grid .cg-board square')
+                           .getAttribute('data-key')''')
+            first=bottom_left()
+            page.get_by_role('button',name='Flip board',exact=True).click()
+            page.wait_for_function('(was)=>document.querySelector(".opening-grid .cg-board square")'
+                                   '.getAttribute("data-key")!==was',arg=first)
+            flipped=bottom_left()
+            assert {first,flipped}=={'a8','h1'},(first,flipped)
+            page.wait_for_function('()=>Caissa.state.prefs.explorerOrientation==="b"')
+            page.evaluate('Caissa.go("database")')
+            page.evaluate('Caissa.go("openingbook")')
+            page.wait_for_selector('.opening-grid .cg-board square')
+            assert bottom_left()==flipped,'the flip did not survive leaving the module'
+
+            # The report describes whoever is named, not the reader.
+            page.wait_for_selector('input[aria-label="Player"]')
+            blurb=page.locator('.context-tabs ~ div p.muted').first.inner_text()
+            assert 'Your games' not in blurb,blurb
+            assert 'One player' in blurb,blurb
 
             # The reference tab still works, and going back returns to the tree.
             page.get_by_role('button', name='Reference databases', exact=True).click()

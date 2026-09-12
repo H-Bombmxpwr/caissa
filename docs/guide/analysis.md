@@ -57,18 +57,16 @@ Under the controls is a grid of what the search and the machine are actually doi
 | **CPU temperature** | from a sensor, if the machine publishes one |
 | **Power draw** | watts, if anything on the machine reports them |
 
-:::{admonition} Temperature and wattage often read "not reported"
-:class: warning
-
-That is honest rather than broken. Most Windows desktops publish no CPU thermal sensor
-to the operating system at all, and a machine on mains power reports no discharge rate
-because it is not discharging. Nothing here is estimated: a reading the machine will not
-give is labelled missing rather than filled in with a plausible number.
-
-To get real values, run [LibreHardwareMonitor](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor)
-in the background. It publishes per-package temperature and watts over WMI, and both
-appear here within a few seconds. Laptops on battery report discharge wattage without it.
-:::
+> **Temperature and wattage often read "not reported"**
+>
+> That is honest rather than broken. Most Windows desktops publish no CPU thermal sensor
+> to the operating system at all, and a machine on mains power reports no discharge rate
+> because it is not discharging. Nothing here is estimated: a reading the machine will not
+> give is labelled missing rather than filled in with a plausible number.
+>
+> To get real values, run [LibreHardwareMonitor](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor)
+> in the background. It publishes per-package temperature and watts over WMI, and both
+> appear here within a few seconds. Laptops on battery report discharge wattage without it.
 
 Sensors are read on a background thread and cached for a few seconds, so polling the
 panel never blocks the search.

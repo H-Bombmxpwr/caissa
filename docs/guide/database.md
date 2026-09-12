@@ -42,13 +42,11 @@ dialog that manages them. Adding links the game; unlinking removes it from that 
 The collection a game was imported into is its owner and cannot be unlinked — that is a
 move, not a link.
 
-:::{admonition} Deleting a collection cannot destroy a shared game
-:class: note
-
-If you delete a collection that owns a game another collection also holds, the game is
-handed to that other collection rather than deleted with the rest. Only games nothing
-else holds go.
-:::
+> **Deleting a collection cannot destroy a shared game**
+>
+> If you delete a collection that owns a game another collection also holds, the game is
+> handed to that other collection rather than deleted with the rest. Only games nothing
+> else holds go.
 
 An import now reports `linked` alongside `added`, `duplicates` and `skipped`, so
 "0 added, 14 linked" tells you the games were already there and are now on this shelf too.

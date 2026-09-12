@@ -14,12 +14,12 @@ book — so a fresh clone builds in one command.
 `caissa.spec` bundles `index.html`, `css/`, `js/`, `data/`, `assets/` and
 `vendor/stockfish/`.
 
-:::{warning}
-`assets/sound/chesscom/` is stripped from the build. chess.com's audio is proprietary:
-`tools/fetch_sounds.py --chesscom` puts it on your own machine for your own use, and
-`.gitignore` plus the spec's filter keep it out of both the repository and any build you
-hand to someone else.
-:::
+> **Warning**
+>
+> `assets/sound/chesscom/` is stripped from the build. chess.com's audio is proprietary:
+> `tools/fetch_sounds.py --chesscom` puts it on your own machine for your own use, and
+> `.gitignore` plus the spec's filter keep it out of both the repository and any build you
+> hand to someone else.
 
 ## Checking it
 

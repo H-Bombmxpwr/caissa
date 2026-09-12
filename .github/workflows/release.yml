@@ -1,0 +1,138 @@
+name: Release
+
+# PyInstaller cannot cross-compile: a Windows .exe has to be built on Windows, a macOS
+# .app on macOS, a Linux binary on Linux. So the same build runs three times, once per
+# runner, and the three archives are attached to one GitHub Release.
+#
+# Cut a release by pushing a tag:
+#     git tag v2.1.0 && git push origin v2.1.0
+#
+# Or run this workflow by hand to produce the artifacts without publishing anything.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version label for a manual build (no release is published)'
+        required: false
+        default: 'dev'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            label: Windows x64
+            asset: Caissa-windows-x64.zip
+          - os: macos-latest
+            label: macOS (Apple silicon)
+            asset: Caissa-macos-arm64.zip
+          - os: ubuntu-latest
+            label: Linux x64
+            asset: Caissa-linux-x64.tar.gz
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      # pywebview needs a native web view. Windows has Edge WebView2 and macOS has
+      # WKWebView already; Linux needs WebKitGTK and the GObject bindings.
+      - name: Install the Linux web view
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-gi python3-gi-cairo gir1.2-gtk-3.0 \
+                                  gir1.2-webkit2-4.1 libcairo2-dev pkg-config
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: Fetch the engine and the bundled data
+        run: |
+          python tools/fetch_stockfish.py
+          python tools/fetch_openings.py
+          python tools/fetch_sounds.py
+          python tools/fetch_pieces.py
+
+      - name: Build
+        run: python -m PyInstaller --noconfirm caissa.spec
+
+      # chess.com's sounds are never shipped; the spec strips them, and this is the
+      # belt to that pair of braces.
+      - name: Check nothing proprietary got in
+        shell: bash
+        run: |
+          if find dist -path '*sound/chesscom*' | grep -q .; then
+            echo "chess.com audio must never be shipped"; exit 1
+          fi
+
+      - name: Smoke-test the build
+        if: runner.os == 'Windows'
+        run: python tests/check_bundle.py
+
+      - name: Package (Windows, macOS)
+        if: runner.os != 'Linux'
+        shell: bash
+        run: |
+          cd dist
+          if [ -d Caissa.app ]; then
+            ditto -c -k --keepParent Caissa.app "../${{ matrix.asset }}"
+          else
+            7z a "../${{ matrix.asset }}" Caissa
+          fi
+
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        run: tar -czf "${{ matrix.asset }}" -C dist Caissa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: ${{ matrix.asset }}
+          if-no-files-found: error
+
+  publish:
+    name: Publish the release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: downloads
+          merge-multiple: true
+
+      - name: Attach the builds to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: downloads/*
+          generate_release_notes: true
+          body: |
+            Download the build for your platform below, unzip it, and run **Caissa**.
+
+            * **Windows** — `Caissa-windows-x64.zip`. Windows SmartScreen will warn about
+              an unsigned application: choose *More info → Run anyway*.
+            * **macOS** — `Caissa-macos-arm64.zip`. The app is not notarised, so the first
+              launch needs *right-click → Open* rather than a double-click.
+            * **Linux** — `Caissa-linux-x64.tar.gz`. Needs WebKitGTK:
+              `sudo apt install gir1.2-webkit2-4.1 python3-gi`.
+
+            Your library is kept outside the application folder, so replacing this build
+            never touches your games. See the
+            [documentation](https://h-bombmxpwr.github.io/caissa/).

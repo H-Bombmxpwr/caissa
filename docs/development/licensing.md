@@ -36,13 +36,13 @@ Credited in `assets/sound/CREDITS.md`, taken from lila's own `COPYING.md`.
 | piano, sfx, futuristic, nes | Enigmahack | AGPLv3+ |
 | lisp | EdinburghCollective | CC BY-NC-SA 4.0 |
 
-:::{danger}
-**chess.com's sounds are not redistributable.** They are proprietary, and nothing in this
-repository ships them. `tools/fetch_sounds.py --chesscom` downloads them to
-`assets/sound/chesscom/` on your own machine, where `.gitignore` and `caissa.spec` keep
-them out of the repository and out of any build. Use them for your own study; do not pass
-them on.
-:::
+> **Take care**
+>
+> **chess.com's sounds are not redistributable.** They are proprietary, and nothing in this
+> repository ships them. `tools/fetch_sounds.py --chesscom` downloads them to
+> `assets/sound/chesscom/` on your own machine, where `.gitignore` and `caissa.spec` keep
+> them out of the repository and out of any build. Use them for your own study; do not pass
+> them on.
 
 The **Caissa wood** and **Caissa digital** presets are synthesized in `js/sounds.js` and
 are part of this project.

@@ -82,8 +82,10 @@ def _request(url, accept, token=None, throttle=None, timeout=120, retries=2, dat
                 raise FileNotFoundError(url)
             if err.code in (401, 403):
                 raise PermissionError(
-                    "lichess refused the request: the access token is missing, expired, "
-                    "or lacks the scope this needs")
+                    "lichess rejected the access token: it may have expired, been revoked, "
+                    "or lack the scope this needs" if token else
+                    "lichess now requires a signed-in account for this. Connect your lichess "
+                    "account in Settings and try again.")
             raise
         except urllib.error.URLError as err:
             attempt += 1
@@ -198,7 +200,7 @@ def import_all_user_games(library, user, collection, token=None, batch_size=200,
     return totals
 
 
-def explorer(db="masters", play=None, fen=None, moves=12, top_games=8, extra=None):
+def explorer(db="masters", play=None, fen=None, moves=12, top_games=8, extra=None, token=None):
     params = {"moves": int(moves)}
     if db == "masters":
         params["topGames"] = int(top_games)
@@ -213,12 +215,14 @@ def explorer(db="masters", play=None, fen=None, moves=12, top_games=8, extra=Non
     if extra:
         params.update(extra)
     url = "%s/%s?%s" % (EXPLORER, db, urllib.parse.urlencode(params))
-    return json.loads(_request(url, "application/json", throttle=explorer_throttle, timeout=60))
+    return json.loads(_request(url, "application/json", throttle=explorer_throttle,
+                               timeout=60, token=token))
 
 
-def masters_pgn(game_id):
+def masters_pgn(game_id, token=None):
     url = "%s/masters/pgn/%s" % (EXPLORER, urllib.parse.quote(game_id))
-    return _request(url, "application/x-chess-pgn", throttle=explorer_throttle, timeout=60)
+    return _request(url, "application/x-chess-pgn", throttle=explorer_throttle, timeout=60,
+                    token=token)
 
 
 class MastersCrawler:
@@ -295,7 +299,8 @@ class MastersCrawler:
                     self.state["queued"] = len(queue)
 
                 try:
-                    data = explorer("masters", play=list(play), moves=12, top_games=top_games)
+                    data = explorer("masters", play=list(play), moves=12, top_games=top_games,
+                                    token=self.library.setting("lichess_token") or None)
                 except RateLimited as err:
                     with self.lock:
                         self.state["error"] = "rate limited, waiting %ss" % err.retry_after
@@ -320,7 +325,7 @@ class MastersCrawler:
                         continue
                     seen_games.add(gid)
                     try:
-                        pgns.append(masters_pgn(gid))
+                        pgns.append(masters_pgn(gid, token=self.library.setting("lichess_token") or None))
                     except Exception:                          # noqa: BLE001
                         continue
                 if pgns:

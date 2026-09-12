@@ -51,21 +51,25 @@
   }
   function openingPanel(getFen,onMove){
     const {h,api,button,field,select}=get();
+    let shown={fen:null,sans:[]};
     const source=select([['bundled','Included book — Lichess Elite (offline)'],['local','My indexed games (offline)'],['masters','Lichess Masters — deep reference'],['lichess','Lichess rated games — broad reference']],'bundled');
     const choice=select([['','All indexed collections']],'');const output=h('div');let request=0,timer;
     const since=h('input',{type:'text',placeholder:'e.g. 2000 (Masters) or 2020-01 (Lichess)'}),until=h('input',{type:'text',placeholder:'Latest available'});
     const ratings=select([['','All ratings'],['2200,2500','2200+'],['2000,2200,2500','2000+'],['1600,1800,2000,2200,2500','1600+']],'');
     const speeds=select([['','All time controls'],['rapid,classical','Rapid & classical'],['blitz','Blitz'],['classical','Classical']],'');
-    const online=h('div',{hidden:true},[field('From year / month',since),field('Through year / month',until),field('Lichess rating bands',ratings),field('Lichess time controls',speeds)]);
+    const signin=h('p.muted',{hidden:true,text:'Lichess now requires a signed-in account on its opening explorer. Connect your lichess account in Settings — any token will do; no extra permission is needed.'});
+    const online=h('div',{hidden:true},[signin,field('From year / month',since),field('Through year / month',until),field('Lichess rating bands',ratings),field('Lichess time controls',speeds)]);
     const root=h('div.card-pad',[field('Reference database',source),field('Opening-book source',choice),online,button('Refresh opening book',refresh),h('p.muted',{text:'Explore as deep as the database has games: no fixed move-depth cutoff. Online positions are cached in your library. White / draw / Black statistics are game results, not engine evaluations.'}),output]);
     api('collections').then(d=>choice.append(...d.collections.map(c=>h('option',{value:c.id,text:c.name})))).catch(()=>{});
     choice.addEventListener('change',refresh);
     choice.disabled=true;
+    api('lichess/account').then(a=>{signin.hidden=!!a.connected;}).catch(()=>{});
     source.addEventListener('change',()=>{online.hidden=['local','bundled'].includes(source.value);choice.disabled=source.value!=='local';ratings.disabled=speeds.disabled=source.value!=='lichess';refresh();});
     for(const control of [since,until,ratings,speeds])control.addEventListener('change',refresh);
     function refresh(){clearTimeout(timer);const id=++request;timer=setTimeout(()=>load(id),250);}
     async function load(id){const fen=getFen();output.textContent='Reading opening book…';try{
       const data=await api('book?'+new URLSearchParams({fen,collection:choice.value,source:source.value,since:since.value,until:until.value,ratings:ratings.value,speeds:speeds.value}));if(id!==request||fen!==getFen())return;
+      shown={fen,sans:data.moves.map(m=>m.san)};
       output.replaceChildren();const total=data.moves.reduce((n,m)=>n+m.games,0);
       if(data.book)output.append(h('p',{text:data.book.title+' · Included offline · '+data.book.games.toLocaleString()+' source games · '+data.book.positions.toLocaleString()+' positions · through '+data.book.max_plies/2+' moves · continuations seen in at least '+data.book.min_games+' games'}));
       else if(data.source)output.append(h('p',{text:(data.source==='masters'?'Lichess Masters':'Lichess rated games')+' · '+(data.total||0).toLocaleString()+' games'+(data.stale?' · Offline fallback: older cached results':data.cached?' · Saved reference':' · Online reference')}));
@@ -75,20 +79,20 @@
       for(const g of data.games)output.append(button(g.white+' — '+g.black+' · '+g.date,()=>ui.openGame(g.id)));
       for(const g of data.reference_games||[])output.append(h('a.btn',{href:'https://lichess.org/'+(data.source==='masters'?'study/master/':'')+encodeURIComponent(g.id),target:'_blank',rel:'noopener',text:(g.white?.name||'White')+' — '+(g.black?.name||'Black')+' · '+(g.year||'')+' · Open reference game'}));
     }catch(e){if(id===request)output.textContent=e.message;}}
-    return {root,refresh};
+    return {root,refresh,listed:()=>shown};
   }
-  /* Your own openings, scored from your side of the board.
+  /* One player's openings, scored from that player's side of the board.
 
-     A reference book says what strong players do here. This says what happened when
-     *you* played it, which is the question worth asking of your own games: the score
-     is yours, the win/draw/loss bar is yours, and the trend shows whether a line has
-     stopped working. It reads the position index, so a collection must be indexed
-     before it has anything to say. */
+     A reference book says what is played here. This says how it went for whoever is
+     named — which may be the reader, and just as easily may be Fischer, or the
+     strongest player in an imported collection. The score, the win/draw/loss bar and
+     the trend all belong to that player. It reads the position index, so a collection
+     must be indexed before it has anything to say. */
   function openingReport(getFen,onMove,onLine){
     const {h,api,button,field,select}=get();
     const collection=select([['','Every indexed collection']],'');
     const names=h('datalist',{id:'tree-player-names'});
-    const player=h('input',{placeholder:'Your username, as it appears in the games',list:'tree-player-names',autocomplete:'off'});
+    const player=h('input',{placeholder:'Player name, as it appears in the games',list:'tree-player-names',autocomplete:'off'});
     const colour=select([['','Both colours'],['w','As White'],['b','As Black']],'');
     const speed=select([['','Any time control'],['bullet','Bullet'],['blitz','Blitz'],
                         ['rapid','Rapid'],['classical','Classical'],['correspondence','Correspondence'],
@@ -101,6 +105,10 @@
     const minGames=select([['2','2+ games'],['3','3+ games'],['5','5+ games'],['10','10+ games']],'3');
     const summary=h('div.tree-summary');
     const movesBody=h('div');
+    // What is on screen, and the position it belongs to. The keyboard reads this
+    // rather than scraping the list, so a key pressed before the debounced reload
+    // lands cannot play a move from the previous position.
+    let shown={fen:null,sans:[]};
     const trendBody=h('div.tree-trend');
     const weakBody=h('div');
     let request=0,timer;
@@ -142,6 +150,7 @@
     }
 
     function showMoves(data){
+      shown={fen:data.fen,sans:data.moves.map(m=>m.san)};
       movesBody.replaceChildren();
       if(!data.moves.length){
         movesBody.append(h('p.muted',{text:'Nothing was played from here in the indexed games.'}));
@@ -177,7 +186,7 @@
                  class:year.score_pct>=55?'good':year.score_pct<45?'poor':'level'}),
           h('small',{text:year.period.slice(2)})]));
       }
-      trendBody.append(chart,h('p.muted',{text:'Bars are your score out of 100 in that year; the count is on hover. A line that used to work and stopped shows up here first.'}));
+      trendBody.append(chart,h('p.muted',{text:'Bars are the score out of 100 in that year; the count is on hover. A line that stopped working shows up here first.'}));
     }
 
     async function loadWeakest(){
@@ -187,11 +196,11 @@
         weakBody.replaceChildren();
         if(!data.weakest.length){
           weakBody.append(h('p.muted',{text:data.player
-            ?'Nothing scoring below even with '+minGames.value.replace('+','')+' or more games. Lower the threshold, or widen the filters.'
+            ?'No line scores below even with that many games. Lower the threshold, or widen the filters.'
             :'Name a player above: a weakest-lines list only means something from one side of the board.'}));
           return;
         }
-        weakBody.append(h('p.muted',{text:'Ranked by points dropped — games multiplied by the shortfall against an even score — so a line you play often at 40% outranks one you played twice at 0%.'}));
+        weakBody.append(h('p.muted',{text:'Ranked by points dropped — games multiplied by the shortfall against an even score — so a line played often at 40% outranks one played twice at 0%.'}));
         for(const entry of data.weakest){
           weakBody.append(h('div.tree-weak',[
             h('button.linkish',{type:'button',text:entry.line||entry.san,
@@ -218,39 +227,52 @@
 
     async function suggest(){
       try{
-        const data=await api('tree/players?'+new URLSearchParams({collection:collection.value,limit:40}));
+        const data=await api('tree/players?'+new URLSearchParams({collection:collection.value,limit:60}));
         names.replaceChildren(...data.players.map(p=>h('option',{value:p.name,label:p.games+' games'})));
-      }catch(e){/* typing still works */}
+        return data.players.map(p=>p.name);
+      }catch(e){return [];}          // typing still works without suggestions
     }
     api('collections').then(d=>{
       collection.append(...d.collections.map(c=>h('option',{value:c.id,text:c.name+' · '+c.games+' games'})));
       suggest();
     }).catch(()=>{});
-    collection.addEventListener('change',()=>{suggest();refreshAll();});
+    collection.addEventListener('change',async()=>{
+      shown={fen:null,sans:[]};
+      // The names in the old collection mean nothing in the new one, so the
+      // suggestions are re-read and a player who is not in it is cleared rather
+      // than left behind to report zero games with no explanation.
+      const known=await suggest();
+      if(player.value.trim()&&!known.some(name=>name.toLowerCase().includes(player.value.trim().toLowerCase()))){
+        player.value='';
+        App.toast('That player has no games in this collection, so the name was cleared.');
+      }
+      refreshAll();
+    });
     player.addEventListener('change',refreshAll);
     for(const control of [colour,speed,rated,since,until,minElo,maxElo])control.addEventListener('change',refreshAll);
     minGames.addEventListener('change',loadWeakest);
 
     const root=h('div',[
       h('div.card-pad',[
-        h('p.muted',{text:'Your games, scored from your side of the board. Name yourself below; everything here then reads as your result, not White’s. Needs an indexed collection.'}),
+        h('p.muted',{text:'One player’s games, scored from that player’s side of the board. Name the player below — yourself, or whoever the collection is of — and every figure reads as their result rather than White’s. Leave it empty to read the collection from White’s side. Needs an indexed collection.'}),
         field('Collection',collection),names,field('Player',player),
         h('div.toolbar',[field('Colour',colour),field('Time control',speed),field('Rated',rated)]),
         h('div.toolbar',[field('From',since),field('Until',until)]),
         h('div.toolbar',[field('Opponent rating from',minElo),field('Opponent rating to',maxElo)]),
         summary]),
-      h('div.divider'),h('div.card-pad',[h('div.eyebrow',{text:'What you played from here'}),movesBody]),
+      h('div.divider'),h('div.card-pad',[h('div.eyebrow',{text:'Moves played from here'}),movesBody]),
       h('div.divider'),h('div.card-pad',[trendBody]),
       h('div.divider'),h('div.card-pad',[h('div.eyebrow',{text:'Where the points go'}),
         field('Only lines with',minGames),weakBody]),
     ]);
     refreshAll();
-    return {root,refresh:refreshAll,player};
+    return {root,refresh:refreshAll,player,collection,listed:()=>shown};
   }
   async function openingView(content){
     const {h,button,heading}=get();let game=new Chess();const history=[];
     content.append(heading('Walk the tree','Opening explorer','Browse a collection\u2019s openings move by move \u2014 what was played, how it scored, and where the points went. Reference databases are a tab away.'));
-    const holder=h('div.board-holder'),board=new Board(holder,{viewOnly:false});
+    const holder=h('div.board-holder'),board=new Board(holder,
+      {viewOnly:false,orientation:ui.explorerOrientation?.()||'w'});
     const line=h('p');
     const panel=openingPanel(()=>game.fen(),play);
     const report=openingReport(()=>game.fen(),play,replay);
@@ -273,6 +295,12 @@
       game=fresh;render();
     }
     function refresh(){if(showing==='Collection tree')report.refresh();else panel.refresh();}
+    // Studying a Black repertoire from White's side is needlessly hard work, and the
+    // choice is remembered so it survives leaving the module and coming back.
+    function flip(){
+      board.toggleOrientation();
+      ui.saveExplorerOrientation?.(board.opts.orientation);
+    }
     const played=[];                       // the SAN of the line currently on the board
     function render(){
       board.setPosition(game);
@@ -284,8 +312,36 @@
             onclick:()=>replay(played.slice(0,i+1))})))
         :h('span.muted',{text:'Starting position \u2014 play a move, or choose one below, to walk the tree.'}));
       refresh();
+      setTimeout(highlight,260);           // after the debounced report has redrawn
     }
-    content.append(h('div.opening-grid',[h('div',[holder,line,h('div.toolbar',[button('Back a move',()=>replay(played.slice(0,-1))),button('Start again',()=>replay([])),button('Analyze this position',()=>ui.analyzeFen(game.fen())),button('Open these games',()=>ui.browsePosition(game.fen()))])]),h('section.card',[tabs,pane,indexControls(),h('p.card-pad.muted',{text:'Import PGNs from Master games or Online & imports, then index them. ChessBase CTG/CTB/CTO and Polyglot BIN files are not imported by this module.'})])]));
+    // Walking a tree is a keyboard job: left steps back, right takes the most played
+    // continuation, and up/down pick a different one without reaching for the mouse.
+    let choice=0;
+    function keys(event){
+      if(!document.body.contains(line))return document.removeEventListener('keydown',keys);
+      if(/INPUT|TEXTAREA|SELECT/.test(event.target.tagName)||event.target.isContentEditable)return;
+      if(event.ctrlKey||event.altKey||event.metaKey||document.querySelector('dialog[open]'))return;
+      const step={ArrowLeft:1,ArrowRight:1,ArrowUp:1,ArrowDown:1,Home:1}[event.key];
+      if(!step)return;
+      event.preventDefault();
+      if(event.key==='ArrowLeft')return replay(played.slice(0,-1));
+      if(event.key==='Home')return replay([]);
+      // Only act on a list that belongs to the position on the board; a reload in
+      // flight means the answer for this position is not in yet.
+      const {fen,sans}=(showing==='Collection tree'?report:panel).listed();
+      if(fen!==game.fen()||!sans.length)return;
+      if(event.key==='ArrowRight'){const san=sans[Math.min(choice,sans.length-1)];choice=0;
+        try{play(san);}catch(err){/* not legal from here after all */}return;}
+      choice=Math.max(0,Math.min(sans.length-1,choice+(event.key==='ArrowDown'?1:-1)));
+      highlight();
+    }
+    function highlight(){
+      document.querySelectorAll('.tree-move,.book-move').forEach((row,i)=>
+        row.classList.toggle('chosen',i===choice));
+    }
+    document.addEventListener('keydown',keys);
+    content.append(h('div.opening-grid',[h('div',[holder,line,h('div.toolbar',[button('Back a move',()=>replay(played.slice(0,-1))),button('Start again',()=>replay([])),button('Flip board',flip),button('Analyze this position',()=>ui.analyzeFen(game.fen())),button('Open these games',()=>ui.browsePosition(game.fen()))]),
+      h('p.muted.key-hint',{text:'← back · → play the highlighted move · ↑ ↓ choose one · Home to the start'})]),h('section.card',[tabs,pane,indexControls(),h('p.card-pad.muted',{text:'Import PGNs from Master games or Online & imports, then index them. ChessBase CTG/CTB/CTO and Polyglot BIN files are not imported by this module.'})])]));
     ui.resizeBoard(holder,'openingBoardSize');choose('Collection tree');render();
   }
   function localFacts(parsed){

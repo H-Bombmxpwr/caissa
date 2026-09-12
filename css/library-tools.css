@@ -43,16 +43,16 @@
 .tree-counts div{display:grid}
 .tree-counts b{font-size:15px;color:var(--text-strong)}
 .tree-counts small{font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:var(--text-dim)}
-.wdl{display:flex;height:8px;border-radius:4px;overflow:hidden;background:#e6e9df}
+.wdl{display:flex;height:8px;border-radius:4px;overflow:hidden;background:var(--border)}
 .wdl i{display:block;height:100%}
 .wdl .won{background:#4f8a58}.wdl .drew{background:#b9bda9}.wdl .lost{background:#a8574c}
 .tree-move{display:grid;grid-template-columns:64px minmax(0,1fr) 92px;gap:12px;align-items:center;
-  padding:9px 0;border-bottom:1px solid #eceee4}
+  padding:9px 0;border-bottom:1px solid var(--border)}
 .tree-move .tree-san{padding:5px 8px;font-weight:600}
 .tree-bars{display:grid;gap:5px;min-width:0}
 .tree-volume{position:relative;height:17px}
-.tree-volume i{position:absolute;inset:0 auto 0 0;background:#e7ece2;border-radius:3px}
-.tree-volume span{position:relative;font-size:11px;color:var(--text-dim);line-height:17px;padding-left:6px}
+.tree-volume i{position:absolute;inset:0 auto 0 0;background:color-mix(in srgb,var(--accent) 22%,transparent);border-radius:3px}
+.tree-volume span{position:relative;font-size:11px;color:var(--text);line-height:17px;padding-left:6px}
 .tree-figures{text-align:right}
 .tree-figures b{display:block;font-size:14px;color:var(--text-strong)}
 .tree-figures small{font-size:10px;color:var(--text-dim)}
@@ -62,7 +62,7 @@
 .tree-year i.good{background:#4f8a58}.tree-year i.poor{background:#a8574c}
 .tree-year small{font-size:9px;color:var(--text-dim);margin-top:4px}
 .tree-weak{display:grid;grid-template-columns:minmax(0,1fr) 120px;gap:10px;align-items:center;
-  padding:10px 0;border-bottom:1px solid #eceee4}
+  padding:10px 0;border-bottom:1px solid var(--border)}
 .tree-weak .wdl{grid-column:1/-1}
 .tree-weak-figures{text-align:right}
 .tree-weak-figures b{display:block;color:#a8574c;font-size:14px}
@@ -74,3 +74,13 @@
   .tree-figures{grid-column:1/-1;text-align:left}}
 .tree-path{display:block;font:14px Georgia,serif;line-height:1.9;padding:8px 0}
 .tree-path .linkish{font:inherit}
+.dark-theme .wdl .won{background:#5fa06b}
+.dark-theme .wdl .drew{background:#8b9186}
+.dark-theme .wdl .lost{background:#c2685c}
+.dark-theme .tree-year i{background:#8b9186}
+.dark-theme .tree-year i.good{background:#5fa06b}
+.dark-theme .tree-year i.poor{background:#c2685c}
+.dark-theme .tree-weak-figures b{color:#e0897c}
+.tree-move.chosen,.book-move.chosen{background:color-mix(in srgb,var(--accent) 14%,transparent);
+  border-radius:6px;box-shadow:inset 3px 0 0 var(--accent)}
+.key-hint{margin-top:8px;font-size:11px}

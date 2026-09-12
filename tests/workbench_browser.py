@@ -9,7 +9,9 @@ from http.server import ThreadingHTTPServer
 
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
+sys.path.insert(0,str(ROOT/'tests'))
 from playwright.sync_api import sync_playwright
+from browser_util import wait_until, wait_for_index
 
 
 with tempfile.TemporaryDirectory(prefix='caissa-browser-') as data:
@@ -357,7 +359,7 @@ with tempfile.TemporaryDirectory(prefix='caissa-browser-') as data:
             page.get_by_role('button',name='Reset board',exact=True).click()
             page.wait_for_function('Caissa.state.node.fenAfter === Chess.DEFAULT_FEN')
             page.evaluate('App.stat("persistence-check",{count:7})')
-            page.wait_for_function('async()=>JSON.parse((await Caissa.api("settings/trainer")).value).stats["persistence-check"].count===7')
+            wait_until(page, 'async()=>JSON.parse((await Caissa.api("settings/trainer")).value).stats["persistence-check"].count===7')
             page.reload()
             page.wait_for_function('window.Caissa && App.store.stats["persistence-check"].count===7')
             assert page.evaluate('Caissa.state.prefs.darkMode')
@@ -388,7 +390,7 @@ with tempfile.TemporaryDirectory(prefix='caissa-browser-') as data:
             assert response.status==206 and response.body()==pdf[:8]
             page.get_by_label('Book page',exact=True).fill('2')
             page.get_by_role('button',name='Go to page',exact=True).click()
-            page.wait_for_function('async()=>(await Caissa.api("books")).books[0].page===2')
+            wait_until(page, 'async()=>(await Caissa.api("books")).books[0].page===2')
             page.evaluate('Caissa.go("analysis")')
             page.get_by_role('button',name='Panels',exact=True).click()
             page.get_by_label('Books',exact=True).check()
@@ -417,7 +419,7 @@ with tempfile.TemporaryDirectory(prefix='caissa-browser-') as data:
             page.get_by_label('Reference database',exact=True).select_option('local')
             page.get_by_label('Collection to index',exact=True).select_option(label='Annotated tests (1)')
             page.get_by_role('button',name='Index positions',exact=True).click()
-            page.wait_for_function('async()=>!(await Caissa.api("study/index")).running')
+            wait_until(page, 'async()=>!(await Caissa.api("study/index")).running')
             page.get_by_role('button',name='Refresh opening book',exact=True).click()
             page.locator('.book-move').get_by_role('button',name='e4',exact=True).wait_for()
             page.locator('.book-move').get_by_role('button',name='e4',exact=True).click()

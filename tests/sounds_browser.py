@@ -9,7 +9,9 @@ from http.server import ThreadingHTTPServer
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / 'tests'))
 from playwright.sync_api import sync_playwright
+from browser_util import wait_until, wait_for_index
 
 with tempfile.TemporaryDirectory(prefix='caissa-sounds-') as data:
     os.environ['DATA_DIR'] = data

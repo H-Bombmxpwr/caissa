@@ -17,17 +17,15 @@ The token is checked with lichess before it is stored, so a mistyped or expired 
 fails immediately rather than silently later. Once connected, the card shows which
 account it belongs to and which scopes it carries.
 
-:::{admonition} Where the token lives
-:class: note
-
-In your local library's settings table, on your own disk. It is sent to lichess and
-nowhere else, and it is never handed back to the page: the generic settings endpoint
-refuses to read it, and the account endpoint reports only the username and scopes. Use
-**Forget this token** to remove it.
-
-A token that has been revoked on lichess's side shows as disconnected with the reason,
-rather than looking connected and failing on use.
-:::
+> **Where the token lives**
+>
+> In your local library's settings table, on your own disk. It is sent to lichess and
+> nowhere else, and it is never handed back to the page: the generic settings endpoint
+> refuses to read it, and the account endpoint reports only the username and scopes. Use
+> **Forget this token** to remove it.
+>
+> A token that has been revoked on lichess's side shows as disconnected with the reason,
+> rather than looking connected and failing on use.
 
 ## Importing studies
 
@@ -71,13 +69,11 @@ been played since it last looked, and files the answer.
 
 **Check lichess now** runs a check immediately, whether or not the watcher is on.
 
-:::{admonition} Switching it on does not backfill
-:class: note
-
-The window starts from the moment you enable it. Pulling in a decade of blitz because
-somebody ticked a box is not a welcome surprise, so history stays a deliberate act —
-use **Import games → Your online games** for that.
-:::
+> **Switching it on does not backfill**
+>
+> The window starts from the moment you enable it. Pulling in a decade of blitz because
+> somebody ticked a box is not a welcome surprise, so history stays a deliberate act —
+> use **Import games → Your online games** for that.
 
 Three details worth knowing:
 

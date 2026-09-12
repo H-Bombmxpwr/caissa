@@ -21,18 +21,16 @@ a database and choose the PGN format). Everything after that is handled.
 
 ### Encoding
 
-:::{admonition} Why your accented names used to break
-:class: note
-
-ChessBase writes PGN in the Windows code page, not UTF-8. Read as UTF-8, `Réti` becomes
-`R<?>ti` and the original letter is gone for good, because the replacement happens before
-anything is stored.
-
-Files are now decoded by sniffing: UTF-8 first, and where that is genuinely impossible,
-Windows-1252 and then Latin-1, applied to the whole file rather than guessed per chunk.
-UTF-16 files are detected from their byte-order mark. The same rule applies to files you
-drop in through the browser, to files read from disk, and to PGNs inside a ZIP.
-:::
+> **Why your accented names used to break**
+>
+> ChessBase writes PGN in the Windows code page, not UTF-8. Read as UTF-8, `Réti` becomes
+> `R<?>ti` and the original letter is gone for good, because the replacement happens before
+> anything is stored.
+>
+> Files are now decoded by sniffing: UTF-8 first, and where that is genuinely impossible,
+> Windows-1252 and then Latin-1, applied to the whole file rather than guessed per chunk.
+> UTF-16 files are detected from their byte-order mark. The same rule applies to files you
+> drop in through the browser, to files read from disk, and to PGNs inside a ZIP.
 
 ### The tags ChessBase writes
 
