@@ -53,11 +53,11 @@ class Study:
                 try:
                     pgn = self.library.game_pgn(game_id)
                     game = Chess(pgnutil.headers(pgn).get('FEN') or Chess().fen())
-                    moves = pgnutil.moves(pgn, limit=25)
+                    moves = pgnutil.moves(pgn)
                     rows = []
-                    for ply in range(min(len(moves), 24) + 1):
+                    for ply in range(len(moves) + 1):
                         rows.append((game.key(), game_id, ply, moves[ply] if ply < len(moves) else None))
-                        if ply < min(len(moves), 24):
+                        if ply < len(moves):
                             game.move(moves[ply])
                     with self.library._write_lock, db:
                         db.execute('DELETE FROM positions WHERE game_id=?', (game_id,))

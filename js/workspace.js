@@ -8,19 +8,28 @@
     Sand:['#f5e9d0','#b7a17b'], Forest:['#e1e4cd','#4e7560'], Rose:['#f1e0da','#ae8584']};
   const modules = [['database','▤','Database'],['analysis','♙','Analysis board'],['repertoire','♧','Repertoire'],
     ['masters','♜','Master games'],['imports','⇣','Online & imports'],['studies','▱','Study folders'],
-    ['training','◉','Blindfold training'],['tactics','♞','Tactics'],['settings','⚙','Appearance']];
+    ['training','◉','Blindfold training'],['tactics','♞','Tactics'],['settings','⚙','Settings']];
   let content, nav, crumb, board, preview, poll, liveTimer;
+  let engineQueue=Promise.resolve();
   async function api(path, body, method) {
+    if(path==='engine/live'&&(body||method==='DELETE')){
+      engineQueue=engineQueue.catch(()=>{}).then(()=>rawApi(path,body,method));
+      return engineQueue;
+    }
+    return rawApi(path,body,method);
+  }
+  async function rawApi(path, body, method) {
     const response = await fetch('/api/' + path, {method:method || (body ? 'POST' : 'GET'),
       headers:body ? {'Content-Type':'application/json'} : {}, body:body ? JSON.stringify(body) : undefined});
     const data = await response.json();
+    if(data.batch_id&&state.view==='imports')await importHistory();
     if (!response.ok) throw new Error(data.error || 'Request failed');
     return data;
   }
   function act(fn) { return async function (event) {try {await fn(event);} catch(err) {App.toast(err.message,5000);}}; }
   function button(text, fn, cls) {return h('button.btn' + (cls ? '.' + cls : ''), {type:'button',text,onclick:act(fn)});}
   function link(text,url) {return h('a',{text,href:url,target:'_blank',rel:'noopener noreferrer'});}
-  function field(label, control) {return h('label.field',[h('span',{text:label}),control]);}
+  function field(label, control) {if(/INPUT|SELECT|TEXTAREA/.test(control.tagName)&&!control.hasAttribute('aria-label'))control.setAttribute('aria-label',label);return h('label.field',[h('span',{text:label}),control]);}
   function select(options,value,onchange) {const el=h('select',{onchange},options.map(o=>h('option',{value:Array.isArray(o)?o[0]:o,text:Array.isArray(o)?o[1]:o})));el.value=value;return el;}
   function heading(kicker,title,description,actions) {return h('div.page-heading',[h('div',[h('div.eyebrow',{text:kicker}),h('h1',{text:title}),h('p',{text:description})]),h('div.toolbar',actions||[])]);}
   function card(title,body,actions) {return h('section.card',[h('div.card-head',[h('h2',{text:title}),h('div.toolbar',actions||[])]),body]);}
@@ -35,7 +44,92 @@
     const [c,f]=await Promise.all([api('collections'),api('study/folders')]);
     state.collections=c.collections;state.folders=f.folders;state.assignments=f.assignments;state.studyRoot=f.root;
   }
+  async function storageSettings(){
+    const bridge=window.pywebview?.api;
+    const info=bridge?.storage_info?await bridge.storage_info():{path:(await api('stats')).data_dir};
+    const path=h('input',{value:info.path,readonly:true,'aria-label':'Current storage folder'});
+    const status=h('p.status-message',{text:info.error?'The storage change could not be completed: '+info.error:info.pending?'Next launch: '+info.pending:''});
+    const selection=h('p.muted');
+    const use=button('Use selected folder',async()=>{
+      const result=await window.pywebview.api.use_storage_folder();
+      if(result.error)throw new Error(result.error);
+      status.textContent='Saved. Close all Caissa windows and reopen the app to copy your library to '+result.pending+'. The current library stays active until then.';
+      use.disabled=true;cancel.hidden=false;selection.textContent='';
+    },'primary');use.disabled=true;
+    const choose=button('Browse folders…',async()=>{
+      if(!window.pywebview?.api?.choose_storage_folder)throw new Error('Open the desktop app (desktop.py or Caissa.exe) to use the native folder picker.');
+      const selected=await window.pywebview.api.choose_storage_folder();
+      selection.textContent=selected?'Selected: '+selected:'';use.disabled=!selected;
+    });
+    const cancel=button('Cancel pending change',async()=>{await window.pywebview.api.cancel_storage_change();status.textContent='Storage change cancelled. Your current folder is unchanged.';cancel.hidden=true;selection.textContent='';use.disabled=true;});cancel.hidden=!info.pending;
+    if(info.overridden){choose.disabled=true;use.disabled=true;status.textContent='DATA_DIR controls this launch. Remove that override to choose a folder here.';}
+    content.append(card('Storage location',h('div.card-pad',[field('Current storage folder',path),h('p.muted',{text:'Games, studies, repertoires, settings, trainer progress, and cached data stay together in this folder. Choose an empty folder; Caissa copies everything on the next launch and retains the original as a backup.'}),
+      ...(!bridge?.storage_info?[h('p.muted',{text:'The native folder picker is available in the desktop app. Browser launches use the saved folder too.'})]:[]),
+      h('div.toolbar',[choose,use,cancel]),selection,status])));
+  }
+  async function deleteMatching(reload){
+    const data=await api('games/delete-preview',{filters:state.filters});
+    if(!data.total){App.toast('No games match these filters.');return;}
+    modal('Delete '+data.total.toLocaleString()+' matching games?',(body,close)=>{
+      body.append(h('p',{text:'All active filters are combined. This removes the matching games from your library index; original PGN text stays on disk.'}),
+        h('pre',{text:JSON.stringify(state.filters,null,2)}),
+        ...data.sample.map(g=>h('p',{text:g.white+' — '+g.black+' · '+g.date})),
+        h('div.dialog-actions',[button('Cancel',close),button('Delete '+data.total+' games',async()=>{const r=await api('games/delete-confirm',{token:data.token});close();App.toast(r.deleted+' games removed');state.offset=0;await reload();},'danger')]));
+    });
+  }
+  async function importHistory(){
+    if(state.view!=='imports')return;
+    const data=await api('import/history');
+    let panel=content.querySelector('.import-history');
+    if(!panel){panel=h('section.card.card-pad.import-history');content.append(panel);}
+    panel.replaceChildren(h('h2',{text:'Recent imports'}),h('p.muted',{text:'Undo removes only games added by that import, including partially completed imports. Duplicates already in your library are preserved.'}),
+      ...data.batches.filter(b=>b.games||b.undone).map(b=>h('div.context-item',[h('span',{text:b.label+' · '+new Date(b.created_at*1000).toLocaleString()+' · '+b.games+' games'}),
+        ...(b.games?[button('Undo import',async()=>{if(!confirm('Remove the '+b.games+' games added by this import?'))return;await api('import/undo',{batch_id:b.id});await importHistory();})]:[h('span',{text:' · Undone'})])])),button('Refresh import history',importHistory));
+  }
+  function resizeBoard(holder){
+    const handle=h('button.board-resize',{type:'button',text:'◢',title:'Drag to resize board','aria-label':'Resize board'});
+    holder.append(handle);holder.style.position='relative';
+    const apply=width=>{const grid=holder.closest('.analysis-grid');const reserve=window.innerWidth>1400?550:window.innerWidth>950?300:0;const max=Math.max(260,Math.min(1000,grid.getBoundingClientRect().width-reserve));const size=Math.max(260,Math.min(max,width));grid.style.setProperty('--board-size',size+'px');};
+    if(state.prefs.boardSize)apply(state.prefs.boardSize);
+    handle.addEventListener('pointerdown',e=>{e.preventDefault();handle.setPointerCapture(e.pointerId);const x=e.clientX,width=holder.getBoundingClientRect().width;
+      const move=e=>apply(width+e.clientX-x);
+      const end=act(async()=>{handle.removeEventListener('pointermove',move);handle.removeEventListener('pointerup',end);handle.removeEventListener('pointercancel',end);state.prefs.boardSize=holder.getBoundingClientRect().width;await savePrefs();});
+      handle.addEventListener('pointermove',move);handle.addEventListener('pointerup',end);handle.addEventListener('pointercancel',end);
+    });
+  }
+  function boardEditor(){modal('Board editor',(body,close)=>{
+    let map=new Chess(state.node.fenAfter).piecesMap();
+    const holder=h('div.board-holder',{style:{width:'min(400px,100%)',margin:'auto'}}),b=new Board(holder,{viewOnly:true});
+    const piece=select([['','Erase'],...['w','b'].flatMap(c=>['k','q','r','b','n','p'].map(t=>[c+t,(c==='w'?'White ':'Black ')+({k:'king',q:'queen',r:'rook',b:'bishop',n:'knight',p:'pawn'}[t])]))],'wk');
+    const fenInput=h('input',{value:state.node.fenAfter}),turn=select([['w','White'],['b','Black']],state.node.fenAfter.split(' ')[1]),castling=h('input',{value:state.node.fenAfter.split(' ')[2]}),ep=h('input',{value:state.node.fenAfter.split(' ')[3]});
+    function sync(){const ranks=[];for(let r=8;r>=1;r--){let row='',empty=0;for(const f of 'abcdefgh'){const p=map[f+r];if(!p){empty++;continue;}if(empty){row+=empty;empty=0;}row+=p.color==='w'?p.type.toUpperCase():p.type;}if(empty)row+=empty;ranks.push(row);}fenInput.value=ranks.join('/')+' '+turn.value+' '+(castling.value||'-')+' '+(ep.value||'-')+' 0 1';b.setPieces(map);}
+    holder.addEventListener('click',e=>{const square=b._keyAt(e);if(!square)return;if(piece.value)map[square]={color:piece.value[0],type:piece.value[1]};else delete map[square];sync();});
+    for(const control of [turn,castling,ep])control.addEventListener('change',sync);
+    body.append(h('p',{text:'Choose a piece and click squares, or paste a FEN. Applying creates a new study.'}),field('Piece',piece),holder,field('Side to move',turn),field('Castling rights (KQkq or -)',castling),field('En passant square (or -)',ep),field('FEN',fenInput),
+      h('div.toolbar',[button('Clear board',()=>{map={};castling.value='-';ep.value='-';sync();}),button('Starting position',()=>{map=new Chess().piecesMap();turn.value='w';castling.value='KQkq';ep.value='-';sync();})]),
+      h('div.dialog-actions',[button('Cancel',close),button('Apply position',()=>{
+        const fen=fenInput.value.trim(),parts=fen.split(/\s+/),ranks=(parts[0]||'').split('/');
+        if(parts.length!==6||ranks.length!==8||ranks.some(r=>!/^[prnbqkPRNBQK1-8]+$/.test(r)||[...r].reduce((n,c)=>n+(Number(c)||1),0)!==8)||!/^[wb]$/.test(parts[1])||!/^(-|K?Q?k?q?)$/.test(parts[2])||!/^(-|[a-h][36])$/.test(parts[3])||!/^\d+$/.test(parts[4])||! /^[1-9]\d*$/.test(parts[5]))throw new Error('Enter a valid six-field FEN.');
+        if((parts[0].match(/K/g)||[]).length!==1||(parts[0].match(/k/g)||[]).length!==1||/[pP]/.test(ranks[0]+ranks[7]))throw new Error('Place one king of each color and no pawns on the first or eighth rank.');
+        const g=new Chess(fen),pieces=g.piecesMap(),wk=Object.keys(pieces).find(k=>pieces[k].color==='w'&&pieces[k].type==='k'),bk=Object.keys(pieces).find(k=>pieces[k].color==='b'&&pieces[k].type==='k');
+        if(Math.abs(wk.charCodeAt(0)-bk.charCodeAt(0))<=1&&Math.abs(Number(wk[1])-Number(bk[1]))<=1)throw new Error('Kings cannot be adjacent.');
+        if(state.dirty&&!confirm('Discard unsaved analysis and use this position?'))return;
+        state.selected=null;state.parsed=PGN.parse('[Event "Edited position"]\n[White "White"]\n[Black "Black"]\n[SetUp "1"]\n[FEN "'+g.fen()+'"]\n[Result "*"]\n\n*');state.node=state.parsed.root;state.dirty=true;close();go('analysis');
+      },'primary')]));b.setPieces(map);
+  });}
+  async function mentorSearch(){
+    const player=h('input',{placeholder:'Fischer',value:'Fischer'}),opening=h('input',{placeholder:"King's Indian",value:"King's Indian"}),eco=h('input',{value:'E60'}),ecoEnd=h('input',{value:'E99'}),results=h('div');
+    content.append(card('Search PGN Mentor player collections',h('div.card-pad',[field('Player surname',player),field('Opening name (when no ECO range)',opening),h('div.toolbar',[field('ECO from',eco),field('ECO through',ecoEnd)]),button('Find collections',async()=>{
+      results.textContent='Searching PGN Mentor…';const data=await api('masters/catalog?'+new URLSearchParams({q:player.value}));results.replaceChildren(...data.players.map(p=>h('div.context-item',[h('b',{text:p.name}),button('Import & find matching games',async()=>{
+        const collection='Masters / '+p.name;await api('import/source',{path:p.url,collection});state.filters={collection,player:player.value,eco:eco.value,eco_to:ecoEnd.value};if(!eco.value)state.filters.opening=opening.value;state.offset=0;await go('database');
+      })])));if(!data.players.length)results.textContent='No player collections found. Try a surname.';
+    },'primary'),h('p.muted',{text:'Downloads the selected player collection, then combines your filters locally. E60–E99 finds King’s Indian games even when the PGN has no opening name.'}),results])));
+  }
   function applyPrefs() {
+    Board.setPieceSet(state.prefs.pieceSet||'cburnett');
+    for(const b of [board,preview,App.board])if(b)b.refreshPieceArt();
+    document.body.classList.toggle('dark-theme',state.prefs.darkMode===true);
+    document.body.classList.toggle('color-lines',state.prefs.colorLines===true);
     const p=state.prefs, colors=themes[p.theme]||themes.Sage;
     document.documentElement.style.setProperty('--light-sq',p.light||colors[0]);
     document.documentElement.style.setProperty('--dark-sq',p.dark||colors[1]);
@@ -60,6 +154,7 @@
     state.selected=game;state.parsed=parsed;state.node=parsed.root;state.dirty=false;await go('analysis');
   }
   async function go(view) {
+    if(state.analysisCleanup){state.analysisCleanup();state.analysisCleanup=null;}
     clearInterval(poll);clearTimeout(liveTimer);const ticket=++state.route;state.view=view;
     document.body.classList.toggle('training',view==='training');document.getElementById('trainer').hidden=view!=='training';
     nav.querySelectorAll('button').forEach(b=>b.classList.toggle('active',b.dataset.view===view));
@@ -80,9 +175,9 @@
     const q=h('input',{placeholder:'Search players, openings, events…',value:state.filters.q||'',type:'search','aria-label':'Search games'});
     let timer;q.addEventListener('input',()=>{clearTimeout(timer);timer=setTimeout(()=>{state.filters.q=q.value;state.offset=0;loadGames();},250);});
     const cols=select([['','All collections'],...state.collections.map(c=>[String(c.id),c.name])],state.filters.collection||'',()=>{state.filters.collection=cols.value;state.offset=0;loadGames();});
-    const sort=select([['date','Newest played'],['date_asc','Oldest played'],['elo','Highest rated'],['white','White player'],['length','Longest games']],state.filters.sort||'date',()=>{state.filters.sort=sort.value;loadGames();});
+    const sort=select([['added','Recently added'],['date','Newest played'],['date_asc','Oldest played'],['elo','Highest rated'],['white','White player'],['length','Longest games']],state.filters.sort||'date',()=>{state.filters.sort=sort.value;loadGames();});
     const rows=h('tbody'),count=h('span'),pager=h('div.pagination');
-    const filters=h('div.filters',[q,cols,sort,button('Filters',()=>filterDialog(loadGames))]);
+    const filters=h('div.filters',[q,cols,sort,button('Filters',()=>filterDialog(loadGames)),button('Delete matching games',()=>deleteMatching(loadGames),'danger')]);
     const table=h('div.table-scroll',[h('table.games',[h('thead',[h('tr',['Players','Result','Opening','Date'].map(t=>h('th',{text:t})))]),rows])]);
     const list=h('section.card',[filters,table,pager]);
     const aside=h('div.library-aside.section-stack');
@@ -101,21 +196,24 @@
       pager.replaceChildren(count,h('div.toolbar',[prev,next]));
     }
     let previewRequest=0;
-    async function showPreview(g){const id=++previewRequest;try{const {game}=await api('games/'+g.id);if(id!==previewRequest)return;const parsed=PGN.parse(game.pgn);const line=PGN.mainline(parsed.root);preview.setPosition(line[Math.min(15,line.length-1)]?.fenAfter||parsed.startFen);previewDetails.replaceChildren(h('h3',{text:g.white+' — '+g.black}),h('p.muted',{text:g.event+' · '+g.date}),button('Open analysis →',()=>openGame(g.id),'primary'));}catch(err){App.toast(err.message);}}
+    async function showPreview(g){const id=++previewRequest;try{const {game}=await api('games/'+g.id);if(id!==previewRequest)return;const parsed=PGN.parse(game.pgn);const line=PGN.mainline(parsed.root);preview.setPosition(line[line.length-1]?.fenAfter||parsed.startFen);previewDetails.replaceChildren(h('h3',{text:g.white+' — '+g.black}),h('p.muted',{text:g.event+' · '+g.date}),button('Open analysis →',()=>openGame(g.id),'primary'));}catch(err){App.toast(err.message);}}
     await loadGames();
   }
-  function filterDialog(reload){modal('Find the games that matter',(body,close)=>{const inputs={};[['player','Player'],['eco','ECO prefix'],['opening','Opening'],['year','Year'],['min_elo','Minimum rating'],['event','Event'],['min_length','Minimum plies'],['max_length','Maximum plies'],['tag','Tag']].forEach(([k,t])=>{inputs[k]=h('input',{value:state.filters[k]||''});body.append(field(t,inputs[k]));});const result=select([['','Any result'],'1-0','0-1','1/2-1/2','*'],state.filters.result||'');body.append(field('Result',result),h('div.dialog-actions',[button('Clear',()=>{state.filters={};state.offset=0;close();go('database');}),button('Apply',()=>{Object.entries(inputs).forEach(([k,v])=>state.filters[k]=v.value);state.filters.result=result.value;state.offset=0;close();return reload();},'primary')]));});}
+  function filterDialog(reload){modal('Find the games that matter',(body,close)=>{const inputs={};[['player','Player'],['eco','ECO prefix'],['opening','Opening'],['year','Year'],['min_elo','Minimum rating'],['event','Event'],['min_length','Minimum plies'],['max_length','Maximum plies'],['tag','Tag'],['added_from','Added on or after (YYYY-MM-DD)'],['added_to','Added on or before (YYYY-MM-DD)'],['position','Position FEN (indexed positions)'],['eco_to','ECO range end (optional)']].forEach(([k,t])=>{inputs[k]=h('input',{value:state.filters[k]||''});body.append(field(t,inputs[k]));});const result=select([['','Any result'],'1-0','0-1','1/2-1/2','*'],state.filters.result||'');body.append(field('Result',result),h('div.dialog-actions',[button('Clear',()=>{state.filters={};state.offset=0;close();go('database');}),button('Apply',()=>{Object.entries(inputs).forEach(([k,v])=>state.filters[k]=v.value);state.filters.result=result.value;state.offset=0;close();return reload();},'primary')]));});}
   async function analysis() {
     if(!state.parsed)newGame();
     const parsed=state.parsed;
     const saveBtn=button(state.dirty?'Save changes *':'Save game',saveGame,'primary');
     content.append(heading('Understand every move',parsed.headers.White+' — '+parsed.headers.Black,[parsed.headers.Event,parsed.headers.Date].filter(Boolean).join(' · ')||'An open board for your ideas',[
-      button('Export PGN',()=>download(serialize(parsed),'caissa-study.pgn')),button('Add to repertoire',addToRepertoire),saveBtn]));
+      button('Reset board',()=>{if(state.dirty&&!confirm('Discard unsaved analysis and reset to the starting position?'))return;newGame();go('analysis');}),button('Board editor',boardEditor),button('Export PGN',()=>download(serialize(parsed),'caissa-study.pgn')),button('Add to repertoire',addToRepertoire),saveBtn]));
     const holder=h('div.board-holder'),moves=h('div.move-tree'),engineBody=h('div',[h('p.muted',{style:{padding:'16px'},text:'Analyze a position with your bundled Stockfish.'})]),contextBody=h('div.context-body');
     const comment=h('textarea',{rows:3,placeholder:'What is the idea in this position?','aria-label':'Position comment'});
     const nag=select([['','No annotation'],['$1','! Good move'],['$2','? Mistake'],['$3','!! Brilliant'],['$4','?? Blunder'],['$5','!? Interesting'],['$6','?! Inaccuracy']], '');
-    let live=false,evalRequest=0,contextRequest=0;
-    const liveBox=h('input',{type:'checkbox',onchange:()=>{live=liveBox.checked;if(live)evaluate();else clearTimeout(liveTimer);}});
+    let live=false,evalRequest=0,contextRequest=0,liveId=null,livePoll=null,closed=false,latestLines=[],tbRequest=0;
+    const resources=h('p.muted',{text:'CPU and memory appear during live analysis.'});
+    const arrows=h('input',{type:'checkbox',checked:state.prefs.bestArrows!==false,onchange:act(async()=>{state.prefs.bestArrows=arrows.checked;drawBest();await savePrefs();})});
+    const colorLines=h('input',{type:'checkbox',checked:!!state.prefs.colorLines,onchange:act(async()=>{state.prefs.colorLines=colorLines.checked;await savePrefs();})});
+    const liveBox=h('input',{type:'checkbox',onchange:()=>{live=liveBox.checked;if(live)evaluate();else {clearTimeout(liveTimer);clearTimeout(livePoll);++evalRequest;liveId=null;api('engine/live',null,'DELETE').catch(()=>{});}}});
     const pv=select(['1','2','3','5'],'3');
     const notation=card('Notation',h('div',[moves,h('div.editor',[field('Position comment',comment),nag,h('div.toolbar',[
       button('Keep annotation',()=>{state.node.comment=comment.value;state.node.nags=nag.value?[nag.value]:[];markDirty();renderMoves();}),
@@ -125,21 +223,34 @@
     controls.querySelectorAll('button').forEach((b,i)=>b.setAttribute('aria-label',['First position','Previous move','Next move','Last move','Flip board'][i]));
     const fen=h('div.fen');const sanInput=h('input',{placeholder:'Enter a move, e.g. Nf3','aria-label':'Move in SAN'});
     const moveForm=h('form.toolbar',{onsubmit:act(e=>{e.preventDefault();play(sanInput.value);sanInput.value='';})},[sanInput,h('button.btn',{text:'Play move',type:'submit'})]);
-    const blind=select([['off','Show pieces'],['pieces','Blindfold'],['full','Hide board']],'off',()=>board.setBlindfold(blind.value));
-    const peek=button('Hold to peek',()=>{});peek.addEventListener('pointerdown',()=>board.setPeeking(true));['pointerup','pointerleave','pointercancel'].forEach(e=>peek.addEventListener(e,()=>board.setPeeking(false)));
+    const tablebaseBody=h('div.card-pad');const tablebaseToggle=h('input',{type:'checkbox',onchange:()=>renderTablebase()});
     content.append(h('div.analysis-grid',[h('div.analysis-board',[
       h('div.player-strip',[h('b',{text:parsed.headers.Black||'Black'}),h('span.muted',{text:parsed.headers.BlackElo||''})]),holder,
-      h('div.player-strip',[h('b',{text:parsed.headers.White||'White'}),h('span.muted',{text:parsed.headers.WhiteElo||''})]),controls,moveForm,h('div.toolbar',{style:{marginTop:'12px'}},[blind,peek]),fen]),
-      h('div.section-stack',[notation,card('Stockfish · local analysis',h('div',[h('div.filters',[h('label.toolbar',[liveBox,'Live analysis']),pv,button('Analyze',evaluate)]),engineBody]),[button('Annotate game',annotate)]),
-      card('Game tags',h('div.card-pad',[button('Edit tags',editTags),button('Train blindfolded',()=>drillLine(PGN.mainline(parsed.root),parsed.startFen)),button('Delete game',deleteGame,'danger')]))]),
+      h('div.player-strip',[h('b',{text:parsed.headers.White||'White'}),h('span.muted',{text:parsed.headers.WhiteElo||''})]),controls,moveForm,h('div.toolbar',[button('Copy FEN',async()=>{await navigator.clipboard.writeText(state.node.fenAfter);App.toast('FEN copied');}),button('Clear arrows',()=>board.setShapes([]))]),h('p.muted',{text:'Wheel: moves · Right drag: arrows · Shift: blue · Ctrl: red · Alt: yellow'}),fen,card('Endgame tablebase',h('div',[h('label.toolbar.card-pad',[tablebaseToggle,'Show exact endgame results (online)']),tablebaseBody]))]),
+      h('div.section-stack',[notation,card('Stockfish · local analysis',h('div',[h('div.filters',[h('label.toolbar',[liveBox,'Live analysis']),field('Lines',pv),button('Analyze',evaluate),h('label.toolbar',[arrows,'Best move arrows']),h('label.toolbar',[colorLines,'Color variations'])]),resources,engineBody]),[button('Annotate game',annotate)]),
+      card('Game tags',h('div.card-pad',[button('Edit tags',editTags),button('Delete game',deleteGame,'danger')]))]),
       h('aside.analysis-context.card',[contextTabs,contextBody]) ]));
-    board=new Board(holder,{viewOnly:false});applyPrefs();
+    board=new Board(holder,{viewOnly:false});applyPrefs();resizeBoard(holder);
+    let wheelAt=0;holder.addEventListener('wheel',e=>{e.preventDefault();if(!e.deltaY||Date.now()-wheelAt<100)return;wheelAt=Date.now();jump(e.deltaY>0?(state.node.children[0]||state.node):(state.node.parent||state.node));},{passive:false});
+    pv.addEventListener('change',()=>{if(live)evaluate();});
     function markDirty(){state.dirty=true;saveBtn.textContent='Save changes *';}
-    function jump(n){state.node=n;render();}
+    function jump(n){if(n===state.node)return;state.node=n;board.setShapes([]);render();}
     function play(input){const g=new Chess(state.node.fenAfter);const moved=g.move(input);if(!moved)throw new Error('That move is not legal in this position.');let n=state.node.children.find(c=>c.san===moved.san);if(!n){n={san:moved.san,move:moved,parent:state.node,children:[],fenAfter:g.fen(),comment:null,nags:[],ply:state.node.ply+1};state.node.children.push(n);markDirty();}jump(n);}
     function renderMoves(){moves.replaceChildren();function walk(parent,target){if(!parent.children.length)return;const n=parent.children[0];append(n,target);for(const alt of parent.children.slice(1)){const sub=h('div.variation');append(alt,sub);walk(alt,sub);target.append(sub);}walk(n,target);}function append(n,target){const f=n.parent.fenAfter.split(' ');target.append(h('button'+(n===state.node?'.current':''),{text:f[5]+(f[1]==='w'?'. ':'… ')+n.san+' '+n.nags.map(v=>({'$1':'!','$2':'?','$3':'!!','$4':'??','$5':'!?','$6':'?!'}[v]||v)).join(''),onclick:()=>jump(n)}));if(n.comment)target.append(h('span.move-comment',{text:n.comment}));}walk(parsed.root,moves);if(!parsed.root.children.length)moves.append(h('p.muted',{text:'Move a piece or enter SAN to begin. Alternative moves become saved variations.'}));}
-    function render(){const g=new Chess(state.node.fenAfter);board.setPosition(g);board.setLastMove(state.node.move||null);board.setMovable({color:g.turnColor(),dests:g.destinationsMap(),onMove:(from,to)=>{const p=g.get(from);if(p?.type==='p'&&/[18]$/.test(to)){modal('Promote pawn',(body,close)=>body.append(h('div.toolbar',['q','r','b','n'].map(promo=>button(promo.toUpperCase(),()=>{close();play({from,to,promotion:promo});})))));}else play({from,to});}});comment.value=state.node.comment||'';nag.value=state.node.nags[0]||'';fen.textContent=state.node.fenAfter;renderMoves();renderContext();clearTimeout(liveTimer);if(live)liveTimer=setTimeout(evaluate,350);}
-    async function evaluate(){const id=++evalRequest,position=state.node.fenAfter;engineBody.replaceChildren(h('p.muted',{style:{padding:'16px'},text:'Stockfish is thinking…'}));try{const data=await api('engine/analyze',{fen:position,movetime:600,multipv:Number(pv.value)});if(id!==evalRequest||state.view!=='analysis'||state.node.fenAfter!==position)return;engineBody.replaceChildren(...data.lines.map(l=>{const g=new Chess(position),sans=[];for(const m of l.pv||[]){const done=g.move(m);if(!done)break;sans.push(done.san);}const sign=position.split(' ')[1]==='w'?1:-1;const score=l.mate!==undefined?'M'+(l.mate*sign):(sign*(l.cp||0)/100).toFixed(2);return h('div.engine-line',[h('strong',{text:score}),h('span',{text:sans.join(' ')}),h('div',[h('small',{text:'Depth '+l.depth+' · evaluation from White’s perspective'})])]);}));}catch(err){engineBody.replaceChildren(h('p.error-message',{style:{padding:'16px'},text:err.message}));}}
+    function render(){const g=new Chess(state.node.fenAfter);board.setPosition(g);board.setLastMove(state.node.move?[state.node.move.from,state.node.move.to]:null);board.setMovable({color:g.turnColor(),dests:g.destinationsMap(),onMove:(from,to)=>{const p=g.get(from);if(p?.type==='p'&&/[18]$/.test(to)){modal('Promote pawn',(body,close)=>body.append(h('div.toolbar',['q','r','b','n'].map(promo=>button(promo.toUpperCase(),()=>{close();play({from,to,promotion:promo});})))));}else play({from,to});}});comment.value=state.node.comment||'';nag.value=state.node.nags[0]||'';fen.textContent=state.node.fenAfter;latestLines=[];drawBest();renderTablebase();renderMoves();renderContext();clearTimeout(liveTimer);if(live)liveTimer=setTimeout(evaluate,350);}
+    function drawBest(){board.setShapes(arrows.checked?latestLines.filter(l=>l.pv?.[0]).map((l,i)=>({from:l.pv[0].slice(0,2),to:l.pv[0].slice(2,4),brand:['green','blue','red','yellow','green'][i]})):[],{answer:true});}
+    function showEvaluation(data,position){latestLines=data.lines||[];drawBest();engineBody.replaceChildren(...latestLines.map((l,i)=>{const g=new Chess(position),sans=[];for(const m of l.pv||[]){const done=g.move(m);if(!done)break;sans.push(done.san);}const sign=position.split(' ')[1]==='w'?1:-1;const score=l.mate!=null?'M'+l.mate*sign:(sign*(l.cp||0)/100).toFixed(2);return h('div.engine-line',{style:{'--line-color':['#488b60','#4682b4','#c05a55','#b99732'][i%4]}},[h('strong',{text:score}),h('span',{text:sans.join(' ')}),h('small',{text:' Depth '+l.depth+' · White perspective'})]);}));if(data.cpu_percent!=null)resources.textContent='CPU '+data.cpu_percent.toFixed(1)+'% (100% = one core) · Memory '+data.memory_mb+' MB';else resources.textContent='Install psutil for measured CPU and memory usage.';}
+    async function evaluate(){clearTimeout(livePoll);const id=++evalRequest,position=state.node.fenAfter;
+      try{const data=await api('engine/live',{fen:position,multipv:Number(pv.value)});if(closed||id!==evalRequest)return;liveId=data.id;
+        async function update(){try{const result=await api('engine/live');if(closed||id!==evalRequest||result.id!==liveId||state.node.fenAfter!==position)return;if(result.lines.length)showEvaluation(result,position);if(result.error)throw new Error(result.error);if(result.running)livePoll=setTimeout(update,250);}catch(err){if(!closed&&id===evalRequest)resources.textContent=err.message;}}
+        live=true;liveBox.checked=true;await update();
+      }catch(err){if(!closed&&id===evalRequest)resources.textContent=err.message;}}
+    async function renderTablebase(){const id=++tbRequest,position=state.node.fenAfter;tablebaseBody.replaceChildren();if(!tablebaseToggle.checked)return;
+      if(Object.keys(new Chess(position).piecesMap()).length>7){tablebaseBody.textContent='Available with seven or fewer pieces, including kings.';return;}
+      tablebaseBody.textContent='Looking up the endgame…';try{const data=await api('tablebase?'+new URLSearchParams({fen:position}));if(id!==tbRequest||closed)return;
+        const invert={win:'loss',loss:'win',draw:'draw','cursed-win':'blessed-loss','blessed-loss':'cursed-win','maybe-win':'maybe-loss','maybe-loss':'maybe-win','syzygy-win':'syzygy-loss','syzygy-loss':'syzygy-win'};
+        tablebaseBody.replaceChildren(h('b',{text:(position.split(' ')[1]==='w'?'White':'Black')+' to move: '+data.category}),h('p.muted',{text:'DTZ '+(data.dtz??'unknown')+' · Cursed wins and blessed losses draw under the 50-move rule.'}),...(data.moves||[]).map(m=>button(m.san+' · '+(invert[m.category]||m.category)+' · DTZ '+(m.dtz??'?'),()=>play(m.uci))));
+      }catch(err){if(id===tbRequest&&!closed)tablebaseBody.textContent=err.message;}}
     async function renderContext(){const id=++contextRequest,position=state.node.fenAfter;contextTabs.querySelectorAll('button').forEach(b=>b.classList.toggle('active',b.textContent===state.context));contextBody.replaceChildren(h('p.muted',{text:'Finding connections…'}));try{const data=await api('study/position?'+new URLSearchParams({fen:position}));if(id!==contextRequest||state.view!=='analysis')return;contextBody.replaceChildren();
       if(state.context==='Library'){contextBody.append(h('p.muted',{text:data.indexed_games.toLocaleString()+' games position-indexed · first 24 plies'}));if(!data.moves.length)contextBody.append(h('p',{text:'No indexed continuations here. Index a collection from Study folders.'}));for(const m of data.moves)contextBody.append(h('div.context-item',[button(m.san,()=>play(m.san)),h('span.muted',{text:'  '+m.games+' games · '+m.white+' / '+m.draws+' / '+m.black})]));for(const g of data.games.slice(0,12))contextBody.append(h('div.context-item',[button(g.white+' — '+g.black,()=>openGame(g.id)),h('div.muted',{text:g.date+' · '+g.result})]));}
       if(state.context==='History'){const earliest=data.games.find(g=>g.date&&!g.date.startsWith('0000'));contextBody.append(h('div.eyebrow',{text:'First seen in your indexed library'}),h('h3',{text:earliest?earliest.white+' — '+earliest.black:'No dated games indexed'}),h('p.muted',{text:earliest?earliest.event+' · '+earliest.date:'Import historical games and index their collection to discover provenance.'}));if(earliest)contextBody.append(button('Open earliest game',()=>openGame(earliest.id)));const max=Math.max(1,...data.decades.map(d=>d.games));for(const d of data.decades)contextBody.append(h('div.timeline-bar',[h('span',{text:d.decade+'s'}),h('i',{style:{width:(d.games/max*110)+'px'}}),h('span',{text:d.games})]));contextBody.append(h('p.muted',{text:'Dates and counts come from your indexed PGNs; this is not a claim of the first game ever played.'}));}
@@ -150,7 +261,7 @@
     async function deleteGame(){if(!state.selected)throw new Error('This game has not been saved.');if(confirm('Remove this game from your library index?')){await api('games/'+state.selected.id,null,'DELETE');newGame();go('database');}}
     render();
     const key=e=>{if(state.view!=='analysis'||/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)||document.querySelector('dialog[open]'))return;if(e.key==='ArrowLeft'){e.preventDefault();jump(state.node.parent||state.node);}if(e.key==='ArrowRight'){e.preventDefault();jump(state.node.children[0]||state.node);}};
-    document.addEventListener('keydown',key);const oldGoCleanup=()=>document.removeEventListener('keydown',key);state.analysisCleanup=oldGoCleanup;
+    document.addEventListener('keydown',key);const oldGoCleanup=()=>{closed=true;++evalRequest;++tbRequest;clearTimeout(livePoll);document.removeEventListener('keydown',key);api('engine/live',null,'DELETE').catch(()=>{});};state.analysisCleanup=oldGoCleanup;
   }
   async function saveGame(){if(state.selected){await api('games/'+state.selected.id,{pgn:serialize(state.parsed)},'PUT');state.dirty=false;App.toast('Annotations saved to PGN');return go('analysis');}
     modal('Save to your library',(body,close)=>{const collection=h('input',{value:'My games',list:'collection-names'}),event=h('input',{value:state.parsed.headers.Event||'Study'});body.append(field('Study title / event',event),field('Collection',collection),h('datalist',{id:'collection-names'},state.collections.map(c=>h('option',{value:c.name}))),h('div.dialog-actions',[button('Cancel',close),button('Save',async()=>{state.parsed.headers.Event=event.value;const data=await api('games',{pgn:serialize(state.parsed),collection:collection.value});state.dirty=false;close();App.toast(data.added?'Saved to your library':'This game is already in your library');const found=await api('games?'+new URLSearchParams({collection:collection.value,sort:'added',limit:1}));if(found.games.length)await openGame(found.games[0].id);},'primary')]));});}
@@ -170,31 +281,35 @@
   function folderDialog(parent){modal('Create a study folder',(body,close)=>{const name=h('input',{placeholder:'e.g. Autumn tournament preparation'}),parents=select([['','Top level'],...state.folders.map(f=>[String(f.id),f.path])],parent?String(parent):'');body.append(field('Folder name',name),field('Inside',parents),h('div.dialog-actions',[button('Cancel',close),button('Create folder',async()=>{await api('study/folders',{name:name.value,parent_id:parents.value?Number(parents.value):null});close();go('studies');},'primary')]));});}
   function collectionDialog(){modal('Create a collection',(body,close)=>{const name=h('input',{placeholder:'e.g. My annotated tournament games'});body.append(field('Collection name',name),h('div.dialog-actions',[button('Cancel',close),button('Create',async()=>{await api('collections',{name:name.value});close();go('studies');},'primary')]));});}
   function assignDialog(folder){modal('Add a collection to '+folder.name,(body,close)=>{const choices=select(state.collections.map(c=>[String(c.id),c.name]),String(state.collections[0]?.id||''));body.append(field('Collection',choices),h('p.muted',{text:'A collection belongs to one study folder. Its PGN remains in the library’s collections directory; the folder manifest records its location.'}),h('div.dialog-actions',[button('Cancel',close),button('Save',async()=>{if(!choices.value)throw new Error('Create a collection first.');await api('study/assign',{folder_id:folder.id,collection_id:Number(choices.value)});close();go('studies');},'primary')]));});}
-  async function imports(){content.append(heading('Bring your chess home','Import games','PGN files, master collections, and your own online games — together in one library.'));const collection=h('input',{value:'My games'}),status=h('div.status-message'),pgn=h('textarea',{rows:9,placeholder:'Paste one game or an entire collection in PGN format…'}),files=h('input',{type:'file',accept:'.pgn',multiple:true});
-    async function imported(data){status.textContent=`Added ${data.added} games · ${data.duplicates} duplicates · ${data.skipped||0} skipped`;await refreshMeta();}
+  async function imports(){await importHistory();content.append(heading('Bring your chess home','Import games','PGN files, master collections, and your own online games — together in one library.'));const collection=h('input',{value:'My games'}),status=h('div.status-message'),pgn=h('textarea',{rows:9,placeholder:'Paste one game or an entire collection in PGN format…'}),files=h('input',{type:'file',accept:'.pgn',multiple:true});
+    async function imported(data){status.textContent=`Added ${data.added} games · ${data.duplicates} duplicates · ${data.skipped||0} skipped`;await refreshMeta();await importHistory();}
     const paste=card('PGN files & clipboard',h('div.card-pad',[field('Save into collection',collection),field('Choose PGN files',files),pgn,h('div.toolbar',{style:{marginTop:'12px'}},[button('Import PGN',async()=>{status.textContent='Importing…';if(files.files.length){let totals={added:0,duplicates:0,skipped:0};for(const f of files.files){const result=await api('games',{pgn:await f.text(),collection:collection.value});for(const k of Object.keys(totals))totals[k]+=result[k]||0;}await imported(totals);}else await imported(await api('games',{pgn:pgn.value,collection:collection.value}));},'primary')]),status]));
     const source=select([['lichess','lichess'],['chesscom','chess.com']],'lichess'),user=h('input',{placeholder:'Username'}),max=h('input',{type:'number',value:100,min:1,max:2000}),token=h('input',{type:'password',placeholder:'Optional lichess token',autocomplete:'off'}),onlineStatus=h('p.status-message');
     const online=card('Your online games',h('div.card-pad',[field('Service',source),field('Username',user),field('Maximum games',max),field('lichess token',token),button('Import account games',async()=>{onlineStatus.textContent='Downloading games…';const result=await api('import/'+source.value,{user:user.value,max:Number(max.value),token:token.value,collection:collection.value});onlineStatus.textContent=`Added ${result.added} games · ${result.duplicates} duplicates`;},'primary'),onlineStatus,h('p.muted',{text:'Downloads need a connection. Imported games stay available offline.'})]));
     const path=h('input',{placeholder:'C:\\Chess\\TWIC or https://…/games.zip'}),pathStatus=h('p.status-message');const bulk=card('Archives, folders & URLs',h('div.card-pad',[field('Local path or URL',path),h('p.muted',{text:'Stream PGN, ZIP, GZ, BZ2 or optional ZST archives. A folder is scanned recursively. For CBH, CBV and SI4, export to PGN in the originating application.'}),button('Import source',async()=>{pathStatus.textContent='Reading source…';const result=await api('import/source',{path:path.value,collection:collection.value});pathStatus.textContent=`Added ${result.added} games · ${result.duplicates} duplicates`;},'primary'),pathStatus]));content.append(h('div.settings-grid',[paste,h('div.section-stack',[online,bulk])]));}
-  async function masters(){content.append(heading('Learn from the great games','Master games','Build your own reference library from freely available PGN collections.'));const week=h('input',{type:'number',placeholder:'TWIC issue number',min:1}),status=h('p.status-message');content.append(h('div.cards-grid',[
+  async function masters(){await mentorSearch();content.append(heading('Learn from the great games','Master games','Build your own reference library from freely available PGN collections.'));const week=h('input',{type:'number',placeholder:'TWIC issue number',min:1}),status=h('p.status-message');content.append(h('div.cards-grid',[
     h('section.card.study-card',[h('div.eyebrow',{text:'Weekly tournament games'}),h('h3',{text:'The Week in Chess'}),h('p.muted',{text:'Choose an issue to download its PGN archive into your Masters collection.'}),field('Issue number',week),button('Import issue',async()=>{if(!Number(week.value))throw new Error('Enter a TWIC issue number.');status.textContent='Downloading and importing…';const r=await api('import/source',{path:'https://theweekinchess.com/zips/twic'+Number(week.value)+'g.zip',collection:'Masters / TWIC'});status.textContent=`${r.added} games added · ${r.duplicates} duplicates`;},'primary'),status,link('Browse TWIC issues','https://theweekinchess.com/twic')]),
     h('section.card.study-card',[h('div.eyebrow',{text:'Players & tournaments'}),h('h3',{text:'PGN Mentor'}),h('p.muted',{text:'Find a player or event collection, then paste its download URL in Online & imports.'}),link('Browse free PGN collections','https://www.pgnmentor.com/files.html'),button('Import a collection',()=>go('imports'))]),
     h('section.card.study-card',[h('div.eyebrow',{text:'Your offline reference'}),h('h3',{text:'Explore by position'}),h('p.muted',{text:'After import, index a collection from Study folders. The analysis board will show continuations, results, and the earliest dated games at each position.'}),button('Manage position indexes',()=>go('studies'))]) ]));}
-  async function tactics(){content.append(heading('Recognize the opportunity','Tactics','Train online with Chess Tempo, or work through your own local problem sets.'));const grid=h('div.cards-grid');content.append(grid);grid.append(h('section.card.study-card',[h('div.eyebrow',{text:'Chess Tempo'}),h('h3',{text:'Your tactics trainer'}),h('p.muted',{text:'Use your own Chess Tempo account and training history. The native app opens the trainer in its own embedded window.'}),button('Open Chess Tempo',async()=>{if(window.pywebview?.api?.open_tactics)await window.pywebview.api.open_tactics();else window.open('https://chesstempo.com/chess-tactics/','_blank','noopener');},'primary')]));const puzzles=state.collections.filter(c=>c.kind==='puzzles'||/tactic|puzzle|problem/i.test(c.name));grid.append(h('section.card.study-card',[h('div.eyebrow',{text:'Offline problem sets'}),h('h3',{text:'Train your own positions'}),h('p.muted',{text:'Import your authorized PGN exports into a collection named Tactics. Open a problem and choose Train blindfolded to recall its solution.'}),button('Import problem set',()=>go('imports')),...puzzles.map(c=>button(c.name+' · '+c.games,()=>{state.filters={collection:String(c.id)};go('database');}))]));}
-  async function settings(){content.append(heading('Make the board yours','Appearance','A study space you want to return to. Preferences are saved with your local library.'));const holder=h('div.board-holder',{style:{maxWidth:'460px',margin:'auto'}});preview=new Board(holder,{viewOnly:true});preview.setPosition(new Chess());
+  async function tactics(){content.append(heading('Recognize the opportunity','Tactics','Train online with Chess Tempo, or work through your own local problem sets.'));const grid=h('div.cards-grid');content.append(grid);grid.append(h('section.card.study-card',[h('div.eyebrow',{text:'Chess Tempo'}),h('h3',{text:'Your tactics trainer'}),h('p.muted',{text:'We recommend Chess Tempo as the best place to train tactics. Use your own account and training history. The native app opens the trainer in its own embedded window.'}),button('Open Chess Tempo',async()=>{if(window.pywebview?.api?.open_tactics)await window.pywebview.api.open_tactics();else window.open('https://chesstempo.com/chess-tactics/','_blank','noopener');},'primary')]));const puzzles=state.collections.filter(c=>c.kind==='puzzles'||/tactic|puzzle|problem/i.test(c.name));grid.append(h('section.card.study-card',[h('div.eyebrow',{text:'Offline problem sets'}),h('h3',{text:'Train your own positions'}),h('p.muted',{text:'Import your authorized PGN exports into a collection named Tactics. Open a problem and choose Train blindfolded to recall its solution.'}),button('Import problem set',()=>go('imports')),...puzzles.map(c=>button(c.name+' · '+c.games,()=>{state.filters={collection:String(c.id)};go('database');}))]));}
+  async function settings(){content.append(heading('Make Caissa yours','Settings','Choose where your library lives and how your board looks.'));const holder=h('div.board-holder',{style:{maxWidth:'460px',margin:'auto'}});preview=new Board(holder,{viewOnly:true});preview.setPosition(new Chess());
     const swatches=h('div.swatches');Object.entries(themes).forEach(([name,colors])=>{const b=h('button.swatch'+((state.prefs.theme||'Sage')===name?'.active':''),{title:name,onclick:act(async()=>{state.prefs.theme=name;delete state.prefs.light;delete state.prefs.dark;await savePrefs();swatches.querySelectorAll('button').forEach(x=>x.classList.toggle('active',x===b));light.value=colors[0];dark.value=colors[1];})},[h('span',{style:{background:`conic-gradient(${colors[1]} 25%,${colors[0]} 0 50%,${colors[1]} 0 75%,${colors[0]} 0)`,backgroundSize:'31px 22px'}}),h('small',{text:name})]);swatches.append(b);});
     const colors=themes[state.prefs.theme]||themes.Sage,light=h('input',{type:'color',value:state.prefs.light||colors[0],oninput:act(async()=>{state.prefs.light=light.value;await savePrefs();})}),dark=h('input',{type:'color',value:state.prefs.dark||colors[1],oninput:act(async()=>{state.prefs.dark=dark.value;await savePrefs();})});
     const pieces=select([['classic','Classic · cburnett'],['outline','Crisp contrast'],['wood','Warm wood'],['slate','Soft graphite']],state.prefs.pieces||'classic',act(async()=>{state.prefs.pieces=pieces.value;await savePrefs();}));
+    await storageSettings();
+    const pieceSet=select([['cburnett','Cburnett'],['merida','Merida'],['chessnut','Chessnut']],state.prefs.pieceSet||'cburnett',act(async()=>{state.prefs.pieceSet=pieceSet.value;await savePrefs();}));
+    content.append(field('Piece set',pieceSet));
     const orientation=select([['w','White at the bottom'],['b','Black at the bottom']],state.prefs.orientation||'w',act(async()=>{state.prefs.orientation=orientation.value;await savePrefs();}));
     const coordinates=h('input',{type:'checkbox',checked:state.prefs.coordinates!==false,onchange:act(async()=>{state.prefs.coordinates=coordinates.checked;await savePrefs();})}),animate=h('input',{type:'checkbox',checked:state.prefs.animate!==false,onchange:act(async()=>{state.prefs.animate=animate.checked;await savePrefs();})});
-    content.append(h('div.settings-grid',[card('Board & pieces',h('div.card-pad',[field('Board palette',swatches),h('div.toolbar',[field('Light squares',light),field('Dark squares',dark)]),field('Piece treatment',pieces),field('Default orientation',orientation),field('Coordinates',coordinates),field('Animate moves',animate)])),card('Preview',h('div.card-pad',[holder,h('p.muted',{style:{marginTop:'20px'},text:'Your palette applies to analysis, previews, and all seven blindfold exercises.'})]))]));applyPrefs();}
+    content.append(h('div.settings-grid',[card('Board & pieces',h('div.card-pad',[field('Board palette',swatches),h('div.toolbar',[field('Light squares',light),field('Dark squares',dark)]),field('Dark theme',h('input',{type:'checkbox',checked:!!state.prefs.darkMode,onchange:act(async e=>{state.prefs.darkMode=e.target.checked;await savePrefs();})})),field('Piece treatment',pieces),field('Default orientation',orientation),field('Coordinates',coordinates),field('Animate moves',animate)])),card('Preview',h('div.card-pad',[holder,h('p.muted',{style:{marginTop:'20px'},text:'Your palette applies to analysis, previews, and all seven blindfold exercises.'})]))]));applyPrefs();}
   document.addEventListener('DOMContentLoaded',async()=>{
+    await App.persistenceReady;
     const initial=location.hash;const originalGo=go; // App boots first so the original trainer stays intact.
     const root=document.getElementById('workspace');nav=h('nav.module-nav',{'aria-label':'Workspace'});
     modules.forEach(([id,icon,title])=>{const b=h('button',{onclick:()=>{if(state.analysisCleanup){state.analysisCleanup();state.analysisCleanup=null;}go(id);}},[h('span',{'aria-hidden':true,text:icon}),title]);b.dataset.view=id;nav.append(b);});
     crumb=h('strong',{text:'Database'});content=h('div.desk-body');root.append(h('aside.sidebar',[
       h('div.caissa-brand',[h('img',{src:'assets/caissa-128.png',alt:'Caissa, muse of chess'}),h('div',[h('strong',{text:'Caissa'}),h('small',{text:'THE CHESS STUDY'})])]),
-      h('div',[h('div.nav-label',{text:'Workspace'}),nav]),h('div.sidebar-foot',[h('b',{text:'Your chess. Your library.'}),h('span',{text:'Local files · portable PGN'})])]),
+      h('div',[h('div.nav-label',{text:'Workspace'}),nav]),h('div.sidebar-foot',[h('img',{src:'assets/caissa-128.png',alt:'Caissa',width:48,height:48}),h('b',{text:'Your chess. Your library.'}),h('span',{text:'Local files · portable PGN'})])]),
       h('div.desk',[h('header.desk-top',[h('div.crumb',['Workspace  /  ',crumb]),h('span.local-badge',{text:'Local library'})]),content]));
     try{const pref=await api('settings/appearance');state.prefs=JSON.parse(pref.value||'{}');}catch(err){/* Defaults remain usable if settings are unavailable. */}applyPrefs();
     window.Caissa={state,api,go,serialize,openGame};window.addEventListener('beforeunload',e=>{if(state.dirty){e.preventDefault();e.returnValue='';}});

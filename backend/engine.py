@@ -155,20 +155,22 @@ class Engine:
                 i += 1
         return out
 
-    def analyze(self, fen, movetime=None, depth=None, multipv=1):
+    def analyze(self, fen, movetime=None, depth=None, multipv=1, on_update=None):
         """Blocking analysis of one position. Returns the best lines, best first."""
         with self.lock:
             self.start()
             self.set_option("MultiPV", max(1, int(multipv)))
             self._send("position fen " + fen)
-            if depth:
+            if on_update:
+                self._send('go infinite')
+            elif depth:
                 self._send("go depth %d" % int(depth))
             else:
                 self._send("go movetime %d" % int(movetime or 1000))
 
             lines = {}
             best_move = None
-            deadline = time.time() + 300
+            deadline = float('inf') if on_update else time.time() + 300
             while True:
                 if time.time() > deadline:
                     self._send("stop")
@@ -180,6 +182,8 @@ class Engine:
                 if raw.startswith("info ") and " pv " in raw:
                     parsed = self._parse_info(raw)
                     lines[parsed.get("multipv", 1)] = parsed
+                    if on_update:
+                        on_update([lines[k] for k in sorted(lines)])
                 elif raw.startswith("bestmove"):
                     bits = raw.split()
                     best_move = bits[1] if len(bits) > 1 else None
@@ -192,6 +196,58 @@ class Engine:
                 "lines": ordered,
                 "engine": self.name,
             }
+
+
+class LiveAnalysis:
+    """Dedicated UCI process so batch annotation cannot block live updates."""
+    def __init__(self):
+        self.engine = Engine()
+        self.lock = threading.Lock()
+        self.thread = None
+        self.state = {'running': False, 'lines': [], 'id': None}
+        self.monitor = None
+
+    def stop(self):
+        if self.thread and self.thread.is_alive():
+            self.engine.stop()
+            self.thread.join(timeout=4)
+        self.state['running'] = False
+
+    def start(self, fen, multipv):
+        import uuid
+        with self.lock:
+            self.stop()
+            self.engine = Engine()
+            self.engine.start()
+            self.state = dict(id=uuid.uuid4().hex, fen=fen, running=True, lines=[])
+            try:
+                import psutil
+                self.monitor = psutil.Process(self.engine.proc.pid)
+                self.monitor.cpu_percent()
+            except ImportError:
+                self.monitor = None
+            self.thread = threading.Thread(target=self._run, args=(fen, multipv), daemon=True)
+            self.thread.start()
+            return self.status()
+
+    def _run(self, fen, multipv):
+        try:
+            self.engine.analyze(fen, multipv=multipv,
+                on_update=lambda lines: self.state.update(lines=lines))
+        except Exception as err:
+            self.state['error'] = str(err)
+        finally:
+            self.state['running'] = False
+
+    def status(self):
+        state = self.state.copy()
+        if self.monitor and state['running']:
+            try:
+                state['cpu_percent'] = self.monitor.cpu_percent()
+                state['memory_mb'] = round(self.monitor.memory_info().rss / 1048576, 1)
+            except Exception:
+                pass
+        return state
 
 
 class AnnotationJob:

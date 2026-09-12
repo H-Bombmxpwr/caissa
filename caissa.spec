@@ -2,7 +2,7 @@
 # PyInstaller spec for Caissa. Build with: .\build.ps1
 import os
 
-ROOT = os.path.abspath(os.getcwd())
+ROOT = os.path.abspath(SPECPATH)
 
 datas = [
     (os.path.join(ROOT, 'index.html'), '.'),
@@ -14,7 +14,7 @@ datas = [
 ]
 
 a = Analysis(
-    ['desktop.py'],
+    [os.path.join(ROOT, 'desktop.py')],
     pathex=[ROOT],
     binaries=[],
     datas=datas,

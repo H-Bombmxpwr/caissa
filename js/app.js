@@ -15,7 +15,7 @@
         if (k === 'class') e.className += (e.className ? ' ' : '') + v;
         else if (k === 'text') e.textContent = v;
         else if (k === 'html') e.innerHTML = v;
-        else if (k === 'style' && typeof v === 'object') Object.assign(e.style, v);
+        else if (k === 'style' && typeof v === 'object') Object.entries(v).forEach(([name,value])=>{if(name.startsWith('--'))e.style.setProperty(name,value);else e.style[name]=value;});
         else if (k.slice(0, 2) === 'on') e.addEventListener(k.slice(2).toLowerCase(), v);
         else if (k === 'value') e.value = v;
         else e.setAttribute(k, v === true ? '' : v);
@@ -31,11 +31,14 @@
 
   /* ---------- persistence ---------- */
   const STORE_KEY = 'blindfold-trainer-v1';
+  let saveQueue=Promise.resolve();
   function loadStore() {
     try { return JSON.parse(localStorage.getItem(STORE_KEY)) || {}; } catch (e) { return {}; }
   }
   function saveStore(data) {
     try { localStorage.setItem(STORE_KEY, JSON.stringify(data)); } catch (e) { /* private mode */ }
+    const value=JSON.stringify(data);
+    saveQueue=saveQueue.catch(()=>{}).then(()=>fetch('/api/settings/trainer',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({value}),keepalive:true})).catch(()=>{});
   }
 
   const App = {
@@ -360,5 +363,9 @@
   };
 
   global.App = App;
-  document.addEventListener('DOMContentLoaded', function () { App.boot(); });
+  App.persistenceReady=fetch('/api/settings/trainer').then(r=>r.json()).then(data=>{
+    if(data.value){App.store=JSON.parse(data.value);Object.assign(App.settings,App.store.settings||{});}
+    else if(Object.keys(App.store).length)saveStore(App.store);
+  }).catch(()=>{});
+  document.addEventListener('DOMContentLoaded', async function () { await App.persistenceReady;App.boot(); });
 })(window);

@@ -17,6 +17,8 @@ import sqlite3
 import threading
 import time
 import hashlib
+import uuid
+from datetime import datetime, timedelta
 
 from . import pgnutil
 
@@ -90,8 +92,17 @@ class Library:
         self.db_path = os.path.join(self.dir, "library.db")
         self._local = threading.local()
         self._write_lock = threading.Lock()
+        self._active_imports = set()
         with self.connect() as conn:
             conn.executescript(SCHEMA)
+            conn.executescript('''
+                CREATE TABLE IF NOT EXISTS import_batches (
+                  id TEXT PRIMARY KEY, created_at INTEGER, label TEXT, undone INTEGER DEFAULT 0);
+                CREATE TABLE IF NOT EXISTS import_members (
+                  batch TEXT REFERENCES import_batches(id),
+                  game_id INTEGER REFERENCES games(id) ON DELETE CASCADE,
+                  PRIMARY KEY(batch, game_id));
+            ''')
             columns = {r[1] for r in conn.execute('PRAGMA table_info(games)')}
             if 'signature' not in columns:
                 conn.execute('ALTER TABLE games ADD COLUMN signature TEXT')
@@ -231,7 +242,7 @@ class Library:
                     added += 1
 
             for collection_id, relpath, offset, length, meta, src in rows:
-                conn.execute(
+                cursor = conn.execute(
                     """INSERT OR IGNORE INTO games
                        (collection_id, path, byte_offset, byte_length, white, black,
                         white_elo, black_elo, result, date, event, site, round, eco,
@@ -247,6 +258,9 @@ class Library:
                         src, meta["source_id"], int(time.time()), meta['signature'],
                     ),
                 )
+                batch = getattr(self._local, 'batch', None)
+                if batch and cursor.rowcount:
+                    conn.execute('INSERT INTO import_members VALUES (?,?)', (batch, cursor.lastrowid))
             conn.commit()
 
         return {
@@ -292,7 +306,8 @@ class Library:
 
     def search(self, query=None, collection=None, player=None, white=None, black=None,
                eco=None, result=None, opening=None, min_elo=None, year=None,
-               sort="date", limit=100, offset=0, event=None, min_length=None, max_length=None, tag=None):
+               sort="date", limit=100, offset=0, event=None, min_length=None, max_length=None, tag=None,
+               added_from=None, added_to=None, position=None, eco_to=None):
         where, params = [], []
 
         if collection:
@@ -342,6 +357,24 @@ class Library:
         if tag:
             where.append('id IN (SELECT game_id FROM game_tags WHERE tag=?)')
             params.append(tag)
+        for value, operator, extra in ((added_from, '>=', 0), (added_to, '<', 1)):
+            if value:
+                stamp = (datetime.strptime(value, '%Y-%m-%d') + timedelta(days=extra)).timestamp()
+                where.append('added_at '+operator+' ?')
+                params.append(int(stamp))
+        if eco_to:
+            where.append('eco <= ?')
+            params.append(eco_to.upper())
+            if eco:
+                index = where.index('eco LIKE ?')
+                where[index] = 'eco >= ?'
+                # Each clause before ECO may have multiple parameters.
+                param_index = sum(clause.count('?') for clause in where[:index])
+                params[param_index] = eco.upper()
+        if position:
+            from .chess import Chess
+            where.append('id IN (SELECT game_id FROM positions WHERE hash=?)')
+            params.append(Chess(position).key())
 
         clause = (" WHERE " + " AND ".join(where)) if where else ""
         order = self.SORTS.get(sort, self.SORTS["date"])
@@ -349,11 +382,38 @@ class Library:
         total = conn.execute("SELECT COUNT(*) FROM games" + clause, params).fetchone()[0]
         rows = conn.execute(
             "SELECT id, collection_id, white, black, white_elo, black_elo, result, date, "
-            "event, site, round, eco, opening, ply_count, source, first_moves "
+            "event, site, round, eco, opening, ply_count, source, first_moves, added_at, signature, path, byte_offset, byte_length "
             "FROM games" + clause + " ORDER BY " + order + " LIMIT ? OFFSET ?",
             params + [int(limit), int(offset)],
         ).fetchall()
         return {"total": total, "games": [dict(r) for r in rows]}
+
+    def begin_import(self, label):
+        batch = uuid.uuid4().hex
+        with self._write_lock, self.connect() as db:
+            db.execute('INSERT INTO import_batches(id,created_at,label) VALUES (?,?,?)',
+                       (batch, int(time.time()), label))
+            self._active_imports.add(batch)
+        self._local.batch = batch
+        return batch
+
+    def end_import(self, batch):
+        with self._write_lock:
+            self._active_imports.discard(batch)
+        self._local.batch = None
+
+    def import_history(self):
+        return [dict(r) for r in self.connect().execute('''SELECT b.*,
+            (SELECT COUNT(*) FROM import_members m WHERE m.batch=b.id) AS games
+            FROM import_batches b ORDER BY created_at DESC, rowid DESC LIMIT 30''')]
+
+    def undo_import(self, batch):
+        with self._write_lock, self.connect() as db:
+            if batch in self._active_imports:
+                raise ValueError('Wait for this import to finish before undoing it')
+            count = db.execute('DELETE FROM games WHERE id IN (SELECT game_id FROM import_members WHERE batch=?)', (batch,)).rowcount
+            db.execute('UPDATE import_batches SET undone=1 WHERE id=?', (batch,))
+        return {'deleted': count}
 
     def delete_game(self, game_id):
         """Drops the index entry. The PGN text stays in the file until compacted."""

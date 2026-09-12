@@ -1,6 +1,7 @@
 # Runtime dependency for the desktop window (Edge WebView2 on Windows).
-# Everything else is Python standard library.
+# psutil measures the Stockfish process's CPU and resident memory.
 pywebview>=5.0
+psutil>=5.9
 
 # Optional: reading lichess .zst database dumps
 # zstandard>=0.22

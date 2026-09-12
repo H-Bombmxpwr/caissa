@@ -23,13 +23,17 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from backend.api import Api, ApiError          # noqa: E402
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.environ.get("DATA_DIR") or os.path.join(ROOT, "library")
+from backend.paths import default_data_dir
+DATA_DIR = default_data_dir()
 MAX_BODY = 256 * 1024 * 1024                   # PGN pastes can be large
 
-NO_CACHE = {".html", ".json", ".pgn"}
+NO_CACHE = {".html", ".json", ".pgn", ".js", ".css"}
 LONG_CACHE_SECONDS = 60 * 60 * 24 * 7
 
 api = Api(DATA_DIR)
+import atexit
+atexit.register(api.engine.stop)
+atexit.register(api.live.stop)
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -94,6 +98,8 @@ class Handler(SimpleHTTPRequestHandler):
         except Exception as err:                                # noqa: BLE001
             traceback.print_exc()
             self._send_json(500, {"error": "%s: %s" % (type(err).__name__, err)})
+        finally:
+            api.library.close()
 
     def do_GET(self):
         if self.path.startswith("/api/"):

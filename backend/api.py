@@ -9,9 +9,11 @@ import os
 import re
 import threading
 import time
+import uuid
+import urllib.parse
 
 from . import lichess
-from .engine import AnnotationJob, Engine, EngineError
+from .engine import AnnotationJob, Engine, EngineError, LiveAnalysis
 from .store import Library
 from .study import Study
 from . import importers
@@ -31,8 +33,10 @@ class Api:
         self.study = Study(self.library)
         self.crawler = lichess.MastersCrawler(self.library)
         self.engine = Engine()
+        self.live = LiveAnalysis()
         self.annotation = AnnotationJob(self.engine, self.library)
         self.import_lock = threading.Lock()
+        self.delete_previews = {}
         self.library.ensure_collection("My games")
 
     # ---------- dispatch ----------
@@ -50,6 +54,15 @@ class Api:
         if handler is None:
             raise ApiError("unknown endpoint: " + head, 404)
         try:
+            is_import = method == 'POST' and ((head == 'import' and rest[1:] != ['undo']) or (head == 'games' and len(rest) == 1))
+            if is_import:
+                batch = self.library.begin_import((body or {}).get('collection') or 'Import')
+                try:
+                    status, payload = handler(method, rest[1:], query, body)
+                    payload['batch_id'] = batch
+                    return status, payload
+                finally:
+                    self.library.end_import(batch)
             return handler(method, rest[1:], query, body)
         except (ValueError, KeyError) as err:
             raise ApiError(str(err)) from err
@@ -126,6 +139,32 @@ class Api:
         raise ApiError("unsupported collections request", 405)
 
     def _route_games(self, method, rest, query, body):
+        if rest == ['delete-preview'] and method == 'POST':
+            filters = dict((body or {}).get('filters') or {})
+            filters.pop('limit', None)
+            filters.pop('offset', None)
+            if 'q' in filters:
+                filters['query'] = filters.pop('q')
+            allowed = {'query','collection','player','white','black','eco','eco_to','result','opening','min_elo','year','sort','event','min_length','max_length','tag','added_from','added_to','position'}
+            if set(filters) - allowed:
+                raise ApiError('Unknown filter')
+            found = self.library.search(**filters, limit=-1)
+            token = uuid.uuid4().hex
+            now = time.time()
+            self.delete_previews = {k:v for k,v in self.delete_previews.items() if now-v[0]<600}
+            # Bind confirmation to row identity as well as id (SQLite may reuse ids).
+            ids = [(g['id'],g['signature'],g['path'],g['byte_offset'],g['byte_length']) for g in found['games']]
+            self.delete_previews[token] = (now, ids)
+            return 200, {'token': token, 'total': found['total'], 'sample': found['games'][:10]}
+        if rest == ['delete-confirm'] and method == 'POST':
+            entry = self.delete_previews.pop((body or {}).get('token'), None)
+            if not entry or time.time()-entry[0]>600:
+                raise ApiError('Deletion preview expired; preview the filters again')
+            with self.library._write_lock, self.library.connect() as db:
+                count = 0
+                for identity in entry[1]:
+                    count += db.execute('DELETE FROM games WHERE id=? AND signature=? AND path=? AND byte_offset=? AND byte_length=?',identity).rowcount
+            return 200, {'deleted': count}
         if method == "GET" and not rest:
             return 200, self.library.search(
                 query=query.get("q"),
@@ -141,6 +180,10 @@ class Api:
                 sort=query.get("sort", "date"),
                 limit=min(int(query.get("limit", 100)), 500),
                 offset=int(query.get("offset", 0)),
+                event=query.get('event'), min_length=query.get('min_length'),
+                max_length=query.get('max_length'), tag=query.get('tag'),
+                added_from=query.get('added_from'), added_to=query.get('added_to'),
+                position=query.get('position'), eco_to=query.get('eco_to'),
             )
         if method == "GET" and rest:
             game = self.library.game(int(rest[0]))
@@ -171,6 +214,10 @@ class Api:
         raise ApiError("unsupported games request", 405)
 
     def _route_import(self, method, rest, query, body):
+        if method == 'GET' and rest == ['history']:
+            return 200, {'batches': self.library.import_history()}
+        if method == 'POST' and rest == ['undo']:
+            return 200, self.library.undo_import((body or {})['batch_id'])
         if method != "POST" or not rest:
             raise ApiError("unsupported import request", 405)
         kind = rest[0]
@@ -248,6 +295,23 @@ class Api:
 
         raise ApiError("unknown import source: " + kind, 404)
 
+    def _route_tablebase(self, method, rest, query, body):
+        from .chess import Chess
+        if method != 'GET':
+            raise ApiError('Use GET', 405)
+        fen = Chess(query['fen']).fen()
+        if sum(c.isalpha() for c in fen.split()[0]) > 7:
+            raise ApiError('Tablebase supports at most seven pieces, including kings')
+        cached = self.library.setting('tablebase:'+fen)
+        if cached:
+            return 200, json.loads(cached)
+        try:
+            data = json.loads(lichess._request('https://tablebase.lichess.org/standard?'+urllib.parse.urlencode({'fen':fen}), 'application/json'))
+        except Exception as err:
+            raise ApiError('Tablebase unavailable. Connect to the internet and try again.', 503) from err
+        self.library.setting('tablebase:'+fen, json.dumps(data))
+        return 200, data
+
     def _route_literature(self, method, rest, query, body):
         """Free study material for the line on the board."""
         if method != "GET":
@@ -295,6 +359,31 @@ class Api:
 
     def _route_masters(self, method, rest, query, body):
         action = rest[0] if rest else ""
+        if action == 'catalog' and method == 'GET':
+            from html.parser import HTMLParser
+            class Catalog(HTMLParser):
+                def __init__(self):
+                    super().__init__()
+                    self.players = {}
+                def handle_starttag(self, tag, attrs):
+                    href = dict(attrs).get('href', '')
+                    if tag == 'a' and re.fullmatch(r'players/[A-Za-z0-9_-]+\.(pgn|zip)', href):
+                        name = href.split('/')[-1][:-4]
+                        self.players[name] = {'name': name, 'url':'https://www.pgnmentor.com/'+href}
+            cached = self.library.setting('mentor_catalog')
+            if cached:
+                players = json.loads(cached)
+            else:
+                try:
+                    parser = Catalog()
+                    parser.feed(lichess._request('https://www.pgnmentor.com/files.html','text/html'))
+                    players = list(parser.players.values())
+                    if players:
+                        self.library.setting('mentor_catalog',json.dumps(players))
+                except Exception as err:
+                    raise ApiError('Could not load PGN Mentor. Check your connection.',503) from err
+            needle = query.get('q','').strip().casefold()
+            return 200, {'players':[p for p in players if needle in p['name'].casefold()][:100]}
         if action == "status" and method == "GET":
             return 200, self.crawler.status()
         if action == "crawl" and method == "POST":
@@ -342,6 +431,20 @@ class Api:
     def _route_engine(self, method, rest, query, body):
         action = rest[0] if rest else "info"
         body = body or {}
+        if action == 'live':
+            if method == 'GET':
+                return 200, self.live.status()
+            if method == 'DELETE':
+                with self.live.lock:
+                    self.live.stop()
+                return 200, {'stopped': True}
+            if method == 'POST':
+                from .chess import Chess
+                fen = Chess(body['fen']).fen()
+                try:
+                    return 200, self.live.start(fen, max(1, min(5, int(body.get('multipv', 3)))))
+                except EngineError as err:
+                    raise ApiError(str(err), 503) from err
 
         if action == "info" and method == "GET":
             return 200, self.engine.info()

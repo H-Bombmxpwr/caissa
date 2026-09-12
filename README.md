@@ -32,17 +32,96 @@ py -m venv .venv
 | `py desktop.py --smoke` | start, check health, print paths, exit |
 | `py server.py` | plain server on <http://localhost:8000>, no window |
 
-Your library lives in `./library` when running from source and in
-`%APPDATA%\Caissa\library` once installed. Override either with `DATA_DIR`.
+Your library lives in `%APPDATA%\Caissa\library` on Windows, for both source and
+executable launches. It stays outside the software folder, so replacing or deleting
+the application and downloading it again preserves your games and settings.
+Override this location with `DATA_DIR`. On Linux/macOS the default is
+`$XDG_DATA_HOME/Caissa/library` or `~/.local/share/Caissa/library`.
+
+In the desktop app, open **Settings → Storage location → Browse folders…** to use
+the native folder picker. Select an empty folder and click **Use selected folder**.
+Close all Caissa windows and reopen: Caissa copies the whole library, including the
+latest changes, to that folder before opening it. The original remains as a backup.
+You can cancel the pending change in Settings before restarting. Failed copies keep
+the original library active and display an error in Settings.
+
+The selected path is remembered in `%APPDATA%\Caissa\storage.json` (the corresponding
+Caissa app-data folder on other platforms), outside the application installation.
+This small location file stays there so a fresh download can find your chosen folder.
+Browser launches also honor this setting, but the native folder picker requires the
+desktop app. An explicit `DATA_DIR` override takes precedence and disables relocation
+through Settings. Reconnect an external drive before launching if it holds your library.
+
+On the first source launch, an existing `./library` is copied to the new location
+if that location does not exist; the original is retained. Close older copies of
+Caissa before migrating. An explicit `DATA_DIR` always takes precedence.
+
+Back up the **whole library folder while Caissa is closed**: PGN files, `library.db`,
+study folders, and any SQLite sidecar files. The database contains annotations' current
+file offsets, deletion state, repertoires, tags, import history, preferences, trainer
+progress, and cached lookups. PGNs alone do not preserve all that information.
+Browser storage is only a fallback for training progress; the local API saves it to disk.
+The library path is returned by `/api/health` and printed by `desktop.py --smoke`.
 
 ## Building the .exe
 
 ```powershell
+cd path\to\blindfold
+py -m venv .venv
+.venv\Scripts\python -m pip install -r requirements.txt
 .venv\Scripts\python -m pip install pyinstaller
+.venv\Scripts\python tools\fetch_stockfish.py
 .\build.ps1
+.\dist\Caissa\Caissa.exe
 ```
 
 Output lands in `dist\Caissa\`. Stockfish and the web assets are bundled in.
+Distribute or copy the **entire `dist\Caissa` directory**, including `_internal`;
+the executable does not require Python on the target machine. The desktop window
+requires Microsoft Edge WebView2. To make a downloadable archive:
+
+```powershell
+Compress-Archive -Path .\dist\Caissa -DestinationPath .\dist\Caissa-Windows.zip -Force
+```
+
+The build never bundles your personal library. Keep `DATA_DIR` outside the app folder
+if you override it, for example `$env:DATA_DIR = 'D:\ChessLibrary'` before launching.
+
+## Workbench controls
+
+- Database previews show the last recorded mainline position, including the final
+  position of full games. The preview stays beside the list while scrolling.
+- **Filters** combine player, opening/ECO range, event, result, rating, move length,
+  tags, date added, collection, and position. **Delete matching games** previews the
+  count and examples, then deletes exactly those unchanged entries after confirmation.
+  Deleted entries leave their original PGN text on disk; collection exports omit them.
+- **Online & imports → Recent imports → Undo import** removes only games newly
+  added by that batch. Existing duplicates survive. History persists across restarts;
+  partially completed archive imports can also be undone. Imports made before this
+  feature have no batch history: use collection/date filters for those.
+- Index a collection from **Study folders** before searching its positions. Indexing
+  now includes the entire game; re-index older collections to include their endgames.
+- On the analysis board, scroll the wheel to step through moves. Right-drag draws an
+  arrow; right-click draws a circle. Shift uses blue, Ctrl red, Alt yellow; unmodified
+  drawing uses green. Repeat a shape to remove it, or use **Clear arrows**.
+- Drag the board's lower-right corner to resize it. **Copy FEN**, **Reset board**, and
+  **Board editor** are available directly in analysis. Editing starts a new study;
+  save it to keep it. Blindfold controls belong to the trainer.
+- **Analyze / Live analysis** runs continuous Stockfish search. Lines and depth update
+  without replacing them with a thinking message. Toggle **Best move arrows** and
+  **Color variations** separately. CPU is measured with 100% representing one core;
+  memory is the engine process's resident memory, not its configured hash size.
+- Toggle **Endgame tablebase** for positions with at most seven pieces. The initial
+  lookup needs internet; cached positions remain available offline. Results are from
+  the side-to-move perspective, including each candidate move's result for that player.
+  Cursed wins and blessed losses account for the 50-move rule. No large tablebase files
+  are bundled. API semantics: [lichess tablebase](https://github.com/lichess-org/lila-tablebase#http-api).
+- **Master games** searches the [PGN Mentor catalog](https://www.pgnmentor.com/files.html),
+  imports the selected player collection, then applies local filters. For Fischer's
+  King's Indian games, use Fischer and ECO E60–E99. This works even without opening
+  names in the PGN; it does not search an un-downloaded game's moves remotely.
+- **Appearance** includes dark mode, Cburnett/Merida/Chessnut piece sets, board palettes,
+  and animation preferences. All are stored with your library.
 
 ## Where things live
 
@@ -78,13 +157,23 @@ tests/                see below
 ## Tests
 
 ```powershell
-py -m unittest discover -s tests -p "test_*.py"    # backend: 52 tests, no network
+py -m unittest discover -s tests -p "test_*.py"    # backend regressions, no network
 powershell -File tests\run.ps1                     # chess engine perft + SAN + data validity
 ```
 
 The Python suite covers the library, every API route the workspace calls, the position index and
 its transposition keys, study folders, literature links, and the Python rules engine on the five
 standard perft positions.
+
+For the workbench interaction regressions (requires installed Microsoft Edge):
+
+```powershell
+.venv\Scripts\python -m pip install playwright
+.venv\Scripts\python tests\workbench_browser.py
+```
+
+This uses a temporary library and checks import undo, filtered deletion, board controls,
+continuous Stockfish, tablebase UI, settings persistence, and both browser smoke suites.
 
 `tests/run.ps1` puts the JavaScript rules engine through the same perft positions under Windows
 Script Host (no Node needed on this machine), plus SAN round-trips and a legality check of every
@@ -116,6 +205,10 @@ answers — only the position itself.
 Bundling Stockfish (GPLv3) and the cburnett piece set (GPL) makes this application **GPLv3**.
 
 - [Stockfish](https://github.com/official-stockfish/Stockfish) — engine
-- [lichess](https://lichess.org) — cburnett pieces, game export API, tablebase
+- [lichess](https://lichess.org) — piece distribution, game export API, tablebase;
+  board interactions informed by [Chessground](https://github.com/lichess-org/chessground)
+- Cburnett: Colin M. L. Burnett, GPLv2+; Merida: Armando Hernandez Marroquin, GPLv2+;
+  Chessnut: Alexis Luengas, Apache 2.0. See `assets/piece/LICHESS-COPYING.md` and the
+  bundled license texts. `py tools/fetch_pieces.py` refreshes the extra sets.
 - Chess Tempo — tactics, used in-app through their own site, never copied
 - Exercises: AdviceCabinet, *7 Levels of Blindfold Chess Exercises for Everyone*

@@ -26,6 +26,49 @@ sys.path.insert(0, ROOT)
 APP_NAME = "Caissa"
 
 
+class DesktopSettings:
+    """Native folder access is exposed only to the desktop window."""
+    def __init__(self, data_dir, overridden=False):
+        self.data_dir = data_dir
+        self.overridden = overridden
+        self.window = None
+        self.selected_folder = None
+
+    def storage_info(self):
+        from backend.paths import storage_preferences
+        prefs = storage_preferences()
+        return {'path': self.data_dir, 'overridden': self.overridden,
+                'pending': prefs.get('pending', {}).get('target'), 'error': prefs.get('error')}
+
+    def choose_storage_folder(self):
+        import webview
+        result = self.window.create_file_dialog(webview.FileDialog.FOLDER, directory=self.data_dir)
+        self.selected_folder = result[0] if result else None
+        return self.selected_folder
+
+    def use_storage_folder(self):
+        from backend.paths import schedule_storage_change
+        if self.overridden:
+            return {'error': 'DATA_DIR controls this launch. Remove that override before changing storage in Settings.'}
+        if not self.selected_folder:
+            return {'error': 'Choose a folder first.'}
+        try:
+            target = schedule_storage_change(self.data_dir, self.selected_folder)
+            self.selected_folder = None
+            return {'pending': target}
+        except (OSError, ValueError) as err:
+            return {'error': str(err)}
+
+    def cancel_storage_change(self):
+        from backend.paths import storage_preferences, save_storage_preferences
+        prefs = storage_preferences()
+        prefs.pop('pending', None)
+        prefs.pop('error', None)
+        save_storage_preferences(prefs)
+        self.selected_folder = None
+        return {'cancelled': True}
+
+
 def bundle_root():
     """Where the app's files live — the source tree, or the PyInstaller bundle."""
     return getattr(sys, "_MEIPASS", ROOT)
@@ -33,12 +76,8 @@ def bundle_root():
 
 def default_data_dir():
     """Installed apps keep their library in the user's app data, not next to the exe."""
-    if os.environ.get("DATA_DIR"):
-        return os.environ["DATA_DIR"]
-    if getattr(sys, "frozen", False):
-        base = os.environ.get("APPDATA") or os.path.expanduser("~")
-        return os.path.join(base, APP_NAME, "library")
-    return os.path.join(ROOT, "library")
+    from backend.paths import default_data_dir as resolve
+    return resolve()
 
 
 def free_port():
@@ -77,6 +116,7 @@ def main():
     parser.add_argument("--port", type=int, default=0)
     args = parser.parse_args()
 
+    overridden = bool(os.environ.get('DATA_DIR'))
     data_dir = default_data_dir()
     os.makedirs(data_dir, exist_ok=True)
     port = args.port or free_port()
@@ -102,12 +142,15 @@ def main():
         try:
             import webview                           # pywebview
 
+            settings = DesktopSettings(data_dir, overridden)
             window = webview.create_window(
                 APP_NAME, url,
+                js_api=settings,
                 width=1440, height=940, min_size=(1000, 680),
                 background_color="#161512",
                 text_select=True,
             )
+            settings.window = window
             start_args = {
                 "gui": None,
                 "private_mode": False,

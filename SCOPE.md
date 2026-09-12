@@ -35,15 +35,18 @@ Caissa.exe            PyInstaller bundle
   └── library/                your data — PGN files + SQLite index
 ```
 
-- **Backend**: Python standard library only (plus `pywebview` for the window). No web framework.
+- **Backend**: Python standard library, `psutil` for engine resource measurements,
+  and `pywebview` for the window. No web framework.
 - **Frontend**: plain HTML/CSS/JS, no build step, no npm. Chess rules run in the browser engine
   (`js/engine.js`) so the board is instant; the backend has its own copy (`backend/chess.py`) for
   indexing positions during import. Both are perft-verified against the same five positions.
 - **Data**: games live as ordinary `.pgn` files in `library/collections/<name>/games.pgn`; SQLite
   indexes them (offset + length per game) for instant search. Your data stays portable — any
   other program can read those files.
-- **Default library location**: `%APPDATA%\Caissa\library` when installed,
-  `./library` when run from source. Override with `DATA_DIR`.
+- **Default library location**: `%APPDATA%\Caissa\library` for source and installed
+  launches. Legacy source libraries are copied on first launch; override with `DATA_DIR`.
+  Desktop Settings includes a native folder picker. The chosen folder is remembered
+  outside the installation; the library is copied on next launch and the original retained.
 
 ## Modules
 
@@ -149,7 +152,7 @@ offline set, but it is not the default.
 ## Two pieces of machinery everything leans on
 
 ### The position index
-A table of `(position hash, game id, ply)` for the first ~24 plies of every game in an indexed
+A table of `(position hash, game id, ply)` for every recorded ply of every game in an indexed
 collection. It is what makes these possible:
 
 - "show me every game that reached this position", including by transposition
@@ -157,8 +160,8 @@ collection. It is what makes these possible:
 - repertoire gap analysis ("opponents played on here and my tree stops")
 - opening statistics from *your* library, so the app is useful with no network at all
 
-Indexing is per collection and opt-in, because a million games costs roughly 24M rows
-(a few hundred MB) and some minutes of CPU.
+Indexing is per collection and opt-in. Full-game indexing uses more disk and CPU than
+the original 24-ply opening index. Re-index older collections to include endgames.
 
 ### A chess rules engine in Python
 `backend/chess.py` mirrors the browser engine (`js/engine.js`): 0x88 move generation, SAN, FEN.

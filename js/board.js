@@ -14,7 +14,7 @@
      so work the base out from board.js' own URL instead of using a page-relative path. */
   const SCRIPT_SRC = (document.currentScript && document.currentScript.src) || '';
   const BASE = SCRIPT_SRC ? SCRIPT_SRC.replace(/\/js\/board\.js.*$/, '/') : '';
-  const PIECE_SET = 'cburnett';
+  let PIECE_SET = 'cburnett';
   function pieceUrl(piece) {
     return BASE + 'assets/piece/' + PIECE_SET + '/' +
       piece.color + piece.type.toUpperCase() + '.svg';
@@ -246,8 +246,8 @@
   Board.prototype.setPosition = function (fenOrGame, opts) {
     const game = (typeof fenOrGame === 'string') ? new Chess(fenOrGame) : fenOrGame;
     const o = opts || {};
-    if (o.check === undefined && game.inCheck && game.inCheck()) {
-      o.check = (game.turnColor() === 'w') ? findKing(game, 'w') : findKing(game, 'b');
+    if (o.check === undefined) {
+      o.check = game.inCheck && game.inCheck() ? findKing(game, game.turnColor()) : null;
     }
     this.setPieces(game.piecesMap(), o);
   };
@@ -366,6 +366,25 @@
 
   Board.prototype._bindInput = function () {
     const self = this;
+    this.wrap.addEventListener('contextmenu', e => e.preventDefault());
+    this.wrap.addEventListener('pointerdown', function(e) {
+      if (self.opts.viewOnly || e.button !== 2) return;
+      e.preventDefault();
+      const from = self._keyAt(e);
+      if (!from) return;
+      self.drawing = {from, brand:e.altKey?'yellow':e.ctrlKey?'red':e.shiftKey?'blue':'green'};
+      self.wrap.setPointerCapture(e.pointerId);
+    });
+    this.wrap.addEventListener('pointerup', function(e) {
+      if (!self.drawing) return;
+      const {from,brand}=self.drawing, to=self._keyAt(e);self.drawing=null;
+      if (!to) return;
+      const shape=from===to?{square:from,brand}:{from,to,brand};
+      const index=self.shapes.findIndex(s=>JSON.stringify(s)===JSON.stringify(shape));
+      if(index>=0)self.shapes.splice(index,1);else self.shapes.push(shape);
+      self._renderShapes();
+    });
+    this.wrap.addEventListener('pointercancel',()=>{self.drawing=null;});
 
     this.wrap.addEventListener('pointerdown', function (e) {
       if (self.opts.viewOnly) return;
@@ -409,12 +428,17 @@
       drag.el.classList.remove('dragging');
       drag.el.style.left = '';
       drag.el.style.top = '';
-      self._place(drag.el, drag.from, false);
+      // Leave a legal drop at its released location; setPosition animates to the square.
       const key = self._keyAt(e);
-      if (drag.moved && key && key !== drag.from) {
-        if (self._destsFrom(drag.from).indexOf(key) > -1) self._tryMove(drag.from, key);
-        else { self.selected = null; self._renderSquares(); }
-      }
+      if (e.type !== 'pointercancel' && drag.moved && key && key !== drag.from) {
+        drag.el.classList.remove('no-anim');
+        if (self._destsFrom(drag.from).indexOf(key) > -1) {
+          self._tryMove(drag.from, key);
+          // Promotion can open a dialog without committing a position yet.
+          if(self.pieces[drag.from]?.el===drag.el)self._place(drag.el,drag.from,true);
+        }
+        else { self._place(drag.el, drag.from, true);self.selected = null; self._renderSquares(); }
+      } else self._place(drag.el, drag.from, false);
     };
     this.wrap.addEventListener('pointerup', release);
     this.wrap.addEventListener('pointercancel', release);
@@ -438,4 +462,6 @@
   Board.prototype.selectSquare = function (key) { this.selected = key; this._renderSquares(); };
 
   global.Board = Board;
+  Board.setPieceSet = function(name){PIECE_SET=['cburnett','merida','chessnut'].includes(name)?name:'cburnett';};
+  Board.prototype.refreshPieceArt = function(){Object.values(this.pieces).forEach(p=>p.el.style.backgroundImage='url("'+pieceUrl(p)+'")');};
 })(window);
