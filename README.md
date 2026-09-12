@@ -182,7 +182,41 @@ panel with the existing panel controls. **Separate window** opens a dedicated re
 that you can move to a second monitor (a separate browser window/tab in browser mode).
 PDF viewing uses the browser/WebView2 PDF viewer; PDFs are not converted to playable games.
 
-## Opening book
+## Opening explorer
+
+A reference database answers *what do strong players play here*. The explorer answers a
+more useful question about your own games: **when you played this, what happened to you.**
+
+It opens on the **Collection tree**. Choose a collection, name yourself, and walk the tree
+move by move — every number reads from your side of the board, so a 38% score is 38% for
+you, not for White. Click a move in the list or play one on the board and the report
+follows; the line you are on is a clickable breadcrumb above the board. There is no depth
+limit, because the position index already holds every position of every game.
+
+Each move shows how often you played it, its share of the position, a win/draw/loss bar,
+your score, the average opponent rating and the year you last played it. **Score by year**
+turns the same games into a bar per year, which is where a line that used to work and
+stopped shows up first.
+
+**Where the points go** scans the whole tree for the lines that cost you most, ranked by
+*points dropped* — games multiplied by the shortfall against an even score — so a line you
+play often at 40% outranks one you played twice at 0%. Two kinds of entry are filtered
+out, because they say nothing of their own: pass-through nodes (every position along a
+losing line reports the same games, so only the deepest is kept) and pure aggregates
+("1.e4 cost you 3.5 points" is only its children added up).
+
+Filters narrow the whole report at once — collection, player, colour, time control, rated
+or casual, date range, and the *opponent's* rating. Time control and rated/casual are
+derived at import from the PGN's `TimeControl` tag and event name.
+
+It reads the position index, so a collection must be indexed before it has anything to
+say. Aggregation happens in the database rather than in the app, so it stays quick on
+collections far larger than one person's games: on 20,000 games and 87,000 indexed
+positions, the opening position answers in about 45 ms and the full weakest-line scan in
+about half a second. See the
+[explorer guide](https://h-bombmxpwr.github.io/caissa/guide/explorer.html).
+
+## Reference databases
 
 **Already installed:** Caissa includes an offline book built from the November 2025
 Lichess Elite game archive: 2500+ versus 2300+ players, excluding bullet. It opens by
@@ -548,6 +582,7 @@ backend/
   hardware.py         core counts, CPU temperature and power draw, where published
   repertoire.py       a PGN move tree walked into flat, drillable repertoire lines
   autoimport.py       watches a linked lichess account for newly played games
+  openingtree.py      the explorer's report: your results, move by move, over the index
   chess.py            chess rules in Python (0x88, perft-verified)
   study.py            position index, pins, study folders on disk
   books.py            PDF library metadata and file storage
@@ -594,6 +629,7 @@ For the workbench interaction regressions (requires installed Microsoft Edge):
 .venv\Scripts\python tests\workbench_browser.py
 .venv\Scripts\python tests\sounds_browser.py
 .venv\Scripts\python tests\autoimport_browser.py
+.venv\Scripts\python tests\explorer_browser.py
 .venv\Scripts\python tests\analysis_quality_browser.py
 ```
 

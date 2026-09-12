@@ -97,6 +97,29 @@ def normalize_date(value):
     return "%s.%s.%s" % (year, month, day)
 
 
+# lichess's own boundaries, in estimated seconds for the whole game. A PGN says
+# "300+3"; what a reader wants to filter on is "blitz".
+SPEEDS = ((29, "ultrabullet"), (179, "bullet"), (479, "blitz"), (1499, "rapid"))
+
+
+def speed_of(time_control):
+    """Bucket a PGN TimeControl tag. Unknown or correspondence returns ''."""
+    value = str(time_control or "").strip()
+    if not value or value in ("-", "?"):
+        return ""
+    if value.startswith("1/") or "/" in value:
+        return "correspondence"
+    base, _, increment = value.partition("+")
+    try:
+        estimate = int(float(base)) + 40 * int(float(increment or 0))
+    except ValueError:
+        return ""
+    for limit, name in SPEEDS:
+        if estimate <= limit:
+            return name
+    return "classical"
+
+
 def describe(game_text):
     """Everything the index wants to know about one game."""
     tags = headers(game_text)
@@ -140,6 +163,9 @@ def describe(game_text):
         "opening": tags.get("Opening", ""),
         "variant": tags.get("Variant", "Standard"),
         "time_control": tags.get("TimeControl", ""),
+        "speed": speed_of(tags.get("TimeControl")),
+        # lichess writes "Rated blitz game"; nothing else reliably says either way.
+        "rated": 1 if tags.get("Event", "").lower().startswith("rated") else 0,
         "fen": tags.get("FEN", ""),
         "ply_count": len(moves(game_text)),
         "first_moves": " ".join(first),

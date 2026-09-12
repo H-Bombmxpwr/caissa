@@ -38,6 +38,10 @@ index over them — delete it and your games are still there.
 Live Stockfish with up to five coloured lines, full search and machine telemetry, and
 one-click annotation of a whole game into your PGN.
 :::
+:::{grid-item-card} Your openings, judged
+Walk a collection's tree move by move and see what happened when *you* played it —
+scores from your side, trends by year, and the lines that cost the most points.
+:::
 :::{grid-item-card} Repertoires that drill
 Import a lichess study or any PGN with variations; every line becomes a spaced-repetition
 drill you play blindfold.
@@ -55,6 +59,7 @@ background for the game you are reading.
 guide/getting-started
 guide/database
 guide/importing
+guide/explorer
 guide/analysis
 guide/repertoire
 guide/lichess

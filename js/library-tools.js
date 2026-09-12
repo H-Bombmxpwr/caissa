@@ -77,14 +77,216 @@
     }catch(e){if(id===request)output.textContent=e.message;}}
     return {root,refresh};
   }
+  /* Your own openings, scored from your side of the board.
+
+     A reference book says what strong players do here. This says what happened when
+     *you* played it, which is the question worth asking of your own games: the score
+     is yours, the win/draw/loss bar is yours, and the trend shows whether a line has
+     stopped working. It reads the position index, so a collection must be indexed
+     before it has anything to say. */
+  function openingReport(getFen,onMove,onLine){
+    const {h,api,button,field,select}=get();
+    const collection=select([['','Every indexed collection']],'');
+    const names=h('datalist',{id:'tree-player-names'});
+    const player=h('input',{placeholder:'Your username, as it appears in the games',list:'tree-player-names',autocomplete:'off'});
+    const colour=select([['','Both colours'],['w','As White'],['b','As Black']],'');
+    const speed=select([['','Any time control'],['bullet','Bullet'],['blitz','Blitz'],
+                        ['rapid','Rapid'],['classical','Classical'],['correspondence','Correspondence'],
+                        ['blitz,rapid,classical','Blitz and slower']],'');
+    const rated=select([['','Rated and casual'],['1','Rated only'],['0','Casual only']],'');
+    const since=h('input',{placeholder:'From, e.g. 2023 or 2023-06'});
+    const until=h('input',{placeholder:'Until'});
+    const minElo=h('input',{type:'number',placeholder:'Opponent rating from',min:0});
+    const maxElo=h('input',{type:'number',placeholder:'…to',min:0});
+    const minGames=select([['2','2+ games'],['3','3+ games'],['5','5+ games'],['10','10+ games']],'3');
+    const summary=h('div.tree-summary');
+    const movesBody=h('div');
+    const trendBody=h('div.tree-trend');
+    const weakBody=h('div');
+    let request=0,timer;
+
+    function params(extra){
+      return new URLSearchParams(Object.entries({
+        collection:collection.value,player:player.value.trim(),color:colour.value,
+        speed:speed.value,rated:rated.value,since:since.value.trim(),until:until.value.trim(),
+        min_opponent_elo:minElo.value,max_opponent_elo:maxElo.value,...(extra||{}),
+      }).filter(([,v])=>v!==''&&v!=null));
+    }
+    const pct=v=>v==null?'—':v.toFixed(1)+'%';
+    function resultBar(entry){
+      const total=entry.games||1;
+      const part=(n,cls,label)=>n?h('i.'+cls,{style:{width:(100*n/total)+'%'},title:label+': '+n}):null;
+      return h('div.wdl',[part(entry.wins,'won','Wins'),part(entry.draws,'drew','Draws'),
+                          part(entry.losses,'lost','Losses')].filter(Boolean));
+    }
+
+    function showSummary(data){
+      const t=data.totals;
+      if(!t.games){
+        summary.replaceChildren(h('p.muted',{text:data.player
+          ?'No indexed games by '+data.player+' reached this position with these filters.'
+          :'No indexed games reached this position. Name a player above, or index a collection below.'}));
+        return;
+      }
+      summary.replaceChildren(
+        h('div.tree-score',[h('strong',{text:pct(t.score_pct)}),
+          h('small',{text:(data.player?data.player+'’s score':'White’s score')+' from here'})]),
+        h('div.tree-counts',[
+          h('div',[h('b',{text:t.games.toLocaleString()}),h('small',{text:'games'})]),
+          h('div',[h('b',{text:t.wins}),h('small',{text:'won'})]),
+          h('div',[h('b',{text:t.draws}),h('small',{text:'drawn'})]),
+          h('div',[h('b',{text:t.losses}),h('small',{text:'lost'})]),
+          ...(t.avg_opponent_elo?[h('div',[h('b',{text:t.avg_opponent_elo}),h('small',{text:'avg opponent'})])]:[]),
+        ]),
+        resultBar(t));
+    }
+
+    function showMoves(data){
+      movesBody.replaceChildren();
+      if(!data.moves.length){
+        movesBody.append(h('p.muted',{text:'Nothing was played from here in the indexed games.'}));
+        return;
+      }
+      const best=Math.max(...data.moves.map(m=>m.games));
+      for(const m of data.moves){
+        movesBody.append(h('div.tree-move',[
+          button(m.san,()=>onMove(m.san),'tree-san'),
+          h('div.tree-bars',[
+            h('div.tree-volume',[h('i',{style:{width:(100*m.games/best)+'%'}}),
+              h('span',{text:m.games+' game'+(m.games===1?'':'s')+' · '+m.share_pct+'%'})]),
+            resultBar(m)]),
+          h('div.tree-figures',[h('b',{text:pct(m.score_pct),
+              title:'Score from '+(data.player||'White')+'’s side'}),
+            h('small',{text:[m.avg_opponent_elo?'vs '+m.avg_opponent_elo:'',
+                             m.last_played?'last '+m.last_played.slice(0,4):''].filter(Boolean).join(' · ')})]),
+        ]));
+      }
+    }
+
+    function showTrend(data){
+      trendBody.replaceChildren();
+      if(data.trend.length<2){
+        trendBody.append(h('p.muted',{text:'A trend needs games in at least two different years.'}));
+        return;
+      }
+      trendBody.append(h('div.eyebrow',{text:'Score by year from this position'}));
+      const chart=h('div.tree-years');
+      for(const year of data.trend){
+        chart.append(h('div.tree-year',{title:year.games+' games, '+pct(year.score_pct)},[
+          h('i',{style:{height:Math.max(3,Math.round(year.score_pct))+'%'},
+                 class:year.score_pct>=55?'good':year.score_pct<45?'poor':'level'}),
+          h('small',{text:year.period.slice(2)})]));
+      }
+      trendBody.append(chart,h('p.muted',{text:'Bars are your score out of 100 in that year; the count is on hover. A line that used to work and stopped shows up here first.'}));
+    }
+
+    async function loadWeakest(){
+      weakBody.replaceChildren(h('p.muted',{text:'Looking for the lines that cost the most…'}));
+      try{
+        const data=await api('tree/weakest?'+params({min_games:minGames.value,limit:12}));
+        weakBody.replaceChildren();
+        if(!data.weakest.length){
+          weakBody.append(h('p.muted',{text:data.player
+            ?'Nothing scoring below even with '+minGames.value.replace('+','')+' or more games. Lower the threshold, or widen the filters.'
+            :'Name a player above: a weakest-lines list only means something from one side of the board.'}));
+          return;
+        }
+        weakBody.append(h('p.muted',{text:'Ranked by points dropped — games multiplied by the shortfall against an even score — so a line you play often at 40% outranks one you played twice at 0%.'}));
+        for(const entry of data.weakest){
+          weakBody.append(h('div.tree-weak',[
+            h('button.linkish',{type:'button',text:entry.line||entry.san,
+              title:'Put this line on the board',onclick:()=>onLine(entry.moves||[])}),
+            h('div.tree-weak-figures',[
+              h('b',{text:pct(entry.score_pct)}),
+              h('small',{text:entry.games+' games · '+entry.points_dropped+' points dropped'})]),
+            resultBar(entry)]));
+        }
+      }catch(err){weakBody.replaceChildren(h('p.error-message',{text:err.message}));}
+    }
+
+    async function load(){
+      const id=++request;
+      summary.replaceChildren(h('p.muted',{text:'Reading your games…'}));
+      try{
+        const data=await api('tree/position?'+params({fen:getFen()}));
+        if(id!==request)return;
+        showSummary(data);showMoves(data);showTrend(data);
+      }catch(err){if(id===request)summary.replaceChildren(h('p.error-message',{text:err.message}));}
+    }
+    function refresh(){clearTimeout(timer);timer=setTimeout(load,200);}
+    function refreshAll(){refresh();loadWeakest();}
+
+    async function suggest(){
+      try{
+        const data=await api('tree/players?'+new URLSearchParams({collection:collection.value,limit:40}));
+        names.replaceChildren(...data.players.map(p=>h('option',{value:p.name,label:p.games+' games'})));
+      }catch(e){/* typing still works */}
+    }
+    api('collections').then(d=>{
+      collection.append(...d.collections.map(c=>h('option',{value:c.id,text:c.name+' · '+c.games+' games'})));
+      suggest();
+    }).catch(()=>{});
+    collection.addEventListener('change',()=>{suggest();refreshAll();});
+    player.addEventListener('change',refreshAll);
+    for(const control of [colour,speed,rated,since,until,minElo,maxElo])control.addEventListener('change',refreshAll);
+    minGames.addEventListener('change',loadWeakest);
+
+    const root=h('div',[
+      h('div.card-pad',[
+        h('p.muted',{text:'Your games, scored from your side of the board. Name yourself below; everything here then reads as your result, not White’s. Needs an indexed collection.'}),
+        field('Collection',collection),names,field('Player',player),
+        h('div.toolbar',[field('Colour',colour),field('Time control',speed),field('Rated',rated)]),
+        h('div.toolbar',[field('From',since),field('Until',until)]),
+        h('div.toolbar',[field('Opponent rating from',minElo),field('Opponent rating to',maxElo)]),
+        summary]),
+      h('div.divider'),h('div.card-pad',[h('div.eyebrow',{text:'What you played from here'}),movesBody]),
+      h('div.divider'),h('div.card-pad',[trendBody]),
+      h('div.divider'),h('div.card-pad',[h('div.eyebrow',{text:'Where the points go'}),
+        field('Only lines with',minGames),weakBody]),
+    ]);
+    refreshAll();
+    return {root,refresh:refreshAll,player};
+  }
   async function openingView(content){
     const {h,button,heading}=get();let game=new Chess();const history=[];
-    content.append(heading('Learn from the games','Opening book','Explore deep lines from Lichess Masters, rated games, or your own indexed PGNs. Choose a reference database below.'));
+    content.append(heading('Walk the tree','Opening explorer','Browse a collection\u2019s openings move by move \u2014 what was played, how it scored, and where the points went. Reference databases are a tab away.'));
     const holder=h('div.board-holder'),board=new Board(holder,{viewOnly:false});
-    const panel=openingPanel(()=>game.fen(),play),line=h('p');
-    function play(san){if(!game.move(san))throw new Error('Illegal book move');history.push(game.fen());render();}
-    function render(){board.setPosition(game);board.setMovable({color:game.turnColor(),dests:game.destinationsMap(),onMove:(from,to)=>play({from,to,promotion:'q'})});line.textContent='Position after '+history.length+' plies';panel.refresh();}
-    content.append(h('div.opening-grid',[h('div',[holder,line,h('div.toolbar',[button('Back',()=>{history.pop();game=new Chess(history[history.length-1]||Chess.DEFAULT_FEN);render();}),button('Reset opening',()=>{history.length=0;game=new Chess();render();}),button('Analyze this position',()=>ui.analyzeFen(game.fen()))])]),h('section.card',[panel.root,indexControls(),h('p.card-pad.muted',{text:'Import PGNs from Master games or Online & imports, then index them. ChessBase CTG/CTB/CTO and Polyglot BIN files are not imported by this module.'})])]));ui.resizeBoard(holder,'openingBoardSize');render();
+    const line=h('p');
+    const panel=openingPanel(()=>game.fen(),play);
+    const report=openingReport(()=>game.fen(),play,replay);
+    // Two readings of the same board: the reference, and your own results.
+    const tabs=h('div.context-tabs');
+    const pane=h('div');
+    let showing='Collection tree';
+    function choose(name){showing=name;
+      tabs.querySelectorAll('button').forEach(b=>b.classList.toggle('active',b.textContent===name));
+      pane.replaceChildren(name==='Collection tree'?report.root:panel.root);
+      refresh();}
+    for(const name of ['Collection tree','Reference databases'])
+      tabs.append(h('button',{type:'button',text:name,onclick:()=>choose(name)}));
+    function play(input){const moved=game.move(input);if(!moved)throw new Error('Illegal book move');
+      history.push(game.fen());played.push(moved.san);render();}
+    function replay(moves){
+      const fresh=new Chess();history.length=0;played.length=0;
+      for(const san of moves||[]){const moved=fresh.move(san);if(!moved)break;
+        history.push(fresh.fen());played.push(moved.san);}
+      game=fresh;render();
+    }
+    function refresh(){if(showing==='Collection tree')report.refresh();else panel.refresh();}
+    const played=[];                       // the SAN of the line currently on the board
+    function render(){
+      board.setPosition(game);
+      board.setMovable({color:game.turnColor(),dests:game.destinationsMap(),
+        onMove:(from,to)=>play({from,to,promotion:'q'})});
+      line.replaceChildren(played.length
+        ?h('span.tree-path',played.map((san,i)=>h('button.linkish',{type:'button',
+            text:(i%2===0?(i/2+1)+'.':'')+san+' ',title:'Back to here',
+            onclick:()=>replay(played.slice(0,i+1))})))
+        :h('span.muted',{text:'Starting position \u2014 play a move, or choose one below, to walk the tree.'}));
+      refresh();
+    }
+    content.append(h('div.opening-grid',[h('div',[holder,line,h('div.toolbar',[button('Back a move',()=>replay(played.slice(0,-1))),button('Start again',()=>replay([])),button('Analyze this position',()=>ui.analyzeFen(game.fen())),button('Open these games',()=>ui.browsePosition(game.fen()))])]),h('section.card',[tabs,pane,indexControls(),h('p.card-pad.muted',{text:'Import PGNs from Master games or Online & imports, then index them. ChessBase CTG/CTB/CTO and Polyglot BIN files are not imported by this module.'})])]));
+    ui.resizeBoard(holder,'openingBoardSize');choose('Collection tree');render();
   }
   function localFacts(parsed){
     const {h}=get(),line=PGN.mainline(parsed.root);let captures=0,promotions=0,castles=0;
@@ -130,6 +332,6 @@
     const unfiled=state.collections.filter(c=>!state.assignments.some(a=>a.collection_id===c.id));
     tree.append(h('section.unfiled-collections',[h('h3',{text:'Unfiled collections · '+unfiled.length}),h('p.muted',{text:'These collections are at library level, outside study folders. Use Add collection on a folder to file one.'}),...unfiled.map(collection)]),h('section',[h('h3',{text:'Repertoires · separate practice library'}),button('Open repertoire lines and drills',actions.repertoire)]));return tree;
   }
-  window.LibraryTools={init(value){ui=value;},categories,pdfReader,booksView,openingPanel,openingView,indexControls,localFacts,networkStatus,positionLibrary,studyTree};
+  window.LibraryTools={init(value){ui=value;},categories,pdfReader,booksView,openingPanel,openingReport,openingView,indexControls,localFacts,networkStatus,positionLibrary,studyTree};
   for(const name of ['online','offline'])window.addEventListener(name,()=>document.querySelectorAll('.network-status').forEach(el=>el.textContent=name==='online'?'Online connection reported by this device.':'Offline: local library, PDFs and Stockfish still work.'));
 })();

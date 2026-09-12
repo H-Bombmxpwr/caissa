@@ -95,9 +95,14 @@ closes. It never runs without a connected account.
 
 ## Importing your games
 
-**Import games → Your online games** takes a username and a maximum. If your account is
-connected the stored token is used automatically, which raises the rate limits lichess
-applies.
+**Import games → Your online games** takes a username and a maximum, or tick **Import
+every game on the account** for the lot. There is no ceiling on that: the export is
+streamed and written in batches rather than held in memory, progress is reported in the
+corner of the window, and the whole thing is one undoable batch. An active account can be
+tens of thousands of games and several minutes of download.
+
+If your account is connected the stored token is used automatically, which raises the
+rate limits lichess applies.
 
 All lichess requests go through one throttled queue in the server: one request at a time,
 with a shared cooldown after a `429`. Clicking "load" repeatedly cannot make it worse.

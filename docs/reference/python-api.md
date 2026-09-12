@@ -59,6 +59,13 @@ Generated from the backend's own docstrings, so it cannot drift from the code.
    :members:
 ```
 
+## The opening tree
+
+```{eval-rst}
+.. automodule:: backend.openingtree
+   :members:
+```
+
 ## Automatic imports
 
 ```{eval-rst}

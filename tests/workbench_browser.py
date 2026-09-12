@@ -411,6 +411,9 @@ with tempfile.TemporaryDirectory(prefix='caissa-browser-') as data:
             page.evaluate('Caissa.go("openingbook")')
             page.get_by_role('button',name='Resize board',exact=True).wait_for()
             assert abs(page.locator('.opening-grid .board-holder').bounding_box()['width']-resized)<2
+            # The explorer opens on the collection tree now; the reference books are a tab over.
+            assert page.locator('.context-tabs button.active').inner_text()=='Collection tree'
+            page.get_by_role('button',name='Reference databases',exact=True).click()
             page.get_by_label('Reference database',exact=True).select_option('local')
             page.get_by_label('Collection to index',exact=True).select_option(label='Annotated tests (1)')
             page.get_by_role('button',name='Index positions',exact=True).click()
@@ -418,12 +421,18 @@ with tempfile.TemporaryDirectory(prefix='caissa-browser-') as data:
             page.get_by_role('button',name='Refresh opening book',exact=True).click()
             page.locator('.book-move').get_by_role('button',name='e4',exact=True).wait_for()
             page.locator('.book-move').get_by_role('button',name='e4',exact=True).click()
-            page.get_by_text('Position after 1 plies',exact=True).wait_for()
+            page.wait_for_function('''()=>document.querySelector('.tree-path')&&
+              document.querySelector('.tree-path').textContent.trim().startsWith('1.e4')''')
             page.route('**/api/book?**',lambda r:r.fulfill(json={'source':'masters','total':9000,'cached':True,'moves':[{'san':'e5','games':9000,'white':3000,'draws':4000,'black':2000,'average_elo':2500}],'games':[],'reference_games':[]}))
             page.get_by_label('Reference database',exact=True).select_option('masters')
             page.get_by_text('Lichess Masters · 9,000 games · Saved reference',exact=True).wait_for()
             page.locator('.book-move').get_by_role('button',name='e5',exact=True).click()
-            page.get_by_text('Position after 2 plies',exact=True).wait_for()
+            page.wait_for_function('''()=>document.querySelector('.tree-path')&&
+              document.querySelector('.tree-path').textContent.includes('e5')''')
+            # The breadcrumb walks back to any point in the line.
+            page.locator('.tree-path .linkish').first.click()
+            page.wait_for_function(r'''()=>document.querySelector('.tree-path')
+              .textContent.trim().replace(/\s+/g,' ')==='1.e4' ''')
             page.unroute('**/api/book?**')
             page.evaluate('Caissa.go("repertoire")')
             page.get_by_text('How to use your repertoire',exact=True).wait_for()

@@ -23,6 +23,7 @@ against a temporary one.
 | `test_chessbase.py` | ChessBase encodings, tags, filters and sorts |
 | `test_collection_links.py` | games shelved in several collections, and the routes that manage them |
 | `test_autoimport.py` | the lichess game watcher: settings, windows, failures and teardown |
+| `test_openingtree.py` | the explorer: player perspective, filters, trends and weakest-line collapsing |
 
 ## The JavaScript rules engine
 
@@ -42,6 +43,7 @@ These drive a real Edge through Playwright:
 .venv\Scripts\python tests\workbench_browser.py
 .venv\Scripts\python tests\sounds_browser.py
 .venv\Scripts\python tests\autoimport_browser.py
+.venv\Scripts\python tests\explorer_browser.py
 .venv\Scripts\python tests\analysis_quality_browser.py
 ```
 
@@ -54,6 +56,11 @@ deletion, and the two smoke pages.
 appears only once an account is connected, settings persist without a save button, a
 check really imports, a second check imports nothing, the run is undoable, and switching
 off — or forgetting the token — stops the watcher.
+
+`explorer_browser.py` indexes a small collection and drives the explorer: it opens on
+the collection tree, the score follows the named player rather than White, clicking a
+move walks the tree and the breadcrumb walks back, the filters narrow it, the trend is
+per year, and the weakest list names the line that cost the points.
 
 `sounds_browser.py` checks the sound catalogue against what is actually on disk, that
 every file it claims is served as audio, that every event resolves to a real sample

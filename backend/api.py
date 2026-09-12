@@ -19,6 +19,7 @@ from .store import Library
 from .study import Study
 from . import importers
 from . import literature
+from . import openingtree
 from . import repertoire as repertoire_pgn
 from .books import Books
 
@@ -190,6 +191,51 @@ class Api:
         if method=='PUT' and len(rest)==1:
             return 200,self.books.update(rest[0],body or {})
         raise ApiError('Unsupported books request',405)
+
+    def _route_tree(self, method, rest, query, body):
+        """Your own openings: what you played, and how it went for you.
+
+        The same filters drive all three views, so the weakest-line list and the
+        position report are always talking about the same set of games.
+        """
+        from .chess import Chess
+        if method != "GET":
+            raise ApiError("Use GET", 405)
+        action = rest[0] if rest else "position"
+
+        if action == "players":
+            return 200, {"players": openingtree.players(
+                self.library, query.get("collection"), int(query.get("limit", 40)))}
+
+        filters = openingtree.Filters(
+            player=query.get("player"), color=query.get("color"),
+            collection=query.get("collection"), speed=query.get("speed"),
+            since=query.get("since"), until=query.get("until"),
+            min_opponent_elo=query.get("min_opponent_elo") or None,
+            max_opponent_elo=query.get("max_opponent_elo") or None,
+            rated=query.get("rated") if query.get("rated") not in (None, "") else None,
+            kind=query.get("kind") or None,
+        )
+
+        if action == "weakest":
+            return 200, {
+                "player": filters.player or None,
+                "weakest": openingtree.weakest(
+                    self.library, filters,
+                    min_games=max(1, int(query.get("min_games", openingtree.DEFAULT_MIN_GAMES))),
+                    limit=max(1, min(int(query.get("limit", 15)), 50)),
+                    max_ply=max(2, min(int(query.get("max_ply", openingtree.MAX_SCAN_PLY)), 80)),
+                ),
+            }
+
+        if action == "position":
+            fen = Chess(query.get("fen") or Chess().fen()).fen()
+            report = openingtree.position(self.library, fen, filters)
+            report["indexed_games"] = self.library.connect().execute(
+                "SELECT COUNT(DISTINCT game_id) FROM positions").fetchone()[0]
+            return 200, report
+
+        raise ApiError("unsupported tree request", 404)
 
     def _route_book(self, method, rest, query, body):
         from .chess import Chess
@@ -414,18 +460,23 @@ class Api:
                 token = body.get("token") or self.library.setting("lichess_token") or None
                 if body.get("token"):
                     self.library.setting("lichess_token", body["token"])
+                collection = body.get("collection") or "lichess imports"
+                selection = {"color": body.get("color"), "rated": body.get("rated"),
+                             "perf": body.get("perf"), "since": body.get("since"),
+                             "until": body.get("until")}
+                if body.get("all"):
+                    # No ceiling and no idea how many are coming, so it is streamed
+                    # and written in batches rather than held in memory.
+                    return 200, lichess.import_all_user_games(
+                        self.library, user, collection, token=token,
+                        progress=self._import_progress, **selection)
                 pgn = lichess.user_games(
                     user,
-                    max_games=min(int(body.get("max", 100)), 2000),
-                    color=body.get("color"),
-                    rated=body.get("rated"),
-                    perf=body.get("perf"),
-                    since=body.get("since"),
+                    max_games=max(1, int(body.get("max", 100))),
                     token=token,
+                    **{k: v for k, v in selection.items() if k != "until"},
                 )
-                result = self.library.add_games(
-                    pgn, collection=body.get("collection") or "lichess imports", source="lichess"
-                )
+                result = self.library.add_games(pgn, collection=collection, source="lichess")
                 result["user"] = user
                 return 200, result
             except lichess.RateLimited as err:
@@ -434,6 +485,8 @@ class Api:
                 ) from err
             except FileNotFoundError as err:
                 raise ApiError("no such lichess user: " + user, 404) from err
+            except PermissionError as err:
+                raise ApiError(str(err), 401) from err
             except ConnectionError as err:
                 raise ApiError("could not reach lichess: %s" % err, 503) from err
             finally:

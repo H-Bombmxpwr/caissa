@@ -33,3 +33,44 @@
 .study-overview{display:block}.study-tree{max-width:1000px}.study-tree>section{margin:24px 0}.study-node{border-left:2px solid var(--border);margin:12px 0;padding:8px 12px;background:var(--bg-2);border-radius:5px}.study-node>.study-node{margin-left:24px}.study-node summary{display:flex;gap:12px;align-items:center;cursor:pointer;flex-wrap:wrap}.study-node summary::before{content:'▸'}.study-node[open]>summary::before{content:'▾'}.study-node small{color:var(--text-dim)}.folder-tools{padding:6px 0 12px 20px}.folder-tools .field{max-width:260px}.breadcrumb{font-size:11px;color:var(--text-dim)}.kind-badge{font-size:10px;padding:3px 7px;background:var(--bg-3);border-radius:4px;color:var(--text-dim)}.collection-leaf{display:flex;gap:10px;align-items:center;padding:8px 16px 8px 30px;flex-wrap:wrap}.collection-leaf button{border:0;text-align:left}.unfiled-collections{border-top:1px solid var(--border)}.example-filters{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.example-filters input,.example-filters select{width:100%;min-width:0}.sound-row{display:flex;align-items:center;gap:15px;flex-wrap:wrap;margin:10px 0}.sound-row .field{min-width:95px;margin:0}
 @media(max-width:1400px){.analysis-grid{grid-template-columns:minmax(260px,var(--board-size,1fr)) minmax(0,1.5fr)}.dock-columns{grid-template-columns:minmax(0,1fr)}.dock-side{grid-column:auto}.dock-splitter{display:none}}
 @media(max-width:950px){.analysis-grid{grid-template-columns:minmax(0,1fr)}.example-filters{grid-template-columns:1fr}}
+
+/* Opening tree: your own results, move by move. */
+.tree-summary{display:grid;gap:12px;margin-top:14px}
+.tree-score{display:flex;align-items:baseline;gap:10px}
+.tree-score strong{font:30px Georgia,serif;color:var(--text-strong)}
+.tree-score small{font-size:11px;color:var(--text-dim)}
+.tree-counts{display:flex;gap:18px;flex-wrap:wrap}
+.tree-counts div{display:grid}
+.tree-counts b{font-size:15px;color:var(--text-strong)}
+.tree-counts small{font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:var(--text-dim)}
+.wdl{display:flex;height:8px;border-radius:4px;overflow:hidden;background:#e6e9df}
+.wdl i{display:block;height:100%}
+.wdl .won{background:#4f8a58}.wdl .drew{background:#b9bda9}.wdl .lost{background:#a8574c}
+.tree-move{display:grid;grid-template-columns:64px minmax(0,1fr) 92px;gap:12px;align-items:center;
+  padding:9px 0;border-bottom:1px solid #eceee4}
+.tree-move .tree-san{padding:5px 8px;font-weight:600}
+.tree-bars{display:grid;gap:5px;min-width:0}
+.tree-volume{position:relative;height:17px}
+.tree-volume i{position:absolute;inset:0 auto 0 0;background:#e7ece2;border-radius:3px}
+.tree-volume span{position:relative;font-size:11px;color:var(--text-dim);line-height:17px;padding-left:6px}
+.tree-figures{text-align:right}
+.tree-figures b{display:block;font-size:14px;color:var(--text-strong)}
+.tree-figures small{font-size:10px;color:var(--text-dim)}
+.tree-years{display:flex;align-items:flex-end;gap:6px;height:96px;margin:12px 0}
+.tree-year{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;height:100%;min-width:18px}
+.tree-year i{display:block;width:100%;border-radius:3px 3px 0 0;background:#b9bda9}
+.tree-year i.good{background:#4f8a58}.tree-year i.poor{background:#a8574c}
+.tree-year small{font-size:9px;color:var(--text-dim);margin-top:4px}
+.tree-weak{display:grid;grid-template-columns:minmax(0,1fr) 120px;gap:10px;align-items:center;
+  padding:10px 0;border-bottom:1px solid #eceee4}
+.tree-weak .wdl{grid-column:1/-1}
+.tree-weak-figures{text-align:right}
+.tree-weak-figures b{display:block;color:#a8574c;font-size:14px}
+.tree-weak-figures small{font-size:10px;color:var(--text-dim)}
+.linkish{border:0;background:none;padding:0;text-align:left;color:var(--text-strong);
+  font:13px Georgia,serif;cursor:pointer;overflow-wrap:anywhere}
+.linkish:hover{text-decoration:underline}
+@media(max-width:700px){.tree-move{grid-template-columns:52px minmax(0,1fr);}
+  .tree-figures{grid-column:1/-1;text-align:left}}
+.tree-path{display:block;font:14px Georgia,serif;line-height:1.9;padding:8px 0}
+.tree-path .linkish{font:inherit}

@@ -45,6 +45,9 @@ The index row for one game. Beyond the location fields (`path`, `byte_offset`,
 * - `event_date`, `event_type`, `white_team`, `black_team`, `white_title`, `black_title`,
     `white_fide_id`, `black_fide_id`, `source_title`, `variation`
   - ChessBase's richer tag set — see [Importing games](../guide/importing.md#the-tags-chessbase-writes)
+* - `speed`, `rated`
+  - derived at import from `TimeControl` and the event name, so the
+    [explorer](../guide/explorer.md) can filter by them
 * - `first_moves`
   - the opening moves, for naming openings without replaying the game
 * - `source`, `source_id`, `added_at`

@@ -63,7 +63,7 @@
   const kindLabel=k=>(KINDS.find(([id])=>id===k)||[,'Games'])[1];
   const modules = [['database','▤','Database'],['analysis','♙','Analysis board'],['repertoire','♧','Repertoire'],
     ['masters','♜','Master games'],['imports','⇣','Online & imports'],['studies','▱','Study folders'],
-    ['books','▥','Books'],['openingbook','♜','Opening book'],['training','◉','Blindfold training'],['tactics','♞','Tactics'],['settings','⚙','Settings']];
+    ['books','▥','Books'],['openingbook','♜','Opening explorer'],['training','◉','Blindfold training'],['tactics','♞','Tactics'],['settings','⚙','Settings']];
   let content, nav, crumb, board, preview, poll, liveTimer;
   let engineQueue=Promise.resolve();
   async function api(path, body, method) {
@@ -1060,10 +1060,27 @@
       if(!namedByHand||!collection.value.trim())collection.value=files.files[0].name.replace(/\.[^.]*$/,'').trim()||'Imported games';});
     async function imported(data){status.textContent=`Added ${data.added} games · ${data.duplicates} duplicates · ${data.skipped||0} skipped`;await refreshMeta();await importHistory();}
     const paste=card('PGN files & clipboard',h('div.card-pad',[field('Collection name (required)',collection),field('Choose PGN files',files),pgn,h('div.toolbar',{style:{marginTop:'12px'}},[button('Import PGN',async()=>{if(!collection.value.trim())throw new Error('Name the collection these games should go into.');status.textContent='Importing…';watchImport();if(files.files.length){let totals={added:0,duplicates:0,skipped:0};for(const f of files.files){const result=await api('games',{pgn:await pgnText(f),collection:collection.value});for(const k of Object.keys(totals))totals[k]+=result[k]||0;}await imported(totals);}else await imported(await api('games',{pgn:pgn.value,collection:collection.value}));},'primary')]),status]));
-    const source=select([['lichess','lichess'],['chesscom','chess.com']],'lichess'),online_collection=h('input',{value:'lichess imports'}),user=h('input',{placeholder:'Username'}),max=h('input',{type:'number',value:100,min:1,max:2000}),token=h('input',{type:'password',placeholder:'Optional lichess token',autocomplete:'off'}),onlineStatus=h('p.status-message');
+    const source=select([['lichess','lichess'],['chesscom','chess.com']],'lichess'),online_collection=h('input',{value:'lichess imports'}),user=h('input',{placeholder:'Username'}),max=h('input',{type:'number',value:100,min:1}),token=h('input',{type:'password',placeholder:'Optional lichess token',autocomplete:'off'}),onlineStatus=h('p.status-message');
+    // Asking for everything means not knowing how many are coming, so the server
+    // streams the export and writes it in batches instead of holding it in memory.
+    const everything=h('input',{type:'checkbox'});
+    const maxField=field('Maximum games',max);
+    everything.addEventListener('change',()=>{maxField.hidden=everything.checked;});
     let onlineNamedByHand=false;online_collection.addEventListener('input',()=>{onlineNamedByHand=true;});
     source.addEventListener('change',()=>{if(!onlineNamedByHand)online_collection.value=source.value==='lichess'?'lichess imports':'chess.com imports';});
-    const online=card('Your online games',h('div.card-pad',[field('Service',source),field('Collection name',online_collection),field('Username',user),field('Maximum games',max),field('lichess token',token),button('Import account games',async()=>{onlineStatus.textContent='Downloading games…';watchImport();if(!online_collection.value.trim())throw new Error('Name the collection these games should go into.');const result=await api('import/'+source.value,{user:user.value,max:Number(max.value),token:token.value,collection:online_collection.value.trim()});onlineStatus.textContent=`Added ${result.added} games · ${result.duplicates} duplicates`;},'primary'),onlineStatus,h('p.muted',{text:'Downloads need a connection. Imported games stay available offline.'})]));
+    const online=card('Your online games',h('div.card-pad',[field('Service',source),field('Collection name',online_collection),field('Username',user),
+      h('label.toolbar',[everything,'Import every game on the account']),maxField,field('lichess token',token),
+      button('Import account games',async()=>{
+        if(!online_collection.value.trim())throw new Error('Name the collection these games should go into.');
+        if(everything.checked&&source.value!=='lichess')throw new Error('Importing every game is a lichess export. For chess.com, set a maximum.');
+        onlineStatus.textContent=everything.checked?'Downloading every game — this can take a while for a large account…':'Downloading games…';
+        watchImport();
+        const result=await api('import/'+source.value,{user:user.value,all:everything.checked,
+          max:Number(max.value),token:token.value,collection:online_collection.value.trim()});
+        onlineStatus.textContent=`Added ${result.added} games · ${result.duplicates} duplicates`
+          +(result.linked?` · ${result.linked} linked from other collections`:'');
+      },'primary'),onlineStatus,
+      h('p.muted',{text:'Downloads need a connection. Imported games stay available offline. Every game on a busy account can be tens of thousands of games and several minutes of download; progress is shown in the corner and the import can be undone afterwards.'})]));
     const path=h('input',{placeholder:'C:\\Chess\\TWIC or https://…/games.zip'}),pathStatus=h('p.status-message');const bulk=card('Archives, folders & URLs',h('div.card-pad',[field('Local path or URL',path),h('p.muted',{text:'Stream PGN, ZIP, GZ, BZ2 or optional ZST archives. A folder is scanned recursively. For CBH, CBV and SI4, export to PGN in the originating application.'}),button('Import source',async()=>{pathStatus.textContent='Reading source…';watchImport();const result=await api('import/source',{path:path.value,collection:collection.value});pathStatus.textContent=`Added ${result.added} games · ${result.duplicates} duplicates`;},'primary'),pathStatus]));    const studyCard=card('lichess studies',h('div.card-pad',[
       h('p.muted',{text:'Import your lichess studies, including private and unlisted ones, once your account is connected in Settings. Chapters are filed under their own collection rather than the game database.'}),
       h('div.toolbar',[button('Choose studies to import',()=>lichessStudies(),'primary'),button('Connect lichess account',()=>go('settings'))])]));
@@ -1256,7 +1273,10 @@
     content.append(h('div.settings-grid',[card('Board & pieces',h('div.card-pad',[field('Board palette',swatches),h('div.toolbar',[field('Light squares',light),field('Dark squares',dark)]),field('Dark theme',h('input',{type:'checkbox',checked:!!state.prefs.darkMode,onchange:act(async e=>{state.prefs.darkMode=e.target.checked;await savePrefs();})})),field('Piece set',pieceSet),field('Piece treatment',treatments),field('Default orientation',orientation),field('Coordinates',coordinates),field('Animate moves and captures',animate),field('Animation duration',select([['100','Fast · 100 ms'],['200','Normal · 200 ms'],['350','Smooth · 350 ms'],['500','Slow · 500 ms']],String(state.prefs.animationMs||200),act(async e=>{state.prefs.animationMs=Number(e.target.value);await savePrefs();})))])),card('Preview',h('div.card-pad',[holder,h('p.muted',{style:{marginTop:'20px'},text:'Your palette applies to analysis, previews, and all seven blindfold exercises.'})]))]));applyPrefs();}
   document.addEventListener('DOMContentLoaded',async()=>{
     await App.persistenceReady;
-    LibraryTools.init({h,api,button,field,select,heading,openGame,resizeBoard,analyzeFen:fen=>{
+    LibraryTools.init({h,api,button,field,select,heading,openGame,resizeBoard,
+      // From a node in the tree to the games that made it, without retyping a FEN.
+      browsePosition:fen=>{state.filters={position:fen,kind:''};state.offset=0;return go('database');},
+      analyzeFen:fen=>{
       stashBoard();state.boards.splice(++state.boardIndex,0,makeBoard());adoptBoard(state.boardIndex);
       state.parsed=PGN.parse('[Event "Opening exploration"]\n[White "White"]\n[Black "Black"]\n[SetUp "1"]\n[FEN "'+fen+'"]\n[Result "*"]\n\n*');state.node=state.parsed.root;state.selected=null;state.dirty=true;stashBoard();return go('analysis');
     }});

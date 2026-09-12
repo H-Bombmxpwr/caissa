@@ -114,6 +114,90 @@ def user_games(user, max_games=100, color=None, rated=None, perf=None, since=Non
     return _request(url, "application/x-chess-pgn", token=token)
 
 
+def _user_games_url(user, max_games=None, color=None, rated=None, perf=None, since=None,
+                    until=None):
+    params = {
+        "moves": "true", "tags": "true", "clocks": "false",
+        "evals": "false", "opening": "true", "sort": "dateDesc",
+    }
+    if max_games:
+        params["max"] = int(max_games)
+    if color:
+        params["color"] = color
+    if rated is not None:
+        params["rated"] = "true" if rated else "false"
+    if perf:
+        params["perfType"] = perf
+    if since:
+        params["since"] = int(since)
+    if until:
+        params["until"] = int(until)
+    return "%s/api/games/user/%s?%s" % (API, urllib.parse.quote(user),
+                                        urllib.parse.urlencode(params))
+
+
+def import_all_user_games(library, user, collection, token=None, batch_size=200,
+                          progress=None, **selection):
+    """Stream a whole lichess account into the library, however many games that is.
+
+    Asking for every game means not knowing how many are coming, which rules out
+    holding the answer in memory: an active account is hundreds of megabytes of PGN.
+    So the response is read as it arrives and written in batches, and the caller is
+    told the running count rather than made to wait in silence.
+
+    `selection` takes the same narrowing arguments as `user_games` — color, rated,
+    perf, since, until — so "every rated blitz game since 2023" is one call.
+    """
+    url = _user_games_url(user, max_games=None, **selection)
+    throttle = api_throttle
+    throttle.wait()
+    headers = {"Accept": "application/x-chess-pgn", "User-Agent": USER_AGENT}
+    if token:
+        headers["Authorization"] = "Bearer " + token
+    request = urllib.request.Request(url, headers=headers)
+
+    totals = {"added": 0, "duplicates": 0, "skipped": 0, "linked": 0}
+    batch, chunk = [], []
+
+    def flush():
+        if not batch:
+            return
+        result = library.add_games("\n\n".join(batch), collection=collection, source="lichess")
+        for key in totals:
+            totals[key] += result.get(key, 0)
+        batch.clear()
+        if progress:
+            progress(totals["added"] + totals["duplicates"], 0)
+
+    try:
+        with urllib.request.urlopen(request, timeout=300) as response:
+            for raw in response:
+                line = raw.decode("utf-8", "replace")
+                # A new game starts at its Event tag; everything before belongs to the last.
+                if line.startswith("[Event ") and chunk:
+                    batch.append("".join(chunk))
+                    chunk = []
+                    if len(batch) >= batch_size:
+                        flush()
+                chunk.append(line)
+        if chunk:
+            batch.append("".join(chunk))
+        flush()
+    except urllib.error.HTTPError as err:
+        if err.code == 429:
+            raise RateLimited(int(err.headers.get("Retry-After") or 62)) from err
+        if err.code == 404:
+            raise FileNotFoundError(url) from err
+        if err.code in (401, 403):
+            raise PermissionError("lichess refused the export: check the access token") from err
+        raise
+    except urllib.error.URLError as err:
+        # Whatever arrived before the connection dropped is already saved.
+        raise ConnectionError(str(err.reason)) from err
+    totals["user"] = user
+    return totals
+
+
 def explorer(db="masters", play=None, fen=None, moves=12, top_games=8, extra=None):
     params = {"moves": int(moves)}
     if db == "masters":

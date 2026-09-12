@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS games (
   white_title TEXT, black_title TEXT,
   white_fide_id TEXT, black_fide_id TEXT,
   source_title TEXT, variation TEXT,
+  speed TEXT, rated INTEGER,
   added_at INTEGER NOT NULL
 );
 
@@ -131,14 +132,15 @@ class Library:
                                ('white_team','TEXT'),('black_team','TEXT'),
                                ('white_title','TEXT'),('black_title','TEXT'),
                                ('white_fide_id','TEXT'),('black_fide_id','TEXT'),
-                               ('source_title','TEXT'),('variation','TEXT')]:
+                               ('source_title','TEXT'),('variation','TEXT'),
+                               ('speed','TEXT'),('rated','INTEGER')]:
                 if name not in columns:
                     conn.execute('ALTER TABLE games ADD COLUMN '+name+' '+kind)
             # A library imported before these columns existed is re-read once, so a
             # ChessBase collection already on disk gains its teams, titles and FIDE
             # ids without being imported again.
             stale = conn.execute('''SELECT id FROM games
-                WHERE has_annotations IS NULL OR event_date IS NULL''').fetchall()
+                WHERE has_annotations IS NULL OR event_date IS NULL OR speed IS NULL''').fetchall()
             for row in stale:
                 text = self.game_pgn(row['id'])
                 if text:
@@ -147,6 +149,7 @@ class Library:
                 conn.execute('ALTER TABLE games ADD COLUMN signature TEXT')
             conn.execute('CREATE INDEX IF NOT EXISTS games_signature ON games(signature)')
             conn.execute('CREATE INDEX IF NOT EXISTS games_event_date ON games(event_date)')
+            conn.execute('CREATE INDEX IF NOT EXISTS games_speed ON games(speed)')
             # Older libraries receive signatures once, without changing their PGNs.
             for row in conn.execute('SELECT id FROM games WHERE signature IS NULL').fetchall():
                 text = self.game_pgn(row['id'])
@@ -158,11 +161,12 @@ class Library:
         meta = pgnutil.describe(text)
         conn.execute('''UPDATE games SET annotator=?,termination=?,has_annotations=?,
             event_date=?,event_type=?,white_team=?,black_team=?,white_title=?,black_title=?,
-            white_fide_id=?,black_fide_id=?,source_title=?,variation=? WHERE id=?''',
+            white_fide_id=?,black_fide_id=?,source_title=?,variation=?,speed=?,rated=? WHERE id=?''',
             (meta['annotator'],meta['termination'],meta['has_annotations'],
              meta['event_date'],meta['event_type'],meta['white_team'],meta['black_team'],
              meta['white_title'],meta['black_title'],meta['white_fide_id'],
-             meta['black_fide_id'],meta['source_title'],meta['variation'],ident))
+             meta['black_fide_id'],meta['source_title'],meta['variation'],
+             meta['speed'],meta['rated'],ident))
 
     @staticmethod
     def signature(text):
@@ -430,11 +434,12 @@ class Library:
                 if cursor.rowcount:
                     conn.execute('''UPDATE games SET annotator=?,termination=?,has_annotations=?,
                         event_date=?,event_type=?,white_team=?,black_team=?,white_title=?,black_title=?,
-                        white_fide_id=?,black_fide_id=?,source_title=?,variation=? WHERE id=?''',
+                        white_fide_id=?,black_fide_id=?,source_title=?,variation=?,speed=?,rated=? WHERE id=?''',
                         (meta['annotator'],meta['termination'],meta['has_annotations'],
                          meta['event_date'],meta['event_type'],meta['white_team'],meta['black_team'],
                          meta['white_title'],meta['black_title'],meta['white_fide_id'],
-                         meta['black_fide_id'],meta['source_title'],meta['variation'],cursor.lastrowid))
+                         meta['black_fide_id'],meta['source_title'],meta['variation'],
+                         meta['speed'],meta['rated'],cursor.lastrowid))
                 if batch and cursor.rowcount:
                     conn.execute('INSERT INTO import_members VALUES (?,?)', (batch, cursor.lastrowid))
             conn.commit()

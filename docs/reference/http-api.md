@@ -285,6 +285,37 @@ a `machine` object with `cores`, `cpu_percent`, `cpu_mhz`, memory, `temperature_
 The token is never returned by any endpoint. `GET /api/settings/lichess_token` is
 refused with `403`.
 
+## Your own openings
+
+The explorer's report. Every route takes the same filters: `collection`, `player`,
+`color` (`w`/`b`), `speed` (one or several of `bullet`, `blitz`, `rapid`, `classical`,
+`correspondence`, comma-separated), `rated` (`0`/`1`), `since`, `until` (a year, month or
+day), `min_opponent_elo`, `max_opponent_elo`, `kind`. With no `player` the report reads
+from White's side.
+
+:::{list-table}
+:header-rows: 1
+:widths: 12 30 58
+
+* - Method
+  - Path
+  - What it does
+* - `GET`
+  - `/api/tree/position?fen=…`
+  - totals, per-move statistics and a per-year trend, from the player's side
+* - `GET`
+  - `/api/tree/weakest`
+  - the lines that cost the most points — `min_games`, `limit`, `max_ply`
+* - `GET`
+  - `/api/tree/players`
+  - the names that actually appear in a collection, for the player box
+:::
+
+Scores are percentages from the report's side of the board: `score_pct`, with `wins`,
+`draws`, `losses` and `avg_opponent_elo` beside them. `weakest` entries carry `line` (the
+numbered moves) and `moves` (the SAN list, so the line can be replayed), plus
+`points_dropped`.
+
 ## Reference material
 
 :::{list-table}
