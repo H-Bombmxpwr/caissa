@@ -107,28 +107,72 @@
 </div>
 
 <script>
-// Offer the build for the visitor's machine, without hiding the other two: a guess
-// from the user agent is a good default and a bad certainty.
+/* Offer the build for the visitor's machine, without hiding the other two: a guess from
+   the user agent is a good default and a bad certainty.
+
+   The assets are read from the release itself rather than assumed. A hard-coded
+   `releases/latest/download/<name>` link is a 404 waiting to happen — it breaks when no
+   release exists yet, and again the day a file is renamed — and a download button that
+   goes nowhere is worse than one that admits there is nothing to download. */
 (function () {
-  var base = 'https://github.com/H-Bombmxpwr/caissa/releases/latest/download/';
-  var ua = navigator.userAgent;
-  var platform = (navigator.userAgentData && navigator.userAgentData.platform) || ua;
-  var builds = {
-    windows: ['Caissa-windows-x64.zip', 'Download for Windows',
-              'Windows may warn about an unsigned app — choose More info, then Run anyway.'],
-    macos:   ['Caissa-macos-arm64.zip', 'Download for macOS',
-              'Not notarised yet, so the first launch needs right-click → Open.'],
-    linux:   ['Caissa-linux-x64.tar.gz', 'Download for Linux',
-              'Needs WebKitGTK: sudo apt install gir1.2-webkit2-4.1 python3-gi.']
-  };
+  var REPO = 'H-Bombmxpwr/caissa';
+  var button = document.getElementById('download');
+  var label = document.getElementById('download-label');
+  var note = document.getElementById('note');
+
+  var platform = (navigator.userAgentData && navigator.userAgentData.platform)
+                 || navigator.userAgent;
   var pick = /Win/i.test(platform) ? 'windows'
            : /Mac|iPhone|iPad/i.test(platform) ? 'macos'
            : /Linux|X11|Android/i.test(platform) ? 'linux' : null;
-  if (!pick) return;                       // unknown: the button keeps its releases link
-  var build = builds[pick];
-  document.getElementById('download').href = base + build[0];
-  document.getElementById('download-label').textContent = build[1];
-  document.getElementById('note').textContent = build[2];
+  var named = {windows: 'Windows', macos: 'macOS', linux: 'Linux'};
+  var advice = {
+    windows: 'Windows may warn about an unsigned app — choose More info, then Run anyway.',
+    macos: 'Not notarised yet, so the first launch needs right-click → Open.',
+    linux: 'Needs WebKitGTK: sudo apt install gir1.2-webkit2-4.1 python3-gi.'
+  };
+  var sized = function (bytes) {
+    return bytes > 1048576 ? (bytes / 1048576).toFixed(0) + ' MB'
+                           : Math.max(1, Math.round(bytes / 1024)) + ' KB';
+  };
+
+  function noBuildsYet() {
+    button.href = 'https://github.com/' + REPO + '#install';
+    label.textContent = 'Build from source';
+    note.textContent = 'No builds have been published yet. The repository has everything '
+                     + 'needed to run it — it takes three commands.';
+  }
+
+  fetch('https://api.github.com/repos/' + REPO + '/releases/latest',
+        {headers: {Accept: 'application/vnd.github+json'}})
+    .then(function (response) {
+      if (response.status === 404) { noBuildsYet(); return null; }
+      if (!response.ok) throw new Error(response.status);   // rate limited, offline, …
+      return response.json();
+    })
+    .then(function (release) {
+      if (!release) return;
+      var assets = release.assets || [];
+      var match = pick && assets.filter(function (a) {
+        return a.name.toLowerCase().indexOf(pick) !== -1;
+      })[0];
+      if (!match) {
+        // A release exists but not for this platform, or the platform is unknown.
+        button.href = release.html_url;
+        label.textContent = 'Downloads for ' + release.tag_name;
+        note.textContent = assets.length ? 'Choose the build for your system.'
+                                         : 'This release has no attached builds yet.';
+        return;
+      }
+      button.href = match.browser_download_url;
+      label.textContent = 'Download for ' + named[pick];
+      note.textContent = release.tag_name + ' · ' + sized(match.size) + ' · '
+                       + advice[pick];
+    })
+    .catch(function () {
+      // Offline or rate limited: the releases page still works, so say nothing clever.
+      note.textContent = pick ? advice[pick] : '';
+    });
 })();
 </script>
 </body>

@@ -79,8 +79,11 @@ Any static host does the same job: GitHub Pages, Netlify or Cloudflare Pages wil
 python deploy/serve.py          # http://localhost:8000, to see it before deploying
 ```
 
-> **The asset names are written down twice**
->
-> `.github/workflows/release.yml` produces them and `deploy/index.html` links to them.
-> Rename one without the other and the button 404s, so `tests/deploy_browser.py` checks
-> that the two agree.
+The page reads the asset list from the release itself through GitHub's API rather than
+guessing a filename, so it survives a rename and, more importantly, survives there being
+no release at all: before the first tag it offers *Build from source* instead of a link
+that 404s. `tests/deploy_browser.py` drives all four states — a matching build, a release
+without one for this platform, no releases yet, and an unreachable API.
+
+The only thing that must hold is that each asset name contains `windows`, `macos` or
+`linux`, which is how the page matches one to the visitor. That is checked too.
