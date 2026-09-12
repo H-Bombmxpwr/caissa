@@ -40,7 +40,12 @@ shown to a person.
 ## Games
 
 `GET /api/games` takes the filters below as query parameters and returns
-`{total, games: [...]}`. `limit` defaults to 100 and caps at 500; `offset` pages.
+`{total, games: [...]}`. `limit` defaults to 100 and caps at 500; `offset` pages. Every
+game carries `collections`: `[{id, name, kind, owner}]`, the shelves holding it, owner
+first.
+
+A `collection` filter matches the games a collection owns *and* the games linked onto it.
+Import responses report `linked` alongside `added`, `duplicates` and `skipped`.
 
 **Selecting what is listed**
 
@@ -97,6 +102,15 @@ shown to a person.
 * - `DELETE`
   - `/api/games/<id>`
   - remove one game from the index
+* - `GET`
+  - `/api/games/<id>/collections`
+  - the collections holding this game, owner first
+* - `POST`
+  - `/api/games/<id>/collections`
+  - `{collection, kind}` — link it onto another shelf, creating the collection if needed
+* - `DELETE`
+  - `/api/games/<id>/collections/<name>`
+  - remove a link; a game's own collection cannot be unlinked
 * - `POST`
   - `/api/games/delete-preview`
   - `{filters}` → a token, the count, and a sample
@@ -255,7 +269,8 @@ a `machine` object with `cores`, `cpu_percent`, `cpu_mhz`, memory, `temperature_
   - studies visible to the token (or to `?user=` without one)
 * - `POST`
   - `/api/lichess/studies`
-  - `{ids, collection, kind, as_repertoire, name, color}`
+  - `{studies: [{id, name}], collection, kind, as_repertoire, name, color}` — a blank
+    `collection` files each study under its own name
 :::
 
 The token is never returned by any endpoint. `GET /api/settings/lichess_token` is

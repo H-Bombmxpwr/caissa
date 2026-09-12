@@ -257,10 +257,14 @@ A token revoked on lichess's side reads as disconnected, with the reason. **Forg
 token** removes it.
 
 **Import my studies** lists every study lichess will show your token, newest first, with
-checkboxes. Chapters are saved as `studies`-kind collections, and ticking **Also build
-drillable repertoire lines** runs the same chapters through the repertoire importer in one
-pass. A study that cannot be read is reported by name without stopping the others, and the
-whole import is one undoable batch. See the
+checkboxes. **Save chapters into** defaults to *a collection per study, named after it* —
+pick a study called "john games" and you get a collection called `john games` — or pool
+them under one name instead. Chapters are `studies`-kind, so they stay out of the game
+database; because that means they would not show in the default view, the database opens
+on the new collection as soon as the import finishes. Ticking **Also build drillable
+repertoire lines** runs the same chapters through the repertoire importer in one pass. A
+study that cannot be read is reported by name without stopping the others, and the whole
+import is one undoable batch. See the
 [lichess guide](https://h-bombmxpwr.github.io/caissa/guide/lichess.html).
 
 ## Online and offline use
@@ -336,6 +340,15 @@ search the whole position index, not just the initially displayed examples.
   importing into an existing collection never moves somebody's games out of the
   database behind their back. **Save game** asks what you are saving and offers only
   the collections that can hold it.
+- **One game can sit in several collections.** A game belongs to the collection it was
+  imported into and can be linked into others; importing a game the library already holds
+  now links it there instead of dropping it as a duplicate, so "0 added, 14 linked" means
+  the games were already yours and are now on this shelf too. There is still one row of
+  PGN. The **Collections** column shows where each game lives (a `+n` when it is on more
+  than one shelf, with the full list on hover), the preview and the analysis **Game tags**
+  panel list them, and **Collections…** adds or unlinks one. A game's own collection
+  cannot be unlinked, and deleting a collection hands any shared game to the collection
+  that still holds it rather than destroying it.
 - Database previews show the last recorded mainline position, including the final
   position of full games. The preview stays beside the list while scrolling.
 - **Filters** combine player, colour, outcome, opening/ECO range, event, result, rating

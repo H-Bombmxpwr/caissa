@@ -16,6 +16,50 @@
   // positions and imported opening trees live in their own collections so they do
   // not pad out the game list, and stay searchable by choosing them here.
   const KINDS=[['games','Games'],['studies','Study positions'],['openings','Opening trees']];
+  // A game lives in the collection it was imported into and can be linked into others.
+  // Wherever a game is shown, so is the set of shelves holding it, because "this is
+  // also in my repertoire folder" is the sort of thing you want to see before you edit.
+  function collectionNames(game){return (game.collections||[]).map(c=>c.name);}
+  function collectionCell(game){
+    const names=collectionNames(game);
+    if(!names.length)return h('td',{text:'—'});
+    return h('td'+(names.length>1?'.multi-collection':''),{title:names.join('\n')},
+      [h('span',{text:names[0]}),...(names.length>1?[h('b.collection-more',{text:' +'+(names.length-1)})]:[])]);
+  }
+  // Adding a game to a second collection links it rather than copying the PGN: one
+  // game, many shelves, so an edit made in one place is the same game everywhere.
+  function collectionsDialog(game,refresh){
+    modal('Collections holding this game',(body,close)=>{
+      const list=h('div');
+      const chooser=select([['__new','＋ New collection…'],...state.collections.map(c=>[c.name,c.name+' · '+kindLabel(c.kind||'games')])],'__new');
+      const fresh=h('input',{placeholder:'e.g. Tournament preparation'});
+      const freshField=field('New collection name',fresh);
+      const kind=select(KINDS,'games');
+      const kindField=field('Kind of the new collection',kind);
+      function sync(){freshField.hidden=kindField.hidden=chooser.value!=='__new';}
+      chooser.addEventListener('change',sync);
+      async function render(){
+        const data=await api('games/'+game.id+'/collections');
+        list.replaceChildren(...data.collections.map(c=>h('div.context-item',[
+          h('b',{text:c.name}),
+          h('span.muted',{text:' · '+kindLabel(c.kind||'games')+(c.owner?' · imported here':' · linked')}),
+          ...(c.owner?[]:[button('Unlink',async()=>{
+            await api('games/'+game.id+'/collections/'+encodeURIComponent(c.name),null,'DELETE');
+            await render();await refreshMeta();if(refresh)await refresh();})])])));
+        if(data.collections.length<2)list.append(h('p.muted',{text:'This game is in one collection. Add it to another and both will list it — there is still only one copy of the PGN.'}));
+      }
+      body.append(h('p.muted',{text:'Linking does not copy the game. The same PGN is listed by every collection here, and deleting one of them hands the game to the others rather than destroying it.'}),
+        list,h('div.divider'),field('Add to',chooser),freshField,kindField,
+        h('div.dialog-actions',[button('Close',close),button('Add to collection',async()=>{
+          const name=(chooser.value==='__new'?fresh.value:chooser.value).trim();
+          if(!name)throw new Error('Name the collection to add this game to.');
+          const out=await api('games/'+game.id+'/collections',{collection:name,kind:kind.value});
+          App.toast(out.linked?'Added to '+name:'That game is already in '+name);
+          fresh.value='';await render();await refreshMeta();if(refresh)await refresh();
+        },'primary')]));
+      sync();render();
+    });
+  }
   const kindLabel=k=>(KINDS.find(([id])=>id===k)||[,'Games'])[1];
   const modules = [['database','▤','Database'],['analysis','♙','Analysis board'],['repertoire','♧','Repertoire'],
     ['masters','♜','Master games'],['imports','⇣','Online & imports'],['studies','▱','Study folders'],
@@ -518,7 +562,7 @@
       state.filters.sort||'date',()=>{state.filters.sort=sort.value;loadGames();});
     const rows=h('tbody'),count=h('span'),pager=h('div.pagination');
     const filters=h('div.filters',[q,kind,cols,sort,button('Filters',()=>filterDialog(loadGames)),button('Clear filters',()=>{state.filters={};state.offset=0;return go('database');}),button('Index positions',()=>modal('Build the position index',(body,close)=>body.append(LibraryTools.indexControls(),button('Close',close)))),button('Delete matching games',()=>deleteMatching(async()=>{await refreshStats();await loadGames();}),'danger')]);
-    const table=h('div.table-scroll',[h('table.games',[h('thead',[h('tr',['#','White','Elo W','Black','Elo B','Result','Moves','ECO / Opening','Tournament','Date','Round','Annotator','Notes','Added'].map(t=>h('th',{text:t})))]),rows])]);
+    const table=h('div.table-scroll',[h('table.games',[h('thead',[h('tr',['#','White','Elo W','Black','Elo B','Result','Moves','ECO / Opening','Tournament','Date','Round','Annotator','Notes','Collections','Added'].map(t=>h('th',{text:t})))]),rows])]);
     const list=h('section.card',[filters,table,pager]);
     const aside=h('div.library-aside.section-stack');
     const previewBody=h('div.preview',[h('div.eyebrow',{text:'At the board'}),h('h3',{text:'Your next discovery'}),h('p.muted',{text:'Select a game to preview. Double-click to analyze.'})]);
@@ -533,16 +577,21 @@
             g.result,Math.ceil(g.ply_count/2),
             [opening.eco,opening.name,g.variation].filter(Boolean).join(' · '),
             [g.event,g.white_team&&g.black_team?g.white_team+' v '+g.black_team:''].filter(Boolean).join(' · ')||'—',
-            g.date||'Unknown',g.round||'—',g.annotator||'—',g.has_annotations?'Annotated':'',
-            new Date(g.added_at*1000).toLocaleDateString()].map(text=>h('td',{text}))]);rows.append(row);});
-      if(!data.games.length)rows.append(h('tr',[h('td',{colspan:14},[empty('Make room for your chess',stats.games?'Nothing here matches. '+(kind.value?'This lists '+kindLabel(kind.value).toLowerCase()+' only — switch the content list to look elsewhere.':'Widen or clear the filters.'):'Import a PGN or bring in your online games to start your library.',[button('Import games',()=>go('imports'),'primary')])])]));
+            g.date||'Unknown',g.round||'—',g.annotator||'—',g.has_annotations?'Annotated':''
+           ].map(text=>h('td',{text})),collectionCell(g),
+           h('td',{text:new Date(g.added_at*1000).toLocaleDateString()})]);rows.append(row);});
+      if(!data.games.length)rows.append(h('tr',[h('td',{colspan:15},[empty('Make room for your chess',stats.games?'Nothing here matches. '+(kind.value?'This lists '+kindLabel(kind.value).toLowerCase()+' only — switch the content list to look elsewhere.':'Widen or clear the filters.'):'Import a PGN or bring in your online games to start your library.',[button('Import games',()=>go('imports'),'primary')])])]));
       count.textContent=data.total?`${state.offset+1}–${Math.min(state.offset+30,data.total)} of ${data.total.toLocaleString()} games`:'0 games';
       const prev=button('← Previous',()=>{state.offset=Math.max(0,state.offset-30);return loadGames();});prev.disabled=state.offset===0;
       const next=button('Next →',()=>{state.offset+=30;return loadGames();});next.disabled=state.offset+30>=data.total;
       pager.replaceChildren(count,h('div.toolbar',[prev,next]));
     }
     let previewRequest=0;
-    async function showPreview(g){const id=++previewRequest;try{const {game}=await api('games/'+g.id);if(id!==previewRequest)return;const parsed=PGN.parse(game.pgn);const line=PGN.mainline(parsed.root);preview.setPosition(line[line.length-1]?.fenAfter||parsed.startFen);previewDetails.replaceChildren(h('h3',{text:g.white+' — '+g.black}),h('p.muted',{text:g.event+' · '+g.date}),h('p',{text:'Result: '+g.result+(game.termination?' · '+game.termination:'')}),...(line.at(-1)?.comment?[h('p',{text:line.at(-1).comment})]:[]),button('Open analysis →',()=>openGame(g.id),'primary'));}catch(err){App.toast(err.message);}}
+    async function showPreview(g){const id=++previewRequest;try{const {game}=await api('games/'+g.id);if(id!==previewRequest)return;const parsed=PGN.parse(game.pgn);const line=PGN.mainline(parsed.root);preview.setPosition(line[line.length-1]?.fenAfter||parsed.startFen);const shelves=collectionNames(game.collections?game:g);
+      previewDetails.replaceChildren(h('h3',{text:g.white+' — '+g.black}),h('p.muted',{text:g.event+' · '+g.date}),h('p',{text:'Result: '+g.result+(game.termination?' · '+game.termination:'')}),
+        h('p.muted',{text:shelves.length>1?'In '+shelves.length+' collections: '+shelves.join(', '):'In '+(shelves[0]||'no collection')}),
+        ...(line.at(-1)?.comment?[h('p',{text:line.at(-1).comment})]:[]),
+        h('div.toolbar',[button('Open analysis →',()=>openGame(g.id),'primary'),button('Collections…',()=>collectionsDialog(g,loadGames))]));}catch(err){App.toast(err.message);}}
     await loadGames();
   }
   async function analysis() {
@@ -843,8 +892,14 @@
     async function renderTags(){
       const headers=h('dl.pgn-tags',Object.entries(parsed.headers).flatMap(([key,value])=>[h('dt',{text:key}),h('dd',{text:value})]));
       if(!state.selected){tagsBody.replaceChildren(headers,h('p.muted',{text:'Save this game to add library labels.'}));return;}
-      try{const data=await api('study/tags?game_id='+state.selected.id);
-        tagsBody.replaceChildren(headers,h('h3',{text:'Library labels'}),...(data.tags.length?data.tags.map(t=>h('span.tag-chip',{text:t})):[h('p.muted',{text:'No tags yet.'})]));
+      try{const [data,shelves]=await Promise.all([api('study/tags?game_id='+state.selected.id),
+                                                  api('games/'+state.selected.id+'/collections')]);
+        tagsBody.replaceChildren(headers,
+          h('h3',{text:'Collections'}),
+          ...shelves.collections.map(c=>h('div.context-item',[h('b',{text:c.name}),
+            h('span.muted',{text:' · '+kindLabel(c.kind||'games')+(c.owner?' · imported here':' · linked')})])),
+          button('Add to another collection',()=>collectionsDialog(state.selected,renderTags)),
+          h('h3',{text:'Library labels'}),...(data.tags.length?data.tags.map(t=>h('span.tag-chip',{text:t})):[h('p.muted',{text:'No tags yet.'})]));
       }catch(err){tagsBody.replaceChildren(h('p.error-message',{text:err.message}));}
     }
     async function editTags(){if(!state.selected)throw new Error('Save this game first.');const data=await api('study/tags?game_id='+state.selected.id);modal('Organize this game',(body,close)=>{const input=h('input',{value:data.tags.join(', '),placeholder:'model game, tournament prep, endgame'});body.append(field('Tags, separated by commas',input),h('div.dialog-actions',[button('Cancel',close),button('Save tags',async()=>{const saved=input.value.split(',').map(t=>t.trim()).filter(Boolean);await api('study/tags',{game_id:state.selected.id,tags:saved},'PUT');close();App.toast(saved.length?'Tags saved: '+saved.join(', '):'Tags cleared');await renderTags();},'primary')]));});}
@@ -1071,7 +1126,13 @@
         return {study:s,box,row:h('label.context-item.study-pick',[box,h('b',{text:s.name}),
           h('span.muted',{text:s.updated_at?' · updated '+new Date(s.updated_at).toLocaleDateString():''})])};
       });
+      // Naming the collection after the study is what someone who just picked
+      // "john games" will go looking for afterwards.
+      const filing=select([['each','A collection per study, named after it'],
+                           ['one','One collection for all of them']],'each');
       const collection=h('input',{value:'Lichess studies'});
+      const collectionField=field('Collection name',collection);
+      filing.addEventListener('change',()=>{collectionField.hidden=filing.value!=='one';});
       const asRepertoire=h('input',{type:'checkbox'});
       const repName=h('input',{value:'Lichess repertoire'});
       const colour=select([['w','White'],['b','Black']],'w');
@@ -1084,23 +1145,35 @@
         h('div.toolbar',[button('Select all',()=>boxes.forEach(b=>{b.box.checked=true;})),
           button('Select none',()=>boxes.forEach(b=>{b.box.checked=false;}))]),
         h('div.study-picker',boxes.map(b=>b.row)),
-        field('Save chapters into',collection),
+        field('Save chapters into',filing),collectionField,
         h('label.toolbar',[asRepertoire,'Also build drillable repertoire lines from these studies']),repFields,
+        h('p.muted',{text:'Studies are filed under their own kind, not the game database. After importing, the database opens on them; to find them later choose Study positions in its Content list.'}),
         status,
         h('div.dialog-actions',[button('Cancel',close),button('Import selected',async()=>{
-          const ids=boxes.filter(b=>b.box.checked).map(b=>b.study.id);
-          if(!ids.length)throw new Error('Choose at least one study.');
-          status.textContent='Downloading '+ids.length+' studies from lichess…';
+          const picked=boxes.filter(b=>b.box.checked).map(b=>({id:b.study.id,name:b.study.name}));
+          if(!picked.length)throw new Error('Choose at least one study.');
+          if(filing.value==='one'&&!collection.value.trim())throw new Error('Name the collection these studies should go into.');
+          status.textContent='Downloading '+picked.length+' studies from lichess…';
           watchImport();
-          const result=await api('lichess/studies',{ids,collection:collection.value.trim(),
+          const result=await api('lichess/studies',{studies:picked,
+            collection:filing.value==='one'?collection.value.trim():'',
             as_repertoire:asRepertoire.checked,name:repName.value.trim(),color:colour.value});
           close();
-          App.toast(result.added+' chapters saved to '+result.collection
+          const where=(result.collections||[]).join(', ')||'your library';
+          App.toast(result.added+' chapters saved to '+where
+            +(result.linked?' · '+result.linked+' linked from other collections':'')
             +(result.duplicates?' · '+result.duplicates+' already present':'')
             +(result.repertoire_lines?' · '+result.repertoire_lines+' repertoire lines added':'')
-            +(result.failures.length?' · '+result.failures.length+' studies failed':''),8000);
+            +(result.failures.length?' · '+result.failures.length+' studies failed: '
+              +result.failures.map(f=>(f.name||f.id)+' ('+f.error+')').join('; '):''),10000);
           await refreshMeta();
+          // Studies are filed under their own kind, so the game database would not show
+          // them by default. Land on them instead of leaving the reader to guess.
+          const landed=state.collections.find(c=>c.name===(result.collections||[])[0]);
+          if(landed){state.filters={kind:result.kind||'studies',collection:String(landed.id)};
+            state.offset=0;await go('database');}
         },'primary')]));
+      collectionField.hidden=true;          // per-study naming is the default
     });
   }
   async function settings(){content.append(heading('Make Caissa yours','Settings','Choose where your library lives and how your board looks.'));const holder=h('div.board-holder',{style:{maxWidth:'460px',margin:'auto'}});preview=new Board(holder,{viewOnly:true});preview.setPosition(new Chess());

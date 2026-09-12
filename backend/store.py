@@ -62,6 +62,18 @@ CREATE INDEX IF NOT EXISTS games_eco ON games(eco);
 CREATE INDEX IF NOT EXISTS games_date ON games(date);
 CREATE INDEX IF NOT EXISTS games_event ON games(event);
 
+-- A game belongs to the collection it was first imported into, and may be linked
+-- into others. Importing a game that is already in the library used to drop it
+-- silently as a duplicate, which lost the fact that it belongs in both places;
+-- now that fact is recorded here instead. One row of PGN, many shelves.
+CREATE TABLE IF NOT EXISTS game_collections (
+  game_id INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+  collection_id INTEGER NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+  added_at INTEGER NOT NULL,
+  PRIMARY KEY (game_id, collection_id)
+);
+CREATE INDEX IF NOT EXISTS game_collections_collection ON game_collections(collection_id);
+
 CREATE TABLE IF NOT EXISTS repertoires (
   id INTEGER PRIMARY KEY,
   name TEXT NOT NULL,
@@ -181,7 +193,9 @@ class Library:
     def collections(self):
         rows = self.connect().execute(
             """SELECT c.id, c.name, c.kind, c.created_at,
-                      (SELECT COUNT(*) FROM games g WHERE g.collection_id = c.id) AS games
+                      (SELECT COUNT(*) FROM games g WHERE g.collection_id = c.id)
+                      + (SELECT COUNT(*) FROM game_collections l WHERE l.collection_id = c.id) AS games,
+                      (SELECT COUNT(*) FROM game_collections l WHERE l.collection_id = c.id) AS linked
                FROM collections c ORDER BY c.name"""
         ).fetchall()
         return [dict(r) for r in rows]
@@ -207,6 +221,56 @@ class Library:
             conn.commit()
         os.makedirs(os.path.join(self.collections_dir, slugify(name)), exist_ok=True)
         return self.collection(name)
+
+    def collections_for(self, game_ids):
+        """Every collection each of these games sits in, owner first then links."""
+        ids = [int(i) for i in game_ids]
+        if not ids:
+            return {}
+        marks = ",".join("?" * len(ids))
+        rows = self.connect().execute(
+            "SELECT g.id AS game_id, c.id, c.name, c.kind, 1 AS owner "
+            "FROM games g JOIN collections c ON c.id = g.collection_id "
+            "WHERE g.id IN (" + marks + ") "
+            "UNION ALL "
+            "SELECT l.game_id, c.id, c.name, c.kind, 0 AS owner "
+            "FROM game_collections l JOIN collections c ON c.id = l.collection_id "
+            "WHERE l.game_id IN (" + marks + ")",
+            ids + ids).fetchall()
+        out = {}
+        for row in rows:
+            out.setdefault(row["game_id"], []).append(
+                {"id": row["id"], "name": row["name"], "kind": row["kind"],
+                 "owner": bool(row["owner"])})
+        for entries in out.values():
+            entries.sort(key=lambda c: (not c["owner"], c["name"].lower()))
+        return out
+
+    def link_game(self, game_id, collection):
+        """Shelve an existing game in another collection. Returns False if it is already there."""
+        info = self.collection(collection)
+        if not info:
+            raise ValueError("Choose an existing collection")
+        row = self.connect().execute("SELECT collection_id FROM games WHERE id=?",
+                                     (int(game_id),)).fetchone()
+        if not row:
+            raise ValueError("No such game")
+        if row["collection_id"] == info["id"]:
+            return False
+        with self._write_lock, self.connect() as db:
+            cur = db.execute("INSERT OR IGNORE INTO game_collections VALUES (?,?,?)",
+                             (int(game_id), info["id"], int(time.time())))
+        return bool(cur.rowcount)
+
+    def unlink_game(self, game_id, collection):
+        """Take a game off a shelf it was linked onto. The owning collection is not a link."""
+        info = self.collection(collection)
+        if not info:
+            raise ValueError("Choose an existing collection")
+        with self._write_lock, self.connect() as db:
+            cur = db.execute("DELETE FROM game_collections WHERE game_id=? AND collection_id=?",
+                             (int(game_id), info["id"]))
+        return bool(cur.rowcount)
 
     def name_openings(self, collection=None):
         """Fill in opening names for games imported before, or without, an Opening tag."""
@@ -237,6 +301,19 @@ class Library:
             return False
         with self._write_lock:
             conn = self.connect()
+            # A game this collection owns but another collection also holds must not
+            # disappear with it. Hand it to the other collection instead, and drop the
+            # link that has just become its ownership.
+            rescued = conn.execute(
+                """SELECT l.game_id, MIN(l.collection_id) AS new_owner
+                   FROM game_collections l JOIN games g ON g.id = l.game_id
+                   WHERE g.collection_id = ? AND l.collection_id <> ?
+                   GROUP BY l.game_id""", (info["id"], info["id"])).fetchall()
+            for row in rescued:
+                conn.execute("UPDATE games SET collection_id = ? WHERE id = ?",
+                             (row["new_owner"], row["game_id"]))
+                conn.execute("DELETE FROM game_collections WHERE game_id = ? AND collection_id = ?",
+                             (row["game_id"], row["new_owner"]))
             conn.execute("DELETE FROM games WHERE collection_id = ?", (info["id"],))
             conn.execute("DELETE FROM collections WHERE id = ?", (info["id"],))
             conn.commit()
@@ -270,7 +347,7 @@ class Library:
 
         path = self._pgn_path(info["name"])
         rel = os.path.relpath(path, self.dir)
-        added = duplicates = skipped = 0
+        added = duplicates = skipped = linked = 0
         rows = []
 
         with self._write_lock:
@@ -300,7 +377,21 @@ class Library:
                     signature = self.signature(text)
                     if skip_duplicates and ((meta["source_id"] and meta["source_id"] in known) or
                         signature in known or conn.execute('SELECT 1 FROM games WHERE signature=? LIMIT 1', (signature,)).fetchone()):
-                        duplicates += 1
+                        # The same game arriving for a second collection is not noise:
+                        # it belongs on both shelves, so link it rather than drop it.
+                        existing = conn.execute(
+                            'SELECT id, collection_id FROM games WHERE signature=? '
+                            'OR (source_id IS NOT NULL AND source_id=?) LIMIT 1',
+                            (signature, meta["source_id"])).fetchone()
+                        if existing and existing["collection_id"] != info["id"]:
+                            if conn.execute(
+                                'INSERT OR IGNORE INTO game_collections VALUES (?,?,?)',
+                                (existing["id"], info["id"], int(time.time()))).rowcount:
+                                linked += 1
+                            else:
+                                duplicates += 1
+                        else:
+                            duplicates += 1
                         continue
                     # A file carrying only an ECO code would otherwise show up with no
                     # opening name at all; its own Opening tag is never overwritten.
@@ -354,6 +445,7 @@ class Library:
             "added": added,
             "duplicates": duplicates,
             "skipped": skipped,
+            "linked": linked,
             "collection": info["name"],
             "collection_id": info["id"],
         }
@@ -379,6 +471,7 @@ class Library:
             return None
         out = dict(row)
         out["pgn"] = self.game_pgn(game_id)
+        out["collections"] = self.collections_for([game_id]).get(int(game_id), [])
         return out
 
     SORTS = {
@@ -415,15 +508,18 @@ class Library:
         # trees stay out of it; every other caller can still reach them by naming a kind
         # or by passing none at all, which searches the whole library.
         if kind:
-            where.append("collection_id IN (SELECT id FROM collections WHERE kind = ?)")
-            params.append(str(kind))
+            where.append("(collection_id IN (SELECT id FROM collections WHERE kind = ?)"
+                         " OR id IN (SELECT l.game_id FROM game_collections l"
+                         " JOIN collections c ON c.id = l.collection_id WHERE c.kind = ?))")
+            params.extend([str(kind), str(kind)])
 
         if collection:
             info = self.collection(collection)
             if not info:
                 return {"total": 0, "games": []}
-            where.append("collection_id = ?")
-            params.append(info["id"])
+            where.append("(collection_id = ? OR id IN "
+                         "(SELECT game_id FROM game_collections WHERE collection_id = ?))")
+            params.extend([info["id"], info["id"]])
         if query:
             for term in query.split():
                 like = "%" + term + "%"
@@ -560,7 +656,11 @@ class Library:
             "FROM games" + clause + " ORDER BY " + order + " LIMIT ? OFFSET ?",
             params + [int(limit), int(offset)],
         ).fetchall()
-        return {"total": total, "games": [dict(r) for r in rows]}
+        games = [dict(r) for r in rows]
+        memberships = self.collections_for([g["id"] for g in games])
+        for game in games:
+            game["collections"] = memberships.get(game["id"], [])
+        return {"total": total, "games": games}
 
     def begin_import(self, label):
         batch = uuid.uuid4().hex

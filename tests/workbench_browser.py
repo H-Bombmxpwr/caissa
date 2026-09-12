@@ -178,6 +178,34 @@ with tempfile.TemporaryDirectory(prefix='caissa-browser-') as data:
             # Every dialog closes without the keyboard.
             page.locator('dialog .dialog-close').click()
             page.wait_for_selector('dialog',state='detached')
+            # A game on more than one shelf says so in the list, and the dialog can add
+            # and remove a shelf without copying the PGN.
+            shared_pgn='\n'.join(['[Event "Shared game"]', '[White "Alpha"]', '[Black "Beta"]',
+                                  '[Result "1-0"]', '', '1. c4 e5 1-0'])
+            page.evaluate('''async(pgn)=>{
+              await Caissa.api('games',{pgn,collection:'Shelf one'});
+              await Caissa.api('games',{pgn,collection:'Shelf two'});
+              Caissa.state.filters={kind:'games',q:'Shared game'};Caissa.state.offset=0;
+              await Caissa.go('database');}''',shared_pgn)
+            page.wait_for_selector('tbody tr td.multi-collection')
+            marker=page.locator('tbody tr td.multi-collection').first
+            assert '+1' in marker.inner_text(),marker.inner_text()
+            assert 'Shelf one' in marker.inner_text(),marker.inner_text()
+            shelves=page.evaluate('''async()=>{
+              const found=await Caissa.api('games?'+new URLSearchParams({q:'Shared game',limit:1}));
+              const id=found.games[0].id;
+              const before=await Caissa.api('games/'+id+'/collections');
+              await Caissa.api('games/'+id+'/collections',{collection:'Shelf three'});
+              const after=await Caissa.api('games/'+id+'/collections');
+              await Caissa.api('games/'+id+'/collections/Shelf%20three',null,'DELETE');
+              const back=await Caissa.api('games/'+id+'/collections');
+              const total=(await Caissa.api('games?'+new URLSearchParams({q:'Shared game'}))).total;
+              return {before:before.collections.map(c=>c.name),after:after.collections.map(c=>c.name),
+                      back:back.collections.map(c=>c.name),total};}''')
+            assert shelves['before']==['Shelf one','Shelf two'],shelves
+            assert shelves['after']==['Shelf one','Shelf three','Shelf two'],shelves
+            assert shelves['back']==['Shelf one','Shelf two'],shelves
+            assert shelves['total']==1,shelves          # one game, three shelves, never copied
             # A study position saved into a studies collection stays out of the game
             # database, and is still found by asking for study positions.
             page.evaluate('''async()=>{await Caissa.api('games',{pgn:'[Event "Kept aside"]\\n[White "Study"]\\n[Black "Position"]\\n[Result "*"]\\n\\n1. d4 *',collection:'My studies',kind:'studies'});}''')

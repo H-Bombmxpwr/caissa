@@ -127,3 +127,5 @@ html{background:transparent}
 .study-picker{max-height:320px;overflow:auto;border:1px solid var(--border);border-radius:8px;padding:0 14px;margin-bottom:14px}
 .study-pick{display:flex;align-items:center;gap:10px;cursor:pointer}
 .study-pick input{flex:none}
+/* A game on more than one shelf says so in the list. */
+.multi-collection .collection-more{color:var(--accent,#315e48);font-weight:600}

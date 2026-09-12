@@ -128,7 +128,7 @@ def puzzle_csv(stream):
         yield '[Event "Lichess puzzle '+row['PuzzleId']+'"]\n[SetUp "1"]\n[FEN "'+fen+'"]\n[Result "*"]\n[Themes "'+row.get('Themes','')+'"]\n\n'+' '.join(sans)+' *'
 
 def import_local(library, path, collection):
-    total = dict(added=0, duplicates=0, skipped=0)
+    total = dict(added=0, duplicates=0, skipped=0, linked=0)
     if os.path.isdir(path):
         paths = (os.path.join(root, f) for root, dirs, files in os.walk(path) for f in sorted(files)
                  if f.lower().endswith(SUPPORTED))
@@ -192,7 +192,7 @@ def chesscom(library, user, collection, maximum=100):
         raise ValueError('Give a valid chess.com username')
     base = 'https://api.chess.com/pub/player/'+urllib.parse.quote(user.lower())+'/games/archives'
     archives = json.loads(lichess._request(base, 'application/json'))['archives']
-    total, remaining = dict(added=0, duplicates=0, skipped=0), maximum
+    total, remaining = dict(added=0, duplicates=0, skipped=0, linked=0), maximum
     for archive in reversed(archives):
         if not archive.startswith('https://api.chess.com/pub/player/'):
             continue

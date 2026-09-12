@@ -285,16 +285,17 @@ def import_dump(library, path, collection="Masters", limit=None, batch_size=500,
     Streamed in batches so a multi-gigabyte file never has to fit in memory.
     """
     stream, raw = _open_pgn_stream(path)
-    added = duplicates = 0
+    added = duplicates = linked = 0
     batch, chunk = [], []
 
     def flush():
-        nonlocal added, duplicates, batch
+        nonlocal added, duplicates, linked, batch
         if not batch:
             return
         result = library.add_games(GAME_SEPARATOR.join(batch), collection=collection, source="dump")
         added += result["added"]
         duplicates += result["duplicates"]
+        linked += result.get("linked", 0)
         batch = []
         if progress:
             progress(added, duplicates)
@@ -307,7 +308,7 @@ def import_dump(library, path, collection="Masters", limit=None, batch_size=500,
                 if len(batch) >= batch_size:
                     flush()
                     if limit and added >= limit:
-                        return {"added": added, "duplicates": duplicates}
+                        return {"added": added, "duplicates": duplicates, "linked": linked}
             chunk.append(line)
         if chunk:
             batch.append("".join(chunk))
@@ -317,7 +318,7 @@ def import_dump(library, path, collection="Masters", limit=None, batch_size=500,
             raw.close()
         except Exception:                                 # noqa: BLE001
             pass
-    return {"added": added, "duplicates": duplicates}
+    return {"added": added, "duplicates": duplicates, "linked": linked}
 
 
 # ---------- account, and the studies only an account can see ----------

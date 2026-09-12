@@ -294,15 +294,36 @@ class WorkspaceApiTests(unittest.TestCase):
                                     body={"path": path, "collection": "Imported"})
         self.assertEqual(payload["added"], 2)
 
-    def test_the_same_game_twice_is_a_duplicate(self):
-        """Re-importing is safe: same players, same moves, even from a different URL."""
+    def test_the_same_game_in_another_collection_is_linked_not_copied(self):
+        """Re-importing never copies a game: same players, same moves, different URL.
+
+        Arriving for a collection that does not hold it yet is not noise — the game
+        belongs on both shelves — so it is linked, and there is still one row of PGN.
+        """
         path = os.path.join(self.dir, "again.pgn")
         with open(path, "w", encoding="utf-8") as handle:
             handle.write(GAMES.replace("abcd1234", "different-url").replace("efgh5678", "other-url"))
+        before = self.call("GET", "/api/games", query={})[1]["total"]
+        shelf = self.call("GET", "/api/games", query={"collection": "Imported"})[1]["total"]
         status, payload = self.call("POST", "/api/import/source",
                                     body={"path": path, "collection": "Imported"})
         self.assertEqual(payload["added"], 0)
+        self.assertEqual(payload["duplicates"], 0)
+        self.assertEqual(payload["linked"], 2)
+        # No new rows of PGN, but the collection now lists two more games.
+        self.assertEqual(self.call("GET", "/api/games", query={})[1]["total"], before)
+        self.assertEqual(self.call("GET", "/api/games", query={"collection": "Imported"})[1]["total"],
+                         shelf + 2)
+
+    def test_the_same_game_twice_in_one_collection_is_a_duplicate(self):
+        path = os.path.join(self.dir, "twice.pgn")
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(GAMES.replace("abcd1234", "same-again").replace("efgh5678", "same-too"))
+        status, payload = self.call("POST", "/api/import/source",
+                                    body={"path": path, "collection": "My games"})
+        self.assertEqual(payload["added"], 0)
         self.assertEqual(payload["duplicates"], 2)
+        self.assertEqual(payload["linked"], 0)
 
     def test_unknown_route_is_a_clean_404(self):
         with self.assertRaises(ApiError) as caught:

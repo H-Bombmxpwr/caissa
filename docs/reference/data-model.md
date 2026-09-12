@@ -55,6 +55,17 @@ The index row for one game. Beyond the location fields (`path`, `byte_offset`,
 carries no such id, `signature` — a hash over the identifying tags and the moves —
 catches duplicates instead.
 
+### `game_collections`
+
+`(game_id, collection_id, added_at)` — the extra shelves a game sits on. `games.collection_id`
+remains the owning collection; this table holds only the links, so every query that
+existed before it still means what it did.
+
+A collection contains the games it owns plus the games linked onto it, which is how
+`search(collection=…)`, the collection counts and the PGN export all read it. Both
+columns cascade on delete, and deleting a collection first hands any game it owns but
+another collection also holds to that other collection.
+
 ### `positions`
 
 `(hash, game_id, ply, next_san)`. The hash is a transposition key: the same position

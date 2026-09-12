@@ -35,10 +35,21 @@ rather than looking connected and failing on use.
 studies** — lists every study lichess will show your token, newest first, with
 checkboxes.
 
-Chapters are saved into a collection of kind `studies`, so they stay out of the game
-database while remaining fully searchable there (choose **Study positions** in the
-database's Content dropdown). Tick **Also build drillable repertoire lines** to run the
-same chapters through the [repertoire importer](repertoire.md) in one pass.
+**Save chapters into** decides the filing. The default, *a collection per study named
+after it*, is almost always what you want: pick a study called "john games" and you get a
+collection called `john games`. Choose *one collection for all of them* to pool several
+studies under a single name instead.
+
+Chapters are saved with kind `studies`, so they stay out of the game database while
+remaining fully searchable (choose **Study positions** in the database's Content
+dropdown). Because that means they would not appear in the default view, the database
+opens on the new collection as soon as the import finishes, so there is nothing to go
+hunting for. Tick **Also build drillable repertoire lines** to run the same chapters
+through the [repertoire importer](repertoire.md) in one pass.
+
+A chapter you already have elsewhere in the library is
+[linked](database.md#one-game-several-collections) rather than skipped, so a study that
+collects games you have imported before still lists all of them.
 
 A study that cannot be read — revoked access, or a chapter that exports nothing — is
 reported by name and does not stop the others from importing. The whole import is one

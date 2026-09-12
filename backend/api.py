@@ -312,6 +312,32 @@ class Api:
                 position=query.get('position'), eco_to=query.get('eco_to'),
                 **{key:query.get(key) for key in EXTRA_FILTERS},
             )
+        # /api/games/<id>/collections — the shelves one game sits on.
+        if len(rest) >= 2 and rest[1] == "collections":
+            game_id = int(rest[0])
+            if method == "GET":
+                return 200, {"collections": self.library.collections_for([game_id]).get(game_id, [])}
+            if method == "POST":
+                name = str((body or {}).get("collection", "")).strip()
+                if not name:
+                    raise ApiError("Name the collection to add this game to.")
+                kind = (body or {}).get("kind") or "games"
+                if kind not in COLLECTION_KINDS:
+                    raise ApiError("unknown collection kind: " + str(kind))
+                if not self.library.collection(name):
+                    self.library.ensure_collection(name, kind)
+                linked = self.library.link_game(game_id, name)
+                return 200, {"linked": linked, "collection": name,
+                             "collections": self.library.collections_for([game_id]).get(game_id, [])}
+            if method == "DELETE" and len(rest) == 3:
+                removed = self.library.unlink_game(game_id, urllib.parse.unquote(rest[2]))
+                if not removed:
+                    raise ApiError("That game is not linked into this collection. A game's "
+                                   "own collection is changed by moving it, not by unlinking.")
+                return 200, {"unlinked": True,
+                             "collections": self.library.collections_for([game_id]).get(game_id, [])}
+            raise ApiError("unsupported collections request", 405)
+
         if method == "GET" and rest:
             game = self.library.game(int(rest[0]))
             if not game:
@@ -719,11 +745,17 @@ class Api:
         Studies are reference material, so they are filed under a collection of kind
         'studies' and stay out of the game database while remaining searchable there.
         """
-        ids = [str(i).strip() for i in (body.get("ids") or []) if str(i).strip()]
-        if not ids:
+        # Either [{id, name}] or bare ids. The name matters: a collection called after
+        # the study is the one the reader will go looking for afterwards.
+        chosen = body.get("studies") or [{"id": i} for i in (body.get("ids") or [])]
+        chosen = [{"id": str(s.get("id", "")).strip(), "name": str(s.get("name", "")).strip()}
+                  for s in chosen if str(s.get("id", "")).strip()]
+        if not chosen:
             raise ApiError("Choose at least one study to import.")
+        ids = [s["id"] for s in chosen]
         token = self._lichess_token()
-        collection = str(body.get("collection", "")).strip() or "Lichess studies"
+        # A blank collection name means "one collection per study, named after it".
+        shared = str(body.get("collection", "")).strip()
         kind = body.get("kind") or "studies"
         if kind not in COLLECTION_KINDS:
             raise ApiError("unknown collection kind: " + str(kind))
@@ -735,20 +767,28 @@ class Api:
         rep_lines_added = 0
         failures = []
         imported = []
-        for study_id in ids:
+        linked = 0
+        collections = []
+        for study in chosen:
+            study_id, label = study["id"], study["name"]
             try:
                 pgn = self._lichess_call(lambda sid=study_id: lichess.study_pgn(sid, token))
             except ApiError as err:
-                failures.append({"id": study_id, "error": err.message})
+                failures.append({"id": study_id, "name": label, "error": err.message})
                 continue
             if not pgn.strip():
-                failures.append({"id": study_id, "error": "that study exported no chapters"})
+                failures.append({"id": study_id, "name": label,
+                                 "error": "that study exported no chapters"})
                 continue
-            result = self.library.add_games(pgn, collection=collection,
+            target = shared or label or ("Lichess study " + study_id)
+            result = self.library.add_games(pgn, collection=target,
                                             source="lichess-study", kind=kind)
             added += result["added"]
             duplicates += result["duplicates"]
             skipped += result["skipped"]
+            linked += result.get("linked", 0)
+            if result["collection"] not in collections:
+                collections.append(result["collection"])
             imported.append(study_id)
             if as_repertoire:
                 parsed = repertoire_pgn.from_pgn(pgn, color)
@@ -764,7 +804,8 @@ class Api:
                     rep_id = self.library.save_repertoire(name, color, json.dumps({"lines": merged}), rep_id)
                     rep_lines_added += fresh
         return 200, {"added": added, "duplicates": duplicates, "skipped": skipped,
-                     "collection": collection, "studies": len(imported),
+                     "linked": linked, "collection": collections[0] if collections else None,
+                     "collections": collections, "kind": kind, "studies": len(imported),
                      "repertoire_id": rep_id, "repertoire_lines": rep_lines_added,
                      "failures": failures}
 

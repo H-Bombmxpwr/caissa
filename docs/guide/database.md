@@ -25,6 +25,34 @@ A collection's kind is set when it is created and never changes afterwards. Impo
 into an existing collection cannot move somebody's games out of the database behind
 their back.
 
+## One game, several collections
+
+A game belongs to the collection it was imported into, and can be listed by others as
+well. Importing a game the library already holds used to count it as a duplicate and drop
+it, which quietly lost the fact that it belonged in both places. Now it is **linked**
+instead: the same single row of PGN, shelved twice.
+
+Wherever a game is shown, so are its collections. The database has a **Collections**
+column — a game on more than one shelf shows the first name and a `+n`, with the full
+list on hover — and the preview panel and the analysis board's **Game tags** panel both
+list them.
+
+**Collections…** on the preview, or **Add to another collection** in analysis, opens the
+dialog that manages them. Adding links the game; unlinking removes it from that shelf.
+The collection a game was imported into is its owner and cannot be unlinked — that is a
+move, not a link.
+
+:::{admonition} Deleting a collection cannot destroy a shared game
+:class: note
+
+If you delete a collection that owns a game another collection also holds, the game is
+handed to that other collection rather than deleted with the rest. Only games nothing
+else holds go.
+:::
+
+An import now reports `linked` alongside `added`, `duplicates` and `skipped`, so
+"0 added, 14 linked" tells you the games were already there and are now on this shelf too.
+
 ## Searching
 
 The search box matches players, event, opening, ECO, annotator, site, team, source
