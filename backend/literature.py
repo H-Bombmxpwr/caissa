@@ -184,3 +184,137 @@ def references(sans, opening=None, eco=None, online=True):
         seen.add(link["url"])
         unique.append(link)
     return {"links": unique, "message": message}
+
+
+WIKIPEDIA_API = "https://en.wikipedia.org/w/api.php"
+
+
+def _surname(name):
+    """PGN names are 'Karpov, Anatoly'; Wikipedia wants 'Anatoly Karpov'."""
+    name = (name or "").strip()
+    # "White"/"Black" are what an unnamed study carries, and both are real article titles.
+    if not name or name in ("?", "-", "NN", "White", "Black", "Unknown"):
+        return ""
+    if "," in name:
+        last, _, first = name.partition(",")
+        return (first.strip() + " " + last.strip()).strip()
+    return name
+
+
+def _named(value):
+    """Drop the placeholders PGN writers use when there was nothing to record."""
+    value = (value or "").strip()
+    generic = {"", "?", "-", "--", "study", "casual game", "unknown", "chess", "game",
+               "local event", "internet", "?/?", "rated game", "unrated game"}
+    return "" if value.lower() in generic else value
+
+
+def _wikipedia(titles):
+    """Summaries for the titles that actually exist, following redirects.
+
+    One query covers up to 20 titles. Anything missing is simply absent from the
+    result: this never reports a page it has not seen come back from the API.
+    """
+    titles = [t for t in dict.fromkeys(titles) if t]
+    if not titles:
+        return {}
+    params = {
+        "action": "query", "format": "json", "formatversion": "2", "redirects": "1",
+        "prop": "extracts|info|pageprops", "exintro": "1", "explaintext": "1", "exsentences": "3",
+        "inprop": "url", "titles": "|".join(titles[:20]),
+    }
+    url = WIKIPEDIA_API + "?" + urllib.parse.urlencode(params)
+    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    try:
+        with urllib.request.urlopen(req, timeout=15) as res:
+            data = json.loads(res.read().decode("utf-8"))
+    except (urllib.error.URLError, OSError, ValueError):
+        return {}
+    found = {}
+    for page in data.get("query", {}).get("pages") or []:
+        if page.get("missing") or not page.get("extract"):
+            continue
+        # A disambiguation page is a list of things it might be, never a fact about one.
+        if "disambiguation" in (page.get("pageprops") or {}):
+            continue
+        found[page["title"]] = {
+            "title": page["title"],
+            "extract": page["extract"].strip(),
+            "url": page.get("fullurl") or "https://en.wikipedia.org/wiki/" + urllib.parse.quote(page["title"].replace(" ", "_")),
+        }
+    return found
+
+
+def _wikipedia_search(term, limit=3):
+    """Titles matching a phrase, so a famous game can be found by its own name."""
+    if not term:
+        return []
+    params = {"action": "query", "format": "json", "formatversion": "2",
+              "list": "search", "srsearch": term, "srlimit": limit}
+    url = WIKIPEDIA_API + "?" + urllib.parse.urlencode(params)
+    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    try:
+        with urllib.request.urlopen(req, timeout=15) as res:
+            data = json.loads(res.read().decode("utf-8"))
+    except (urllib.error.URLError, OSError, ValueError):
+        return []
+    return [hit["title"] for hit in data.get("query", {}).get("search") or []]
+
+
+def game_facts(headers, online=True):
+    """Background reading for one game, grouped by what each article is actually about.
+
+    Wikipedia has articles about players, about events, and about a handful of famous
+    individual games. Only the first two can be matched with confidence from PGN tags,
+    so anything found by searching for the game itself is offered as a possibility and
+    labelled that way rather than asserted. Nothing here is generated: every entry is a
+    page the API returned.
+    """
+    white, black = _surname(headers.get("White")), _surname(headers.get("Black"))
+    event = _named(headers.get("Event"))
+    site = _named(headers.get("Site"))
+    year = (headers.get("Date") or "")[:4]
+    if not year.isdigit():
+        year = ""
+
+    query = {"white": white, "black": black, "event": event, "year": year}
+    if not (white or black or event):
+        return {"groups": [], "query": query,
+                "message": "This game has no players or event recorded, so there is nothing to look up."}
+    if not online:
+        return {"groups": [], "query": query, "message": "Offline — connect to look this game up."}
+
+    wanted = [white, black]
+    event_titles = []
+    for name in (event, site):
+        if name:
+            event_titles.append(name)
+            if "chess" not in name.lower():
+                event_titles.append(name + " chess tournament")
+    wanted.extend(event_titles)
+
+    # A game famous enough to have its own article usually carries both names.
+    candidates = []
+    if white and black:
+        candidates = _wikipedia_search("%s %s %s chess game" % (white, black, year))
+        wanted.extend(candidates)
+
+    pages = _wikipedia(wanted)
+
+    def group(label, titles, note=None):
+        items = [pages[t] for t in dict.fromkeys(titles) if t in pages]
+        return {"label": label, "note": note, "items": items} if items else None
+
+    groups = [
+        group("The players", [white, black]),
+        group("The event and place", event_titles),
+        group("Possibly about this game", [t for t in candidates if t not in (white, black)],
+              "Found by searching Wikipedia for these players; read the article to judge whether it is this game."),
+    ]
+    groups = [g for g in groups if g]
+
+    message = None
+    if not groups:
+        message = "Wikipedia has nothing under these names. Games by well-known players at named events are the ones it covers."
+    return {"groups": groups, "message": message,
+            "query": {"white": white, "black": black, "event": event, "year": year}}

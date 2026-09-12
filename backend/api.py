@@ -382,6 +382,25 @@ class Api:
             online=query.get("offline") != "1",
         )
 
+    def _route_facts(self, method, rest, query, body):
+        """What Wikipedia has to say about the players, the event, and maybe the game."""
+        if method != "GET":
+            raise ApiError("unsupported facts request", 405)
+        headers = {key: query.get(key.lower(), "") for key in ("White", "Black", "Event", "Site", "Date")}
+        if not (headers["White"] or headers["Black"] or headers["Event"]):
+            raise ApiError("give at least a player or an event to look up")
+        key = "facts:" + json.dumps(headers, sort_keys=True)
+        cached = self.library.setting(key)
+        if cached:
+            found = json.loads(cached)
+            found["cached"] = True
+            return 200, found
+        found = literature.game_facts(headers, online=query.get("offline") != "1")
+        # Only a real answer is worth keeping; an offline miss must not become permanent.
+        if found.get("groups"):
+            self.library.setting(key, json.dumps(found))
+        return 200, found
+
     def _route_explorer(self, method, rest, query, body):
         if method != "GET":
             raise ApiError("unsupported explorer request", 405)

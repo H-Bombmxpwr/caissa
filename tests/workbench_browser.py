@@ -162,6 +162,14 @@ with tempfile.TemporaryDirectory(prefix='caissa-browser-') as data:
             assert any(t.startswith('e4') and '=' in t for t in texts),texts
             assert any(t.startswith('c5') and '\u2212+' in t for t in texts),texts
             assert '[%evp 0,4,10,-20,30,-40,50]' in page.evaluate('Caissa.serialize(Caissa.state.parsed)')
+            # The Facts tab reads Wikipedia; the lookup is stubbed so the test stays offline.
+            page.route('**/api/facts?*',lambda r:r.fulfill(json={'groups':[{'label':'The players','note':None,
+              'items':[{'title':'Alpha','extract':'A player.','url':'https://en.wikipedia.org/wiki/Alpha'}]}],
+              'message':None,'query':{}}))
+            page.get_by_role('button',name='Facts',exact=True).click()
+            page.get_by_text('Background from Wikipedia',exact=True).wait_for()
+            assert page.get_by_role('link',name='Alpha',exact=True).count()==1
+            assert 'Wikipedia' in page.locator('.context-body').inner_text()
             # Put the library back as it was so the import-history checks below stay honest.
             page.evaluate('''async()=>{const cols=(await Caissa.api('collections')).collections;
               const evp=cols.find(c=>c.name==='Evp');

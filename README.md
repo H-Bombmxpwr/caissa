@@ -145,6 +145,13 @@ if you override it, for example `$env:DATA_DIR = 'D:\ChessLibrary'` before launc
 - Numeric annotation glyphs are shown as symbols: `$1`–`$6` as `!` `?` `!!` `??` `!?` `?!`,
   and the standard positional set (`$10` `=`, `$14`–`$19` `⩲ ⩱ ± ∓ +− −+`, `$140` `∆`, and
   the rest) rather than raw `$n`.
+- The position context panel has a **Facts** tab: background reading about the game from
+  Wikipedia, grouped by what each article is actually about — the players, the event and
+  place, and anything a search for both players turns up, which is offered as *possibly*
+  about this game rather than asserted. Only pages the API returned are shown, and
+  disambiguation pages are skipped. A game with no players or event recorded says so
+  instead of guessing. Results are cached in your library, so a game you have looked up
+  once reads offline; a failed or offline lookup is never cached as the answer.
 - Each Stockfish line carries its depth as a chip and an **Add to tree** button that grafts
   the line into the notation as a variation — up to ten moves of it, or the whole line if
   it is shorter — and puts you on its first move so the arrow keys walk through it.

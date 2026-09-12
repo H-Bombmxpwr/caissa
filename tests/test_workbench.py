@@ -80,6 +80,73 @@ class WorkbenchTests(unittest.TestCase):
         self.api=Api(self.temp.name)
         self.assertNotIn('Scratch',[c['name'] for c in self.call('GET','collections')['collections']])
 
+    def test_game_facts_group_what_wikipedia_actually_returned(self):
+        from backend import literature
+        pages = {'query': {'pages': [
+            {'title': 'Anatoly Karpov', 'extract': 'A Russian chess grandmaster.',
+             'fullurl': 'https://en.wikipedia.org/wiki/Anatoly_Karpov'},
+            {'title': 'Garry Kasparov', 'extract': 'A Russian chess grandmaster.',
+             'fullurl': 'https://en.wikipedia.org/wiki/Garry_Kasparov'},
+            {'title': 'Linares', 'extract': 'A town in Spain.', 'pageprops': {'disambiguation': ''},
+             'fullurl': 'https://en.wikipedia.org/wiki/Linares'},
+            {'title': 'Game of the Century (chess)', 'extract': 'A 1956 game won by Bobby Fischer.',
+             'fullurl': 'https://en.wikipedia.org/wiki/Game_of_the_Century_(chess)'},
+            {'title': 'Nothing Here', 'missing': True},
+        ]}}
+        search = {'query': {'search': [{'title': 'Game of the Century (chess)'}]}}
+        with patch.object(literature, '_wikipedia_search', return_value=['Game of the Century (chess)']), \
+             patch.object(literature, '_wikipedia', return_value={
+                 p['title']: {'title': p['title'], 'extract': p['extract'], 'url': p['fullurl']}
+                 for p in pages['query']['pages'] if not p.get('missing')
+                 and 'disambiguation' not in (p.get('pageprops') or {})}):
+            found = literature.game_facts({'White': 'Karpov, Anatoly', 'Black': 'Kasparov, Garry',
+                                           'Event': 'Linares 11th', 'Site': 'Linares', 'Date': '1993.02.??'})
+        labels = {g['label']: [i['title'] for i in g['items']] for g in found['groups']}
+        self.assertEqual(labels['The players'], ['Anatoly Karpov', 'Garry Kasparov'])
+        self.assertNotIn('The event and place', labels, 'a disambiguation page is not a fact')
+        self.assertEqual(labels['Possibly about this game'], ['Game of the Century (chess)'])
+        self.assertIn('judge whether it is this game',
+                      [g for g in found['groups'] if g['label'].startswith('Possibly')][0]['note'])
+        self.assertEqual(found['query']['white'], 'Anatoly Karpov')
+
+    def test_game_facts_says_so_when_there_is_nothing_to_look_up(self):
+        from backend import literature
+        blank = literature.game_facts({'White': 'White', 'Black': 'Black', 'Event': 'Study', 'Site': '', 'Date': ''})
+        self.assertEqual(blank['groups'], [])
+        self.assertIn('nothing to look up', blank['message'])
+        offline = literature.game_facts({'White': 'Karpov, Anatoly', 'Black': 'Kasparov, Garry',
+                                         'Event': 'Linares', 'Site': '', 'Date': '1993.??.??'}, online=False)
+        self.assertEqual(offline['groups'], [])
+        self.assertIn('Offline', offline['message'])
+
+    def test_facts_route_caches_a_hit_and_never_caches_a_miss(self):
+        from backend import literature
+        hit = {'groups': [{'label': 'The players', 'note': None,
+                           'items': [{'title': 'A', 'extract': 'B', 'url': 'https://example.org/A'}]}],
+               'message': None, 'query': {}}
+        calls = []
+        def fake(headers, online=True):
+            calls.append(headers)
+            return hit
+        with patch.object(literature, 'game_facts', fake):
+            first = self.call('GET', 'facts', None, {'white': 'Karpov, Anatoly'})
+            second = self.call('GET', 'facts', None, {'white': 'Karpov, Anatoly'})
+        self.assertEqual(len(calls), 1, 'the second lookup is served from the library')
+        self.assertNotIn('cached', first)
+        self.assertTrue(second['cached'])
+
+        miss = {'groups': [], 'message': 'Offline', 'query': {}}
+        with patch.object(literature, 'game_facts', lambda headers, online=True: miss):
+            self.call('GET', 'facts', None, {'white': 'Nobody At All'})
+            self.call('GET', 'facts', None, {'white': 'Nobody At All'})
+        with patch.object(literature, 'game_facts', fake):
+            self.call('GET', 'facts', None, {'white': 'Nobody At All'})
+        self.assertEqual(len(calls), 2, 'an offline miss must not be remembered as the answer')
+
+    def test_facts_route_needs_something_to_search_for(self):
+        with self.assertRaises(ApiError):
+            self.call('GET', 'facts', None, {})
+
     def test_import_undo_survives_restart_and_preserves_duplicates(self):
         self.call('POST','games',{'pgn':pgn('Existing')})
         r=self.call('POST','games',{'pgn':pgn('Existing')+'\n\n'+pgn('New')})

@@ -486,7 +486,7 @@
     const liveBox=h('input',{type:'checkbox',onchange:()=>{live=liveBox.checked;if(live)evaluate();else {clearTimeout(liveTimer);clearTimeout(livePoll);++evalRequest;liveId=null;api('engine/live',null,'DELETE').catch(()=>{});}}});
     const pv=select(['1','2','3','5'],'3');
     const rowsBox=h('input',{type:'checkbox',checked:state.prefs.moveRows!==false,onchange:act(async()=>{state.prefs.moveRows=rowsBox.checked;renderMoves();await savePrefs();})});
-    const contextTabs=h('div.context-tabs');['Library','Study','History'].forEach(t=>contextTabs.append(h('button',{text:t,onclick:()=>{state.context=t;renderContext();}})));
+    const contextTabs=h('div.context-tabs');['Library','Study','History','Facts'].forEach(t=>contextTabs.append(h('button',{text:t,onclick:()=>{state.context=t;renderContext();}})));
     const controls=h('div.board-navigation',[button('⏮',()=>jump(parsed.root)),button('←',()=>jump(state.node.parent||state.node)),button('→',()=>jump(state.node.children[0]||state.node)),button('⏭',()=>{let n=state.node;while(n.children.length)n=n.children[0];jump(n);}),button('Flip',()=>board.toggleOrientation())]);
     controls.querySelectorAll('button').forEach((b,i)=>b.setAttribute('aria-label',['First position','Previous move','Next move','Last move','Flip board'][i]));
     const fen=h('div.fen');const sanInput=h('input',{placeholder:'Enter a move, e.g. Nf3','aria-label':'Move in SAN'});
@@ -634,7 +634,30 @@
         const invert={win:'loss',loss:'win',draw:'draw','cursed-win':'blessed-loss','blessed-loss':'cursed-win','maybe-win':'maybe-loss','maybe-loss':'maybe-win','syzygy-win':'syzygy-loss','syzygy-loss':'syzygy-win'};
         tablebaseBody.replaceChildren(h('b',{text:(position.split(' ')[1]==='w'?'White':'Black')+' to move: '+data.category}),h('p.muted',{text:'DTZ '+(data.dtz??'unknown')+' · Cursed wins and blessed losses draw under the 50-move rule.'}),...(data.moves||[]).map(m=>button(m.san+' · '+(invert[m.category]||m.category)+' · DTZ '+(m.dtz??'?'),()=>play(m.uci))));
       }catch(err){if(id===tbRequest&&!closed)tablebaseBody.textContent=err.message;}}
-    async function renderContext(){const id=++contextRequest,position=state.node.fenAfter;contextTabs.querySelectorAll('button').forEach(b=>b.classList.toggle('active',b.textContent===state.context));contextBody.replaceChildren(h('p.muted',{text:'Finding connections…'}));try{const data=await api('study/position?'+new URLSearchParams({fen:position}));if(id!==contextRequest||state.view!=='analysis')return;contextBody.replaceChildren();
+    // Background reading about the game itself: who played, where, and whether the game
+    // is famous enough to have been written about. Every entry is a Wikipedia page the
+    // lookup actually found; nothing here is generated.
+    async function renderFacts(id){
+      contextBody.replaceChildren(h('p.muted',{text:'Looking this game up\u2026'}));
+      const head=parsed.headers;
+      try{
+        const data=await api('facts?'+new URLSearchParams({white:head.White||'',black:head.Black||'',
+          event:head.Event||'',site:head.Site||'',date:head.Date||''}));
+        if(id!==contextRequest||state.view!=='analysis')return;
+        contextBody.replaceChildren(h('div.eyebrow',{text:'Background from Wikipedia'}));
+        for(const group of data.groups){
+          contextBody.append(h('h3',{text:group.label}));
+          if(group.note)contextBody.append(h('p.muted',{text:group.note}));
+          for(const item of group.items)
+            contextBody.append(h('div.context-item',[link(item.title,item.url),h('p.muted',{text:item.extract})]));
+        }
+        if(data.message)contextBody.append(h('p',{text:data.message}));
+        contextBody.append(h('p.muted',{text:data.cached
+          ?'Kept from an earlier lookup, so this reads offline too.'
+          :'Summaries are Wikipedia\u2019s words, matched from this game\u2019s tags. Follow a link before relying on it.'}));
+      }catch(err){if(id===contextRequest)contextBody.replaceChildren(h('p.error-message',{text:err.message}));}
+    }
+    async function renderContext(){const id=++contextRequest,position=state.node.fenAfter;contextTabs.querySelectorAll('button').forEach(b=>b.classList.toggle('active',b.textContent===state.context));if(state.context==='Facts')return renderFacts(id);contextBody.replaceChildren(h('p.muted',{text:'Finding connections…'}));try{const data=await api('study/position?'+new URLSearchParams({fen:position}));if(id!==contextRequest||state.view!=='analysis')return;contextBody.replaceChildren();
       if(state.context==='Library'){contextBody.append(h('p.muted',{text:data.indexed_games.toLocaleString()+' games position-indexed · first 24 plies'}));if(!data.moves.length)contextBody.append(h('p',{text:'No indexed continuations here. Index a collection from Study folders.'}));for(const m of data.moves)contextBody.append(h('div.context-item',[button(m.san,()=>play(m.san)),h('span.muted',{text:'  '+m.games+' games · '+m.white+' / '+m.draws+' / '+m.black})]));for(const g of data.games.slice(0,12))contextBody.append(h('div.context-item',[button(g.white+' — '+g.black,()=>openGame(g.id)),h('div.muted',{text:g.date+' · '+g.result})]));}
       if(state.context==='History'){const earliest=data.games.find(g=>g.date&&!g.date.startsWith('0000'));contextBody.append(h('div.eyebrow',{text:'First seen in your indexed library'}),h('h3',{text:earliest?earliest.white+' — '+earliest.black:'No dated games indexed'}),h('p.muted',{text:earliest?earliest.event+' · '+earliest.date:'Import historical games and index their collection to discover provenance.'}));if(earliest)contextBody.append(button('Open earliest game',()=>openGame(earliest.id)));const max=Math.max(1,...data.decades.map(d=>d.games));for(const d of data.decades)contextBody.append(h('div.timeline-bar',[h('span',{text:d.decade+'s'}),h('i',{style:{width:(d.games/max*110)+'px'}}),h('span',{text:d.games})]));contextBody.append(h('p.muted',{text:'Dates and counts come from your indexed PGNs; this is not a claim of the first game ever played.'}));}
       if(state.context==='Study'){contextBody.append(h('div.eyebrow',{text:'Your position notebook'}),button('＋ Pin a link or note',()=>pinDialog(position,renderContext)));for(const pin of data.pins)contextBody.append(h('div.context-item',[pin.url?link(pin.title,pin.url):h('b',{text:pin.title}),h('p.muted',{text:pin.note}),button('Remove',async()=>{await api('study/pins/'+pin.id,null,'DELETE');renderContext();})]));const opening=parsed.headers.Opening;contextBody.append(h('div.divider'),h('h3',{text:'Free study material'}));if(opening)contextBody.append(link('Wikipedia: '+opening,'https://en.wikipedia.org/wiki/'+encodeURIComponent(opening.split(':')[0].replace(/ /g,'_'))));const path=PGN.pathTo(state.node).map((n,i)=>((i%2===0?Math.floor(i/2)+1+'.':Math.floor(i/2)+1+'...')+n.san));contextBody.append(button('Find opening references',async()=>{const refs=await api('literature?'+new URLSearchParams({moves:JSON.stringify(PGN.pathTo(state.node).map(n=>n.san)),opening:opening||'',eco:parsed.headers.ECO||''}));const box=h('div');for(const ref of refs.links)box.append(h('div.context-item',[link(ref.title,ref.url)]));if(refs.message)box.append(h('p.muted',{text:refs.message}));contextBody.append(box);}));contextBody.append(h('p.muted',{text:'Online references need a connection. Your saved notes and PGNs are available offline.'}));}
