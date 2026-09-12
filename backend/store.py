@@ -1,6 +1,6 @@
 """The game library: PGN files on disk plus a SQLite index over them.
 
-Layout (DATA_DIR defaults to ./library, or /data on Railway with a volume):
+Layout (DATA_DIR defaults to ./library, or /data on Railway with a volume)::
 
     library/
       library.db                  index + repertoires + settings
@@ -17,6 +17,7 @@ import sqlite3
 import threading
 import time
 import hashlib
+import re
 import uuid
 from datetime import datetime, timedelta
 
@@ -45,6 +46,11 @@ CREATE TABLE IF NOT EXISTS games (
   first_moves TEXT,
   source TEXT,
   source_id TEXT,
+  event_date TEXT, event_type TEXT,
+  white_team TEXT, black_team TEXT,
+  white_title TEXT, black_title TEXT,
+  white_fide_id TEXT, black_fide_id TEXT,
+  source_title TEXT, variation TEXT,
   added_at INTEGER NOT NULL
 );
 
@@ -54,6 +60,7 @@ CREATE INDEX IF NOT EXISTS games_white ON games(white);
 CREATE INDEX IF NOT EXISTS games_black ON games(black);
 CREATE INDEX IF NOT EXISTS games_eco ON games(eco);
 CREATE INDEX IF NOT EXISTS games_date ON games(date);
+CREATE INDEX IF NOT EXISTS games_event ON games(event);
 
 CREATE TABLE IF NOT EXISTS repertoires (
   id INTEGER PRIMARY KEY,
@@ -105,16 +112,29 @@ class Library:
                   PRIMARY KEY(batch, game_id));
             ''')
             columns = {r[1] for r in conn.execute('PRAGMA table_info(games)')}
-            for name, kind in [('annotator','TEXT'),('termination','TEXT'),('has_annotations','INTEGER')]:
+            # ChessBase metadata, added to existing libraries in place. Every one is
+            # optional: a PGN that carries none of them stores empty strings.
+            for name, kind in [('annotator','TEXT'),('termination','TEXT'),('has_annotations','INTEGER'),
+                               ('event_date','TEXT'),('event_type','TEXT'),
+                               ('white_team','TEXT'),('black_team','TEXT'),
+                               ('white_title','TEXT'),('black_title','TEXT'),
+                               ('white_fide_id','TEXT'),('black_fide_id','TEXT'),
+                               ('source_title','TEXT'),('variation','TEXT')]:
                 if name not in columns:
                     conn.execute('ALTER TABLE games ADD COLUMN '+name+' '+kind)
-            for row in conn.execute('SELECT id FROM games WHERE has_annotations IS NULL').fetchall():
+            # A library imported before these columns existed is re-read once, so a
+            # ChessBase collection already on disk gains its teams, titles and FIDE
+            # ids without being imported again.
+            stale = conn.execute('''SELECT id FROM games
+                WHERE has_annotations IS NULL OR event_date IS NULL''').fetchall()
+            for row in stale:
                 text = self.game_pgn(row['id'])
                 if text:
                     self._update_extra_metadata(conn, row['id'], text)
             if 'signature' not in columns:
                 conn.execute('ALTER TABLE games ADD COLUMN signature TEXT')
             conn.execute('CREATE INDEX IF NOT EXISTS games_signature ON games(signature)')
+            conn.execute('CREATE INDEX IF NOT EXISTS games_event_date ON games(event_date)')
             # Older libraries receive signatures once, without changing their PGNs.
             for row in conn.execute('SELECT id FROM games WHERE signature IS NULL').fetchall():
                 text = self.game_pgn(row['id'])
@@ -123,11 +143,14 @@ class Library:
 
     @staticmethod
     def _update_extra_metadata(conn, ident, text):
-        import re
-        tags = pgnutil.headers(text)
-        annotated = int(bool(re.search(r'\{|;|\$\d+|[!?]|\(', pgnutil.movetext(text))))
-        conn.execute('UPDATE games SET annotator=?,termination=?,has_annotations=? WHERE id=?',
-                     (tags.get('Annotator',''),tags.get('Termination',''),annotated,ident))
+        meta = pgnutil.describe(text)
+        conn.execute('''UPDATE games SET annotator=?,termination=?,has_annotations=?,
+            event_date=?,event_type=?,white_team=?,black_team=?,white_title=?,black_title=?,
+            white_fide_id=?,black_fide_id=?,source_title=?,variation=? WHERE id=?''',
+            (meta['annotator'],meta['termination'],meta['has_annotations'],
+             meta['event_date'],meta['event_type'],meta['white_team'],meta['black_team'],
+             meta['white_title'],meta['black_title'],meta['white_fide_id'],
+             meta['black_fide_id'],meta['source_title'],meta['variation'],ident))
 
     @staticmethod
     def signature(text):
@@ -232,9 +255,15 @@ class Library:
 
     # ---------- importing ----------
 
-    def add_games(self, pgn_text, collection="My games", source="import", skip_duplicates=True):
-        """Append every game in `pgn_text` to a collection. Returns a summary dict."""
-        info = self.ensure_collection(collection)
+    def add_games(self, pgn_text, collection="My games", source="import", skip_duplicates=True,
+                  kind="games"):
+        """Append every game in `pgn_text` to a collection. Returns a summary dict.
+
+        `kind` only applies when the collection is being created: a collection that
+        already exists keeps whatever kind it was given, so importing into it never
+        moves somebody's games out of the database behind their back.
+        """
+        info = self.ensure_collection(collection, kind or "games")
         texts = pgnutil.split_games(pgn_text)
         if not texts:
             return {"added": 0, "duplicates": 0, "skipped": 0, "collection": info["name"]}
@@ -308,8 +337,13 @@ class Library:
                 )
                 batch = getattr(self._local, 'batch', None)
                 if cursor.rowcount:
-                    conn.execute('UPDATE games SET annotator=?,termination=?,has_annotations=? WHERE id=?',
-                        (meta['annotator'],meta['termination'],meta['has_annotations'],cursor.lastrowid))
+                    conn.execute('''UPDATE games SET annotator=?,termination=?,has_annotations=?,
+                        event_date=?,event_type=?,white_team=?,black_team=?,white_title=?,black_title=?,
+                        white_fide_id=?,black_fide_id=?,source_title=?,variation=? WHERE id=?''',
+                        (meta['annotator'],meta['termination'],meta['has_annotations'],
+                         meta['event_date'],meta['event_type'],meta['white_team'],meta['black_team'],
+                         meta['white_title'],meta['black_title'],meta['white_fide_id'],
+                         meta['black_fide_id'],meta['source_title'],meta['variation'],cursor.lastrowid))
                 if batch and cursor.rowcount:
                     conn.execute('INSERT INTO import_members VALUES (?,?)', (batch, cursor.lastrowid))
             conn.commit()
@@ -358,6 +392,11 @@ class Library:
         "event": "event COLLATE NOCASE ASC, date DESC",
         "annotator": "annotator COLLATE NOCASE ASC, id DESC",
         "eco": "eco ASC, date DESC",
+        # ChessBase sorts by the tournament, not by the individual game's date.
+        "event_date": "COALESCE(NULLIF(event_date,''), date) DESC, event COLLATE NOCASE ASC, round ASC",
+        "round": "event COLLATE NOCASE ASC, LENGTH(round) ASC, round ASC",
+        "result": "result ASC, date DESC",
+        "opening": "opening COLLATE NOCASE ASC, eco ASC",
     }
 
     def search(self, query=None, collection=None, player=None, white=None, black=None,
@@ -366,8 +405,18 @@ class Library:
                added_from=None, added_to=None, position=None, eco_to=None, max_elo=None, outcome=None,
                annotator=None, site=None, round=None, termination=None, annotated=None,
                date_from=None, date_to=None, source=None, category=None,
-               white_min_elo=None, white_max_elo=None, black_min_elo=None, black_max_elo=None):
+               white_min_elo=None, white_max_elo=None, black_min_elo=None, black_max_elo=None,
+               kind=None, team=None, title=None, fide_id=None, source_title=None,
+               variation=None, event_type=None, event_date_from=None, event_date_to=None):
         where, params = [], []
+
+        # Collections carry a kind: ordinary games, saved study positions, or imported
+        # opening trees. The game database asks for 'games' so studies and repertoire
+        # trees stay out of it; every other caller can still reach them by naming a kind
+        # or by passing none at all, which searches the whole library.
+        if kind:
+            where.append("collection_id IN (SELECT id FROM collections WHERE kind = ?)")
+            params.append(str(kind))
 
         if collection:
             info = self.collection(collection)
@@ -378,18 +427,26 @@ class Library:
         if query:
             for term in query.split():
                 like = "%" + term + "%"
-                where.append("(white LIKE ? OR black LIKE ? OR event LIKE ? OR opening LIKE ? OR eco LIKE ? OR annotator LIKE ? OR site LIKE ?)")
-                params.extend([like] * 7)
+                where.append("(white LIKE ? OR black LIKE ? OR event LIKE ? OR opening LIKE ? "
+                             "OR eco LIKE ? OR annotator LIKE ? OR site LIKE ? OR white_team LIKE ? "
+                             "OR black_team LIKE ? OR source_title LIKE ? OR variation LIKE ?)")
+                params.extend([like] * 11)
+        # "Kasparov, Garry" and ChessBase's "Kasparov,Garry" name the same person, so
+        # both spellings are searched however the reader typed it.
+        def spellings(name):
+            name = name.strip()
+            variants = {name, name.replace(", ", ","), re.sub(r",\s*", ", ", name)}
+            return ["%" + v + "%" for v in variants if v]
+
         if player:
-            like = "%" + player.strip() + "%"
-            where.append("(white LIKE ? OR black LIKE ?)")
-            params.extend([like, like])
-        if white:
-            where.append("white LIKE ?")
-            params.append("%" + white + "%")
-        if black:
-            where.append("black LIKE ?")
-            params.append("%" + black + "%")
+            clause = " OR ".join(["white LIKE ? OR black LIKE ?"] * len(spellings(player)))
+            where.append("(" + clause + ")")
+            for like in spellings(player):
+                params.extend([like, like])
+        for column, value in (("white", white), ("black", black)):
+            if value:
+                where.append("(" + " OR ".join([column + " LIKE ?"] * len(spellings(value))) + ")")
+                params.extend(spellings(value))
         if eco:
             where.append("eco LIKE ?")
             params.append(eco.upper() + "%")
@@ -427,10 +484,25 @@ class Library:
         if event:
             where.append('event LIKE ?')
             params.append('%'+event+'%')
-        for column,value in [('annotator',annotator),('site',site),('round',round),('termination',termination),('source',source)]:
+        for column,value in [('annotator',annotator),('site',site),('round',round),('termination',termination),
+                             ('source',source),('source_title',source_title),('variation',variation),
+                             ('event_type',event_type)]:
             if value:
                 where.append(column+' LIKE ?')
                 params.append('%'+value+'%')
+        # ChessBase tags one side at a time; a reader looking for a club or a title
+        # means "either player", which is the only reading that is ever useful.
+        for low, high, value in [('white_team','black_team',team),
+                                 ('white_title','black_title',title),
+                                 ('white_fide_id','black_fide_id',fide_id)]:
+            if value:
+                where.append('(%s LIKE ? OR %s LIKE ?)' % (low, high))
+                params.extend(['%'+str(value)+'%'] * 2)
+        for value, operator in [(event_date_from,'>='), (event_date_to,'<=')]:
+            if value:
+                date = datetime.strptime(value,'%Y-%m-%d').strftime('%Y.%m.%d')
+                where.append("COALESCE(NULLIF(event_date,''), date) "+operator+' ?')
+                params.append(date)
         if annotated in ('0','1',0,1):
             where.append('has_annotations=?')
             params.append(int(annotated))
@@ -481,7 +553,10 @@ class Library:
         total = conn.execute("SELECT COUNT(*) FROM games" + clause, params).fetchone()[0]
         rows = conn.execute(
             "SELECT id, collection_id, white, black, white_elo, black_elo, result, date, "
-            "event, site, round, annotator, termination, has_annotations, eco, opening, ply_count, source, first_moves, added_at, signature, path, byte_offset, byte_length "
+            "event, site, round, annotator, termination, has_annotations, eco, opening, ply_count, "
+            "source, first_moves, added_at, signature, path, byte_offset, byte_length, "
+            "event_date, event_type, white_team, black_team, white_title, black_title, "
+            "white_fide_id, black_fide_id, source_title, variation "
             "FROM games" + clause + " ORDER BY " + order + " LIMIT ? OFFSET ?",
             params + [int(limit), int(offset)],
         ).fetchall()

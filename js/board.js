@@ -320,7 +320,7 @@
         '<text x="' + (x + 0.19) + '" y="' + (y + 0.19) + '" class="shape-label">' + text + '</text>';
     }
     let out = '<defs>';
-    ['green', 'blue', 'red', 'yellow'].forEach(function (c) {
+    ['green', 'blue', 'red', 'yellow', 'purple'].forEach(function (c) {
       out += '<marker id="arrow-' + c + '" orient="auto" markerWidth="4" markerHeight="8" refX="2.05" refY="2.01">' +
         '<path d="M0,0 V4 L3,2 Z" class="shape-' + c + '"/></marker>';
     });

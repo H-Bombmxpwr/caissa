@@ -54,15 +54,17 @@ api_throttle = Throttle(min_gap=1.5)        # game export is the strict one
 explorer_throttle = Throttle(min_gap=0.7)
 
 
-def _request(url, accept, token=None, throttle=None, timeout=120, retries=2):
+def _request(url, accept, token=None, throttle=None, timeout=120, retries=2, data=None,
+             content_type="text/plain"):
     throttle = throttle or api_throttle
     attempt = 0
     while True:
         throttle.wait()
-        req = urllib.request.Request(url, headers={
-            "Accept": accept,
-            "User-Agent": USER_AGENT,
-        })
+        headers = {"Accept": accept, "User-Agent": USER_AGENT}
+        if data is not None:
+            headers["Content-Type"] = content_type
+        req = urllib.request.Request(url, headers=headers,
+                                     data=data.encode("utf-8") if isinstance(data, str) else data)
         if token:
             req.add_header("Authorization", "Bearer " + token)
         try:
@@ -78,6 +80,10 @@ def _request(url, accept, token=None, throttle=None, timeout=120, retries=2):
                 continue
             if err.code == 404:
                 raise FileNotFoundError(url)
+            if err.code in (401, 403):
+                raise PermissionError(
+                    "lichess refused the request: the access token is missing, expired, "
+                    "or lacks the scope this needs")
             raise
         except urllib.error.URLError as err:
             attempt += 1
@@ -312,3 +318,67 @@ def import_dump(library, path, collection="Masters", limit=None, batch_size=500,
         except Exception:                                 # noqa: BLE001
             pass
     return {"added": added, "duplicates": duplicates}
+
+
+# ---------- account, and the studies only an account can see ----------
+
+# A study you have not made public is invisible without a token carrying study:read.
+# These are the scopes the app asks for, and nothing here needs a write scope.
+SCOPES = ("study:read", "preference:read")
+TOKEN_URL = (API + "/account/oauth/token/create?"
+             + urllib.parse.urlencode([("scopes[]", s) for s in SCOPES]
+                                      + [("description", "Caissa chess study")]))
+
+
+def token_scopes(token):
+    """What a personal access token is allowed to do, straight from lichess."""
+    body = _request(API + "/api/token/test", "application/json", data=token,
+                    content_type="text/plain")
+    entry = (json.loads(body) or {}).get(token) or {}
+    if not entry:
+        raise PermissionError("lichess does not recognise that token")
+    return {"user_id": entry.get("userId"),
+            "scopes": [s for s in (entry.get("scopes") or "").split(",") if s],
+            "expires": entry.get("expires")}
+
+
+def account(token):
+    """The signed-in account, plus the scopes the token carries."""
+    profile = json.loads(_request(API + "/api/account", "application/json", token=token))
+    details = {"username": profile.get("username") or profile.get("id"),
+               "id": profile.get("id"), "title": profile.get("title"),
+               "url": profile.get("url") or (API + "/@/" + (profile.get("username") or ""))}
+    try:
+        details.update(token_scopes(token))
+    except (PermissionError, ValueError, urllib.error.URLError):
+        details.setdefault("scopes", [])            # the account call already proved the token
+    details["can_read_studies"] = "study:read" in (details.get("scopes") or [])
+    return details
+
+
+def studies(username, token=None):
+    """Every study lichess will show this token, newest first. Private ones need study:read."""
+    url = "%s/api/study/by/%s" % (API, urllib.parse.quote(username))
+    body = _request(url, "application/x-ndjson", token=token)
+    out = []
+    for line in body.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        out.append({"id": entry.get("id"), "name": entry.get("name"),
+                    "created_at": entry.get("createdAt"), "updated_at": entry.get("updatedAt")})
+    out.sort(key=lambda s: s.get("updated_at") or 0, reverse=True)
+    return out
+
+
+def study_pgn(study_id, token=None, comments=True, variations=True):
+    """One study exported as PGN, every chapter in one file."""
+    params = urllib.parse.urlencode({
+        "clocks": "false", "comments": "true" if comments else "false",
+        "variations": "true" if variations else "false", "orientation": "true"})
+    url = "%s/api/study/%s.pgn?%s" % (API, urllib.parse.quote(study_id), params)
+    return _request(url, "application/x-chess-pgn", token=token)

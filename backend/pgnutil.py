@@ -113,6 +113,19 @@ def describe(game_text):
     return {
         "white": tags.get("White", "?"),
         "black": tags.get("Black", "?"),
+        # ChessBase writes a richer tag set than lichess does, and these are the tags
+        # its users actually sort and filter on. A file without them simply stores "".
+        "event_date": normalize_date(tags.get("EventDate")),
+        "event_type": tags.get("EventType", ""),
+        "white_team": tags.get("WhiteTeam", ""),
+        "black_team": tags.get("BlackTeam", ""),
+        "white_title": tags.get("WhiteTitle", ""),
+        "black_title": tags.get("BlackTitle", ""),
+        "white_fide_id": tags.get("WhiteFideId") or tags.get("WhiteFideID", ""),
+        "black_fide_id": tags.get("BlackFideId") or tags.get("BlackFideID", ""),
+        "source_title": tags.get("SourceTitle") or tags.get("Source", ""),
+        "variation": " ".join(v for v in [tags.get("Variation", ""),
+                                          tags.get("SubVariation", "")] if v),
         "white_elo": to_int(tags.get("WhiteElo")),
         "black_elo": to_int(tags.get("BlackElo")),
         "result": tags.get("Result", "*"),

@@ -172,6 +172,7 @@ main {
 .cg-shapes .shape-blue { stroke: #003088; fill: #003088; }
 .cg-shapes .shape-red { stroke: #882020; fill: #882020; }
 .cg-shapes .shape-yellow { stroke: #e68f00; fill: #e68f00; }
+.cg-shapes .shape-purple { stroke: #6b3fa0; fill: #6b3fa0; }
 
 .cg-coords { position: absolute; inset: 0; pointer-events: none; z-index: 4; }
 .cg-coords coord {

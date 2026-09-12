@@ -38,3 +38,10 @@ dist/
 .env
 .env.*
 !.env.example
+
+# chess.com's sounds are proprietary. tools/fetch_sounds.py --chesscom downloads them
+# for local use only; they must never be committed or shipped in a build.
+assets/sound/chesscom/
+
+# Documentation build output
+docs/_build/

@@ -11,6 +11,8 @@ import subprocess
 import threading
 import time
 
+from . import hardware
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
@@ -119,6 +121,7 @@ class Engine:
             "running": bool(self.proc and self.proc.poll() is None),
             "threads": self.threads,
             "hash_mb": self.hash_mb,
+            "cores": hardware.cores(),
         }
 
     # ---------- analysis ----------
@@ -140,6 +143,8 @@ class Engine:
                 out["nodes"] = int(parts[i + 1]); i += 2
             elif token == "nps":
                 out["nps"] = int(parts[i + 1]); i += 2
+            elif token in ("hashfull", "tbhits", "time"):
+                out[token] = int(parts[i + 1]); i += 2
             elif token == "score":
                 kind = parts[i + 1]
                 value = int(parts[i + 2])
@@ -247,6 +252,17 @@ class LiveAnalysis:
                 state['memory_mb'] = round(self.monitor.memory_info().rss / 1048576, 1)
             except Exception:
                 pass
+        # What the search itself is doing, taken from the deepest line it has sent.
+        lines = state.get('lines') or []
+        if lines:
+            deepest = max(lines, key=lambda line: line.get('depth') or 0)
+            for key in ('depth', 'seldepth', 'nodes', 'nps', 'hashfull', 'tbhits', 'time'):
+                if deepest.get(key) is not None:
+                    state[key] = deepest[key]
+        state['engine'] = self.engine.name
+        state['threads'] = self.engine.threads
+        state['hash_mb'] = self.engine.hash_mb
+        state['machine'] = hardware.system()
         return state
 
 

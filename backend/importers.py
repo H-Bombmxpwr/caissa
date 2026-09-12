@@ -15,6 +15,50 @@ from . import pgnutil, lichess
 
 SUPPORTED = ('.pgn', '.zip', '.gz', '.bz2', '.zst', '.epd', '.csv')
 
+# ChessBase writes PGN in the Windows code page, not UTF-8. Reading such a file as
+# UTF-8 with errors='replace' turns every accented name — Réti, Polgár, Şuba — into
+# U+FFFD, and once written to the library those letters are gone for good. So the
+# encoding is sniffed from the start of the file and applied to the whole of it:
+# one file is written in one encoding, and guessing per chunk would only produce a
+# file that is half right.
+SNIFF_BYTES = 65536
+FALLBACK_ENCODINGS = ('cp1252', 'latin-1')
+
+
+def sniff_encoding(sample, more_follows=True):
+    """Pick the encoding for a PGN file from its opening bytes."""
+    if sample.startswith(b'\xff\xfe') or sample.startswith(b'\xfe\xff'):
+        return 'utf-16'
+    try:
+        sample.decode('utf-8-sig')
+        return 'utf-8-sig'
+    except UnicodeDecodeError as err:
+        # A multi-byte character cut in half by the end of the sample is not evidence
+        # of anything; only a failure inside the sample proper counts.
+        if more_follows and err.start >= len(sample) - 4:
+            return 'utf-8-sig'
+    for encoding in FALLBACK_ENCODINGS:
+        try:
+            sample.decode(encoding)
+            return encoding
+        except UnicodeDecodeError:
+            continue
+    return 'utf-8-sig'
+
+
+def decoded(binary, encoding=None):
+    """Wrap a binary stream as text, sniffing the encoding when the stream allows it."""
+    if encoding is None:
+        encoding = 'utf-8-sig'
+        try:
+            sample = binary.read(SNIFF_BYTES)
+            binary.seek(0)
+            encoding = sniff_encoding(sample, more_follows=len(sample) == SNIFF_BYTES)
+        except (OSError, AttributeError, io.UnsupportedOperation):
+            pass                                    # not seekable: UTF-8 it is
+    return io.TextIOWrapper(binary, encoding=encoding, errors='replace')
+
+
 @contextmanager
 def streams(path):
     lower = path.lower()
@@ -23,7 +67,10 @@ def streams(path):
             for entry in archive.infolist():
                 if entry.filename.lower().endswith('.pgn'):
                     with archive.open(entry) as raw:
-                        with io.TextIOWrapper(raw, encoding='utf-8-sig', errors='replace') as stream:
+                        head = raw.read(SNIFF_BYTES)
+                        encoding = sniff_encoding(head, more_follows=len(head) == SNIFF_BYTES)
+                    with archive.open(entry) as raw:
+                        with decoded(raw, encoding) as stream:
                             yield stream
         return
     if lower.endswith('.zst'):
@@ -32,12 +79,14 @@ def streams(path):
         except ImportError as err:
             raise ValueError('ZST files need the optional package: pip install zstandard') from err
         with open(path, 'rb') as raw, zstandard.ZstdDecompressor().stream_reader(raw) as reader:
+            # A zstd reader cannot be rewound, and the dumps that use it are UTF-8.
             with io.TextIOWrapper(reader, encoding='utf-8-sig', errors='replace') as stream:
                 yield stream
     else:
         opener = gzip.open if lower.endswith('.gz') else bz2.open if lower.endswith('.bz2') else open
-        with opener(path, 'rt', encoding='utf-8-sig', errors='replace') as stream:
-            yield stream
+        with opener(path, 'rb') as raw:
+            with decoded(raw) as stream:
+                yield stream
 
 def game_stream(stream):
     chunk, body_seen, brace_depth = [], False, 0

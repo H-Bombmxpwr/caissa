@@ -1,0 +1,13 @@
+{
+  "start": "start.mp3",
+  "move": "move.mp3",
+  "opponent": "opponent.mp3",
+  "capture": "capture.mp3",
+  "castle": "castle.mp3",
+  "check": "check.mp3",
+  "promotion": "promotion.mp3",
+  "end": "end.mp3",
+  "illegal": "illegal.mp3",
+  "notify": "notify.mp3",
+  "lowtime": "lowtime.mp3"
+}

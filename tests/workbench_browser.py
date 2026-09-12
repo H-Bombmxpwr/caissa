@@ -91,9 +91,31 @@ with tempfile.TemporaryDirectory(prefix='caissa-browser-') as data:
             page.get_by_text('White to move: draw',exact=True).wait_for()
             page.get_by_role('button',name='Analyze',exact=True).click()
             page.wait_for_selector('.engine-line',timeout=30000)
-            page.wait_for_function('document.querySelector(".dock-main").textContent.includes("Memory")')
+            page.wait_for_function('document.querySelector(".engine-stats")&&document.querySelectorAll(".engine-stat").length>10')
+            # The telemetry grid names what it reports, and says so plainly when the
+            # machine publishes no sensor rather than printing an invented number.
+            labels=[t.title() for t in page.locator('.engine-stats small').all_inner_texts()]
+            for wanted in ['Engine','Threads','Cores','Hash','Depth','Nodes','Speed',
+                           'Engine Cpu','Engine Memory','Machine Cpu','Cpu Temperature','Power Draw']:
+                assert wanted in labels,(wanted,labels)
+            cores=page.locator('.engine-stats .engine-stat',has_text='Cores').inner_text()
+            assert 'logical' in cores,cores
+            for missing in page.locator('.engine-stats .stat-missing b').all_inner_texts():
+                assert missing in ('\u2014','not reported'),missing
             # Stop the search first: live analysis rewrites these lines underneath you.
             page.get_by_label('Live analysis',exact=True).uncheck()
+            # The line count runs 1 to 5 with nothing skipped, and each of the five
+            # ranks paints a colour of its own: a fifth arrow must not look like the first.
+            assert [o.strip() for o in page.locator('select[aria-label=Lines] option').all_inner_texts()]==['1','2','3','4','5']
+            painted=page.evaluate('''()=>{const svg=document.querySelector('.analysis-board .cg-shapes');
+              const ns='http://www.w3.org/2000/svg',seen=[];
+              for(const brand of ['green','blue','red','yellow','purple']){
+                const probe=document.createElementNS(ns,'line');
+                probe.setAttribute('class','shape-'+brand);svg.append(probe);
+                seen.push(getComputedStyle(probe).stroke);probe.remove();}
+              return seen;}''')
+            assert len(set(painted))==5,painted
+            assert all(colour and colour!='none' for colour in painted),painted
             # Depth is legible on its own, and a line can be walked in the move tree.
             assert page.locator('.engine-line .line-depth').first.inner_text().startswith('depth')
             pv=page.locator('.engine-line span').nth(2).inner_text().split()
@@ -142,13 +164,31 @@ with tempfile.TemporaryDirectory(prefix='caissa-browser-') as data:
             tall=page.evaluate("document.querySelector('[data-panel=engine] .panel-body').offsetHeight")
             assert tall>short+150,(short,tall)
             assert page.evaluate('Caissa.state.boards[Caissa.state.boardIndex].layout.heights.engine')>short+150
-            # Saving offers every collection outright, not just My games.
+            # Saving offers every collection of the chosen kind outright, not just My games.
             page.evaluate('''async()=>{await Caissa.api('collections',{name:'Model games'});Caissa.state.dirty=false;await Caissa.go('analysis');}''')
             page.get_by_role('button',name='Save game',exact=True).click()
-            names=page.locator('dialog select').first
+            names=page.locator('dialog select[aria-label="Collection"]')
             assert 'Model games' in names.inner_text(),names.inner_text()
             assert 'My games' in names.inner_text(),names.inner_text()
-            page.get_by_role('button',name='Cancel',exact=True).click()
+            # Switching what this is switches which collections can hold it, and a
+            # game collection must not be offered as a home for a study position.
+            page.locator('dialog select[aria-label="Save as"]').select_option('studies')
+            assert 'Model games' not in names.inner_text(),names.inner_text()
+            assert 'New collection' in names.inner_text(),names.inner_text()
+            # Every dialog closes without the keyboard.
+            page.locator('dialog .dialog-close').click()
+            page.wait_for_selector('dialog',state='detached')
+            # A study position saved into a studies collection stays out of the game
+            # database, and is still found by asking for study positions.
+            page.evaluate('''async()=>{await Caissa.api('games',{pgn:'[Event "Kept aside"]\\n[White "Study"]\\n[Black "Position"]\\n[Result "*"]\\n\\n1. d4 *',collection:'My studies',kind:'studies'});}''')
+            listed=page.evaluate('''async()=>{
+              const games=await Caissa.api('games?'+new URLSearchParams({kind:'games',limit:200}));
+              const studies=await Caissa.api('games?'+new URLSearchParams({kind:'studies',limit:200}));
+              const all=await Caissa.api('games?'+new URLSearchParams({limit:200}));
+              return {games:games.games.map(g=>g.event),studies:studies.games.map(g=>g.event),total:all.total};}''')
+            assert 'Kept aside' not in listed['games'],listed
+            assert listed['studies']==['Kept aside'],listed
+            assert listed['total']>len(listed['games']),listed
             # PGN comment commands: [%evp from,to,...] is the main line's engine eval per
             # ply. It belongs beside the moves, not in the notes, and must survive a save.
             evp_pgn=('[Event "Evp"]\n[White "Alpha"]\n[Black "Beta"]\n[Result "*"]\n\n'
@@ -240,9 +280,15 @@ with tempfile.TemporaryDirectory(prefix='caissa-browser-') as data:
             page.get_by_text('Storage change cancelled.',exact=False).wait_for()
             page.evaluate('delete window.pywebview')
             page.evaluate('Caissa.go("imports")')
-            page.get_by_role('button',name='Undo import',exact=True).wait_for()
-            page.get_by_role('button',name='Undo import',exact=True).click()
-            page.wait_for_function('document.querySelector(".import-history").textContent.includes("Undone")')
+            undo=page.get_by_role('button',name='Undo import',exact=True)
+            undo.first.wait_for()
+            # Every batch, not just the first: the library has to end up empty for the
+            # count below to mean anything, and each import is its own undoable batch.
+            undone=0
+            while undo.count():
+                undo.first.click()
+                undone+=1
+                page.wait_for_function('(n)=>(document.querySelector(".import-history").textContent.match(/Undone/g)||[]).length>=n',arg=undone)
             assert page.evaluate('async()=>(await Caissa.api("stats")).games')==0
             for view in ['database','masters','repertoire','studies','tactics','settings']:
                 page.evaluate('(view)=>Caissa.go(view)',view)

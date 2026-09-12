@@ -11,8 +11,8 @@
 .color-lines .engine-line{border-left:4px solid var(--line-color,var(--accent))}
 /* The four arrow brands, named once so a Stockfish line's score, its border and
    the arrow it draws on the board are always the same colour. */
-:root{--shape-green:#15781b;--shape-blue:#003088;--shape-red:#882020;--shape-yellow:#e68f00}
-.dark-theme{--shape-green:#63bd6c;--shape-blue:#7ba4ec;--shape-red:#e07f77;--shape-yellow:#efac3f}
+:root{--shape-green:#15781b;--shape-blue:#003088;--shape-red:#882020;--shape-yellow:#e68f00;--shape-purple:#6b3fa0}
+.dark-theme{--shape-green:#63bd6c;--shape-blue:#7ba4ec;--shape-red:#e07f77;--shape-yellow:#efac3f;--shape-purple:#b18ad9}
 .engine-line strong{color:var(--line-color,var(--accent))}
 /* Piece treatments, named once: the board filters and the settings thumbnails
    both read these, so a tweak here changes the preview and the real board together. */
@@ -109,3 +109,21 @@ html{background:transparent}
 @media(max-width:1400px){.analysis-grid{grid-template-columns:minmax(260px,var(--board-size,1fr)) minmax(0,1fr)}.dock-splitter{display:none}.dock-side{grid-column:1/-1}}
 @media(max-width:950px){.library-grid{grid-template-columns:minmax(0,1fr) 220px}.library-aside{display:grid}.analysis-grid{grid-template-columns:minmax(0,1fr)}.analysis-board{width:min(100%,var(--board-size,650px))}.dock-main,.dock-side{grid-column:auto}}
 @media(max-width:700px){.library-grid{display:flex;flex-direction:column}.library-aside{order:-1;position:static}.library-aside .preview{display:grid;grid-template-columns:140px 1fr;gap:10px}.library-aside .preview .board-holder{grid-column:1}.library-aside .preview>h3,.library-aside .preview>.eyebrow,.library-aside .preview>p{display:none}}
+
+/* Engine telemetry: a dense grid that stays readable when a reading is missing. */
+.engine-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));gap:1px;background:var(--border);border-bottom:1px solid var(--border)}
+.engine-stats .engine-stat{background:var(--bg-2);padding:9px 12px;display:grid;gap:2px;min-width:0}
+.engine-stats small{font-size:9px;letter-spacing:1.1px;text-transform:uppercase;color:var(--text-dim)}
+.engine-stats b{font-size:13px;font-weight:600;color:var(--text-strong);overflow-wrap:anywhere}
+.engine-stats .stat-missing b{font-weight:400;font-size:11px;color:var(--text-dim)}
+/* The dialog itself is the scroll container, so its heading can stay in view. */
+.dialog-head{position:sticky;top:0;z-index:1;display:flex;align-items:flex-start;justify-content:space-between;gap:14px;
+  background:var(--bg-2);margin:-27px -27px 6px;padding:27px 27px 12px}
+.dialog-head h2{margin:0}
+.dialog-close{flex:none;border:1px solid var(--border);background:var(--bg-2);color:var(--text);
+  width:32px;height:32px;border-radius:8px;font-size:19px;line-height:1;cursor:pointer}
+.dialog-close:hover{background:var(--bg-1,#0000000d)}
+/* The lichess study picker: a scrolling list of checkboxes inside a dialog. */
+.study-picker{max-height:320px;overflow:auto;border:1px solid var(--border);border-radius:8px;padding:0 14px;margin-bottom:14px}
+.study-pick{display:flex;align-items:center;gap:10px;cursor:pointer}
+.study-pick input{flex:none}

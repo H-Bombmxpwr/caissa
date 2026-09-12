@@ -18,10 +18,16 @@ from .store import Library
 from .study import Study
 from . import importers
 from . import literature
+from . import repertoire as repertoire_pgn
 from .books import Books
 
 EXTRA_FILTERS = ('annotator','site','round','termination','annotated','date_from','date_to','source','category',
-                 'white_min_elo','white_max_elo','black_min_elo','black_max_elo')
+                 'white_min_elo','white_max_elo','black_min_elo','black_max_elo','kind',
+                 'team','title','fide_id','source_title','variation','event_type',
+                 'event_date_from','event_date_to')
+
+# What a collection can hold. The game database lists COLLECTION_KINDS[0] only.
+COLLECTION_KINDS = ('games', 'studies', 'openings')
 
 
 class ApiError(Exception):
@@ -64,7 +70,9 @@ class Api:
         if handler is None:
             raise ApiError("unknown endpoint: " + head, 404)
         try:
-            is_import = method == 'POST' and ((head == 'import' and rest[1:] != ['undo']) or (head == 'games' and len(rest) == 1))
+            is_import = method == 'POST' and ((head == 'import' and rest[1:] != ['undo'])
+                                             or (head == 'games' and len(rest) == 1)
+                                             or (head == 'lichess' and rest[1:] == ['studies']))
             if is_import:
                 label = (body or {}).get('collection') or 'Import'
                 batch = self.library.begin_import(label)
@@ -313,10 +321,14 @@ class Api:
             pgn = (body or {}).get("pgn", "")
             if not pgn.strip():
                 raise ApiError("no PGN given")
+            kind = (body or {}).get("kind") or "games"
+            if kind not in COLLECTION_KINDS:
+                raise ApiError("unknown collection kind: " + kind)
             result = self.library.add_games(
                 pgn,
                 collection=(body or {}).get("collection") or "My games",
                 source=(body or {}).get("source") or "import",
+                kind=kind,
             )
             return 200, result
         if method == "PUT" and rest:
@@ -567,6 +579,8 @@ class Api:
         raise ApiError("unsupported masters request", 405)
 
     def _route_repertoires(self, method, rest, query, body):
+        if method == "POST" and rest == ["import"]:
+            return self._import_repertoire(body or {})
         if method == "GET" and not rest:
             return 200, {"repertoires": self.library.repertoires()}
         if method == "GET" and rest:
@@ -589,6 +603,170 @@ class Api:
                 raise ApiError("no such repertoire", 404)
             return 200, {"deleted": True}
         raise ApiError("unsupported repertoire request", 405)
+
+    def _import_repertoire(self, body):
+        """Read an opening PGN into repertoire lines, keeping the PGN itself searchable.
+
+        The games go into a collection of kind 'openings' rather than the game
+        database: an opening tree is reference material, not games that were played.
+        """
+        pgn = str(body.get("pgn", ""))
+        if not pgn.strip():
+            raise ApiError("Choose a PGN file, or paste one in.")
+        name = str(body.get("name", "")).strip()
+        if not name:
+            raise ApiError("Name the repertoire these lines belong to.")
+        color = "b" if str(body.get("color", "w")).lower().startswith("b") else "w"
+        try:
+            max_plies = max(4, min(int(body.get("max_plies") or repertoire_pgn.MAX_PLIES), 200))
+        except (TypeError, ValueError):
+            max_plies = repertoire_pgn.MAX_PLIES
+        parsed = repertoire_pgn.from_pgn(pgn, color, max_plies)
+        if not parsed["lines"]:
+            raise ApiError("No playable lines were found in that PGN.")
+
+        rep_id = body.get("id")
+        added = len(parsed["lines"])
+        lines = parsed["lines"]
+        if rep_id:
+            existing = self.library.repertoire(int(rep_id))
+            if not existing:
+                raise ApiError("no such repertoire", 404)
+            stored = json.loads(existing["data"] or "{}")
+            lines, added = repertoire_pgn.merge(stored.get("lines") or [], parsed["lines"])
+            name, color = existing["name"], existing["color"]
+        new_id = self.library.save_repertoire(name, color, json.dumps({"lines": lines}), rep_id)
+
+        stored_games = None
+        if body.get("keep_pgn", True):
+            collection = str(body.get("collection", "")).strip() or "Opening trees"
+            stored_games = self.library.add_games(pgn, collection=collection,
+                                                  source="repertoire", kind="openings")
+        return 200, {"id": new_id, "name": name, "color": color, "lines": len(lines),
+                     "added": added, "chapters": parsed["chapters"],
+                     "skipped_chapters": parsed["skipped"], "truncated": parsed["truncated"],
+                     "collection": (stored_games or {}).get("collection"),
+                     "games_added": (stored_games or {}).get("added", 0)}
+
+    # ---------- the lichess account, and the studies it can reach ----------
+
+    def _lichess_token(self):
+        return self.library.setting("lichess_token") or None
+
+    def _lichess_call(self, work):
+        """One place to turn lichess's failure modes into answers a reader can act on."""
+        try:
+            return work()
+        except PermissionError as err:
+            raise ApiError(str(err), 401) from err
+        except lichess.RateLimited as err:
+            raise ApiError("lichess is rate limiting us — try again in %ss" % err.retry_after, 429) from err
+        except FileNotFoundError as err:
+            raise ApiError("lichess has no such user or study", 404) from err
+        except (ConnectionError, OSError) as err:
+            raise ApiError("could not reach lichess: %s" % err, 503) from err
+
+    def _route_lichess(self, method, rest, query, body):
+        body = body or {}
+        action = rest[0] if rest else "account"
+
+        if action == "account" and method == "GET":
+            token = self._lichess_token()
+            if not token:
+                return 200, {"connected": False, "token_url": lichess.TOKEN_URL,
+                             "scopes_needed": list(lichess.SCOPES)}
+            try:
+                details = self._lichess_call(lambda: lichess.account(token))
+            except ApiError as err:
+                # A token that has been revoked should say so rather than look connected.
+                return 200, {"connected": False, "error": err.message, "stored": True,
+                             "token_url": lichess.TOKEN_URL, "scopes_needed": list(lichess.SCOPES)}
+            details.update(connected=True, token_url=lichess.TOKEN_URL,
+                           scopes_needed=list(lichess.SCOPES))
+            return 200, details
+
+        if action == "account" and method == "PUT":
+            token = str(body.get("token", "")).strip()
+            if not token:
+                raise ApiError("Paste the personal access token from lichess.")
+            details = self._lichess_call(lambda: lichess.account(token))
+            self.library.setting("lichess_token", token)
+            details.update(connected=True, saved=True)
+            return 200, details
+
+        if action == "account" and method == "DELETE":
+            self.library.setting("lichess_token", "")
+            return 200, {"connected": False, "forgotten": True}
+
+        if action == "studies" and method == "GET":
+            token = self._lichess_token()
+            user = (query.get("user") or "").strip()
+            if not user:
+                if not token:
+                    raise ApiError("Connect your lichess account, or name a user.", 401)
+                user = self._lichess_call(lambda: lichess.account(token))["username"]
+            found = self._lichess_call(lambda: lichess.studies(user, token))
+            return 200, {"user": user, "studies": found, "authenticated": bool(token)}
+
+        if action == "studies" and method == "POST":
+            return self._import_lichess_studies(body)
+
+        raise ApiError("unsupported lichess request", 405)
+
+    def _import_lichess_studies(self, body):
+        """Bring chosen studies in as PGN, and optionally as drillable repertoire lines.
+
+        Studies are reference material, so they are filed under a collection of kind
+        'studies' and stay out of the game database while remaining searchable there.
+        """
+        ids = [str(i).strip() for i in (body.get("ids") or []) if str(i).strip()]
+        if not ids:
+            raise ApiError("Choose at least one study to import.")
+        token = self._lichess_token()
+        collection = str(body.get("collection", "")).strip() or "Lichess studies"
+        kind = body.get("kind") or "studies"
+        if kind not in COLLECTION_KINDS:
+            raise ApiError("unknown collection kind: " + str(kind))
+        as_repertoire = bool(body.get("as_repertoire"))
+        color = "b" if str(body.get("color", "w")).lower().startswith("b") else "w"
+
+        added = duplicates = skipped = 0
+        rep_id = body.get("repertoire_id")
+        rep_lines_added = 0
+        failures = []
+        imported = []
+        for study_id in ids:
+            try:
+                pgn = self._lichess_call(lambda sid=study_id: lichess.study_pgn(sid, token))
+            except ApiError as err:
+                failures.append({"id": study_id, "error": err.message})
+                continue
+            if not pgn.strip():
+                failures.append({"id": study_id, "error": "that study exported no chapters"})
+                continue
+            result = self.library.add_games(pgn, collection=collection,
+                                            source="lichess-study", kind=kind)
+            added += result["added"]
+            duplicates += result["duplicates"]
+            skipped += result["skipped"]
+            imported.append(study_id)
+            if as_repertoire:
+                parsed = repertoire_pgn.from_pgn(pgn, color)
+                if parsed["lines"]:
+                    name = str(body.get("name", "")).strip() or "Lichess repertoire"
+                    if rep_id:
+                        existing = self.library.repertoire(int(rep_id))
+                        stored = json.loads(existing["data"] or "{}") if existing else {}
+                        merged, fresh = repertoire_pgn.merge(stored.get("lines") or [], parsed["lines"])
+                        name, color = (existing["name"], existing["color"]) if existing else (name, color)
+                    else:
+                        merged, fresh = parsed["lines"], len(parsed["lines"])
+                    rep_id = self.library.save_repertoire(name, color, json.dumps({"lines": merged}), rep_id)
+                    rep_lines_added += fresh
+        return 200, {"added": added, "duplicates": duplicates, "skipped": skipped,
+                     "collection": collection, "studies": len(imported),
+                     "repertoire_id": rep_id, "repertoire_lines": rep_lines_added,
+                     "failures": failures}
 
     def _route_engine(self, method, rest, query, body):
         action = rest[0] if rest else "info"
@@ -648,7 +826,44 @@ class Api:
 
         raise ApiError("unsupported engine request", 405)
 
+    # Credentials live in the settings table but must not leave through the settings
+    # route: the account route reports who the token belongs to instead.
+    SECRET_SETTINGS = ("lichess_token",)
+
+    def _route_sounds(self, method, rest, query, body):
+        """Which sample sets are installed, and which events each one has a sound for.
+
+        The list is read from disk rather than hard-coded because it is not fixed:
+        the lichess sets ship with the app, while chess.com's are downloaded by
+        whoever wants them and are never redistributed.
+        """
+        if method != "GET":
+            raise ApiError("unsupported sounds request", 405)
+        folder = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                              "assets", "sound")
+        labels = {"standard": "Lichess standard", "piano": "Lichess piano",
+                  "sfx": "Lichess sfx", "futuristic": "Lichess futuristic",
+                  "nes": "Lichess NES", "lisp": "Lichess lisp",
+                  "robot": "Lichess robot", "woodland": "Lichess woodland",
+                  "chesscom": "Chess.com (downloaded on this machine)"}
+        found = []
+        if os.path.isdir(folder):
+            for name in sorted(os.listdir(folder)):
+                manifest = os.path.join(folder, name, "manifest.json")
+                if not os.path.isfile(manifest):
+                    continue
+                try:
+                    with open(manifest, encoding="utf-8") as handle:
+                        events = json.load(handle)
+                except (OSError, ValueError):
+                    continue
+                found.append({"name": name, "label": labels.get(name, name.title()),
+                              "events": sorted(events)})
+        return 200, {"sets": found}
+
     def _route_settings(self, method, rest, query, body):
+        if rest and rest[0] in self.SECRET_SETTINGS:
+            raise ApiError("read and change that through /api/lichess/account", 403)
         if method == "GET" and rest:
             return 200, {"key": rest[0], "value": self.library.setting(rest[0])}
         if method == "PUT" and rest:

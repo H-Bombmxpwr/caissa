@@ -13,6 +13,14 @@ datas = [
     (os.path.join(ROOT, 'vendor', 'stockfish'), os.path.join('vendor', 'stockfish')),
 ]
 
+# chess.com's sounds may sit in assets/sound/chesscom on the machine doing the build.
+# They are proprietary: they are fetched for personal use and must not be shipped in a
+# build any more than they are committed to the repository.
+def _drop_chesscom(entries):
+    blocked = os.path.join('assets', 'sound', 'chesscom')
+    return [item for item in entries if blocked not in os.path.normpath(item[0])]
+
+
 a = Analysis(
     [os.path.join(ROOT, 'desktop.py')],
     pathex=[ROOT],
@@ -24,6 +32,7 @@ a = Analysis(
     excludes=['tkinter', 'unittest', 'pydoc_data'],
     noarchive=False,
 )
+a.datas = _drop_chesscom(a.datas)
 pyz = PYZ(a.pure)
 
 exe = EXE(

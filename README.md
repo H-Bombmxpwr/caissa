@@ -1,12 +1,30 @@
+<div align="center">
+
+<img src="assets/caissa-128.png" alt="Caissa, muse of chess" width="128" height="128">
+
 # Caissa
 
-A desktop chess workbench — a lighter ChessBase. It keeps a local database of games as ordinary
+**A desktop chess workbench — a lighter ChessBase.**
+
+[Documentation](https://h-bombmxpwr.github.io/caissa/) ·
+[Getting started](https://h-bombmxpwr.github.io/caissa/guide/getting-started.html) ·
+[HTTP API](https://h-bombmxpwr.github.io/caissa/reference/http-api.html) ·
+[Scope](SCOPE.md)
+
+</div>
+
+---
+
+It keeps a local database of games as ordinary
 PGN files, analyzes them with a bundled Stockfish, builds and drills opening repertoires, pulls in
-master games and your own online games, links positions to free study material and chess history,
-and trains blindfold visualization.
+master games and your own online games, imports your lichess studies and your ChessBase exports,
+links positions to free study material and chess history, and trains blindfold visualization.
+
+Everything runs on your own machine. No account, no cloud library, no telemetry.
 
 Start with [Running it](#running-it), [Your first study session](#your-first-study-session),
-or [Building the .exe](#building-the-exe).
+or [Building the .exe](#building-the-exe). The
+[full documentation](https://h-bombmxpwr.github.io/caissa/) goes deeper than this file does.
 
 See [SCOPE.md](SCOPE.md) for what the app is, what it is not, and where it is going.
 
@@ -16,6 +34,14 @@ First time only — fetch the engine (about 80 MB, not stored in git):
 
 ```powershell
 py tools\fetch_stockfish.py
+```
+
+Optional, and worth doing: the bundled move sounds and the alternative piece sets.
+
+```powershell
+py tools\fetch_sounds.py              # lichess sound sets
+py tools\fetch_sounds.py --chesscom   # also the chess.com set, for this machine only
+py tools\fetch_pieces.py              # SVG piece sets
 ```
 
 Then, from source:
@@ -201,6 +227,42 @@ PDF books and the statistical opening book are separate kinds of reference.
 The same guide appears in the Repertoire module. Blindfold training remains a separate
 seven-level module, and the Tactics module links to Chess Tempo for dedicated tactics practice.
 
+### Importing a repertoire from a PGN
+
+**Repertoire → Import repertoire PGN** (or the **Opening repertoire** card in Import games)
+turns a lichess study export — or any PGN with variations — into drillable lines.
+
+Every root-to-leaf path through a chapter becomes its own line, so alternatives written as
+variations are drilled as alternatives. Each line is trimmed to end on a move by *your*
+colour, because finishing a drill on the opponent's reply teaches nothing. A line that is
+only the opening part of a longer line is dropped rather than drilled twice. Depth is
+capped — twenty moves by default, up to as deep as the file goes — and a chapter that
+cannot be replayed is skipped and counted instead of sinking the import. Importing into an
+existing repertoire merges: existing lines keep their review history and only new lines are
+added. The PGN itself is filed under an `openings` collection, searchable but out of the
+game database.
+
+## Your lichess account
+
+**Settings → lichess account** connects a personal access token. It makes your own games
+easier to import and your **private and unlisted studies** reachable at all — without a
+token lichess will not admit an unlisted study exists.
+
+The link on the card already requests the right scopes, `study:read` and `preference:read`,
+both read-only. The token is verified with lichess before it is stored, so a mistyped or
+expired one fails immediately. It lives in your local library's settings table, is sent to
+lichess and nowhere else, and is never handed back to the page: the generic settings
+endpoint refuses to read it and the account endpoint reports only the username and scopes.
+A token revoked on lichess's side reads as disconnected, with the reason. **Forget this
+token** removes it.
+
+**Import my studies** lists every study lichess will show your token, newest first, with
+checkboxes. Chapters are saved as `studies`-kind collections, and ticking **Also build
+drillable repertoire lines** runs the same chapters through the repertoire importer in one
+pass. A study that cannot be read is reported by name without stopping the others, and the
+whole import is one undoable batch. See the
+[lichess guide](https://h-bombmxpwr.github.io/caissa/guide/lichess.html).
+
 ## Online and offline use
 
 **Settings → Connection** shows the device's connection status and updates when it changes.
@@ -237,12 +299,18 @@ the surviving parent. Choose **Save changes** to persist the edit.
 - The **↔** panel control spans both columns beside the board. Toggle it again to
   return the panel to its original column. Full-width panels form a stack above the
   two smaller columns; arrangements are remembered per analysis tab.
-- **Settings → Move sounds** offers included Caissa wood/digital sounds or Off, volume,
-  and individual move/capture/castle/check/promotion/game-end/illegal-move toggles.
-  Preview each sound there. Lichess, Chess.com, ChessBase and Custom profiles accept
-  your own audio samples (up to 1 MB per event); their original sound packs are not
-  bundled. Samples are stored in your library preferences. **Animate moves and
-  captures** and **Animation duration** control piece glides and capture fades.
+- **Settings → Move sounds** offers the bundled lichess sets — standard, piano, sfx,
+  futuristic, NES, lisp, robot, woodland — the synthesized Caissa wood/digital presets,
+  or your own audio files. Twelve events have sounds: game start, your move, opponent
+  move, capture, castling, check, promotion, game end, illegal move, notification, low
+  time and pre-move. Each can be previewed and switched off individually. No set covers
+  all twelve (lichess plays nothing for check in its standard set and ships no castling
+  sample), so a missing sample is borrowed from another installed set rather than going
+  silent, and the row says which. Run `py tools/fetch_sounds.py` to install the sets and
+  `--chesscom` to add chess.com's on your own machine — those are proprietary and are
+  never committed or shipped. **Animate moves and captures** and **Animation duration**
+  control piece glides and capture fades. See the
+  [sound guide](https://h-bombmxpwr.github.io/caissa/guide/sounds.html).
 
 ### Understanding folders and example games
 
@@ -259,10 +327,21 @@ search the whole position index, not just the initially displayed examples.
 
 ### Database and import management
 
+- **The database lists games.** Every collection has a *kind* — `games`, `studies` or
+  `openings` — and the **Content** dropdown defaults to Games, so saved study positions
+  and imported opening trees stay out of the game list. They are filed, not hidden:
+  choose **Study positions**, **Opening trees** or **Everything in the library** and
+  they are listed with every filter still working, and the position index in analysis
+  searches all three regardless. A collection's kind is fixed when it is created, so
+  importing into an existing collection never moves somebody's games out of the
+  database behind their back. **Save game** asks what you are saving and offers only
+  the collections that can hold it.
 - Database previews show the last recorded mainline position, including the final
   position of full games. The preview stays beside the list while scrolling.
 - **Filters** combine player, colour, outcome, opening/ECO range, event, result, rating
-  range, move length, tags, date added, collection, and position. Colour and outcome are
+  range, move length, tags, date added, collection, position, and the ChessBase tag
+  block — team, player title, FIDE ID, event type, source publication, variation name
+  and the tournament's own date. Colour and outcome are
   read from the player you name, so *Carlsen · Played White · Won* means exactly that. A
   rating floor asks that at least one player is above it; a ceiling asks that neither is.
   Opening names autocomplete from the games already in your library and fill in the ECO
@@ -275,6 +354,22 @@ search the whole position index, not just the initially displayed examples.
 - Pasted and loaded PGN needs a collection name — choosing a file fills it in from the file
   name. Online games go to their own collection (`lichess imports`, `chess.com imports`)
   rather than mixing into `My games`.
+- **ChessBase exports read correctly.** ChessBase writes PGN in the Windows code page,
+  not UTF-8; read as UTF-8, `Réti` becomes `R<?>ti` and the letter is gone for good.
+  Files are now decoded by sniffing — UTF-8 first, then Windows-1252, then Latin-1,
+  applied to the whole file — on disk, inside archives, and through the browser's file
+  picker alike. Its richer tag set is read and indexed too: `EventDate`, `EventType`,
+  `WhiteTeam`/`BlackTeam`, `WhiteTitle`/`BlackTitle`, `WhiteFideId`/`BlackFideId`,
+  `SourceTitle` and `Variation`. A library imported before those columns existed
+  re-reads its own PGN once on the next launch, so nothing needs importing again.
+  Names match whichever way the comma is spaced, so ChessBase's `Kasparov,Garry` and
+  lichess's `Kasparov, Garry` find each other. What is still missing: native `.cbh`
+  /`.cbv`/`.si4` files need an export step, and medals survive a round trip but are not
+  filterable. See the
+  [import guide](https://h-bombmxpwr.github.io/caissa/guide/importing.html#chessbase-exports).
+- **Sorting** covers recently added, newest and oldest played, tournament date
+  (`EventDate`, falling back to the game date), tournament name, tournament and round,
+  highest rated, White, Black, result, ECO, opening, annotator, and longest games.
 - **Study folders → Collections** can delete a collection, with the choice of whether its
   PGN files go with it. A collection you delete stays deleted; only an empty library is
   given a starter one.
@@ -348,6 +443,25 @@ search the whole position index, not just the initially displayed examples.
 
 ### Engine analysis and endgames
 
+**Lines** runs from 1 to 5, and each line owns a colour that its arrow, its border and
+its score all share — green, blue, red, yellow, purple. Five lines get five distinct
+colours; none repeats another.
+
+Below the controls, a telemetry grid reports what the search and the machine are doing:
+engine name, search threads out of the logical cores available, physical core count,
+hash size and how full it is, depth and seldepth, nodes and nodes per second, tablebase
+hits, the engine process's own CPU and memory, whole-machine CPU and clock, memory in
+use, CPU temperature and power draw.
+
+Temperature and wattage usually read **not reported**, and that is honest rather than
+broken: most Windows desktops publish no CPU thermal sensor at all, and a machine on
+mains power reports no discharge rate. Nothing is estimated — a reading the machine will
+not give is labelled missing. Run
+[LibreHardwareMonitor](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor) in
+the background and real per-package temperature and watts appear within a few seconds;
+laptops on battery report wattage without it. Sensors are polled on a background thread
+and cached, so the readings never slow the search.
+
 - Each Stockfish line carries its depth as a chip and an **Add to tree** button that grafts
   the line into the notation as a variation — up to ten moves of it, or the whole line if
   it is shorter — and puts you on its first move so the arrow keys walk through it.
@@ -400,6 +514,8 @@ server.py             HTTP server: static app + JSON API
 backend/
   store.py            the library — PGN files on disk + SQLite index
   api.py              JSON API routes
+  hardware.py         core counts, CPU temperature and power draw, where published
+  repertoire.py       a PGN move tree walked into flat, drillable repertoire lines
   chess.py            chess rules in Python (0x88, perft-verified)
   study.py            position index, pins, study folders on disk
   books.py            PDF library metadata and file storage
@@ -418,8 +534,9 @@ js/
   ai.js / stockfish.js  in-browser fallback engines
   drills/l1..l7.js    the seven blindfold levels
 data/                 openings, endgames, studies, lectures.json
-tools/                fetch_stockfish.py, make_icon.py
-assets/               the Caissa mark (png + generated ico)
+docs/                 the Sphinx documentation site (published to GitHub Pages)
+tools/                fetch_stockfish.py, fetch_sounds.py, fetch_pieces.py, make_icon.py
+assets/               the Caissa mark, the piece sets, the bundled sound sets
 vendor/stockfish/     the bundled engine (fetched, gitignored)
 library/              your games, studies and index (gitignored)
 tests/                see below
@@ -443,6 +560,7 @@ For the workbench interaction regressions (requires installed Microsoft Edge):
 ```powershell
 .venv\Scripts\python -m pip install playwright
 .venv\Scripts\python tests\workbench_browser.py
+.venv\Scripts\python tests\sounds_browser.py
 .venv\Scripts\python tests\analysis_quality_browser.py
 ```
 
@@ -468,6 +586,24 @@ msedge --headless=new --virtual-time-budget=30000 --dump-dom `
   http://localhost:8000/tests/workspace-smoke.html
 ```
 
+## Documentation
+
+The prose guide, the HTTP API reference and the generated Python API live in `docs/` and
+are published to <https://h-bombmxpwr.github.io/caissa/> by
+`.github/workflows/docs.yml` on every push to `main`. Enable it once under
+**Settings → Pages → Source: GitHub Actions**.
+
+To build the site locally:
+
+```powershell
+.venv\Scripts\python -m pip install -r docs\requirements.txt
+.venv\Scripts\python -m sphinx -b html -W --keep-going docs docs\_build\html
+```
+
+`-W` turns warnings into errors, which is what CI uses, so a broken cross-reference fails
+the build rather than quietly shipping a dead link. The Python reference is generated from
+the backend's own docstrings and cannot drift from the code.
+
 ## Blindfold training
 
 The original seven-level trainer is now a module inside the app. Hold `Space` or the **Peek**
@@ -490,5 +626,12 @@ Bundling Stockfish (GPLv3) and the cburnett piece set (GPL) makes this applicati
   you redistribute this repository: **Alpha** (Eric Bentzen) is free for personal
   non-commercial use only, and **Maestro** (sadsnake1) is CC BY-NC-SA 4.0. Cburnett,
   Merida, Chessnut, Fantasy, Celtic, Spatial and Rhos are free software or public domain.
+- Sound sets are credited in `assets/sound/CREDITS.md`, taken from lila's own
+  `COPYING.md`: standard, robot and woodland by the lila authors and piano, sfx,
+  futuristic and NES by Enigmahack are AGPLv3+; lisp by EdinburghCollective is
+  CC BY-NC-SA 4.0. `py tools/fetch_sounds.py` fetches them.
+  **chess.com's sounds are proprietary and are not redistributed here.**
+  `--chesscom` downloads them to `assets/sound/chesscom/` for your own use;
+  `.gitignore` and `caissa.spec` keep them out of the repository and out of any build.
 - Chess Tempo — tactics, used in-app through their own site, never copied
 - Exercises: AdviceCabinet, *7 Levels of Blindfold Chess Exercises for Everyone*
