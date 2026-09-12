@@ -115,14 +115,14 @@
       const f = el('coord', 'file');
       f.textContent = o === 'w' ? FILES[x] : FILES[7 - x];
       f.style.transform = 'translate(' + (x * 100) + '%, 700%)';
-      f.classList.add((x % 2 === 0) ? 'dark' : 'light');
+      f.classList.add((x % 2 === 0) ? 'light' : 'dark');
       this.coordsEl.appendChild(f);
     }
     for (let y = 0; y < 8; y++) {
       const r = el('coord', 'rank');
       r.textContent = o === 'w' ? (8 - y) : (y + 1);
       r.style.transform = 'translate(0, ' + (y * 100) + '%)';
-      r.classList.add((y % 2 === 0) ? 'light' : 'dark');
+      r.classList.add((y % 2 === 0) ? 'dark' : 'light');
       this.coordsEl.appendChild(r);
     }
   };
@@ -134,7 +134,7 @@
         const sq = this.squareEls[x + ',' + y];
         const key = coordsToKey(x, y, o);
         sq.dataset.key = key;
-        const light = (FILES.indexOf(key[0]) + parseInt(key[1], 10)) % 2 === 1;
+        const light = (FILES.indexOf(key[0]) + parseInt(key[1], 10)) % 2 === 0;
         sq.className = light ? 'light' : 'dark';
         if (this.lastMove && (this.lastMove[0] === key || this.lastMove[1] === key)) sq.classList.add('last-move');
         if (this.selected === key) sq.classList.add('selected');
@@ -267,6 +267,17 @@
   Board.prototype.setCheck = function (sq) { this.checkSquare = sq; this._renderSquares(); };
   /* opts.answer marks decoration that gives the exercise away, so it is suppressed
      while the board is being peeked at */
+  /* Same square pair twice removes it; a different colour recolours it in place. */
+  Board.prototype._addShape = function (from, to, brand) {
+    const same = s => (s.square ? s.square === from && from === to : s.from === from && s.to === to);
+    const existing = this.shapes.find(same);
+    if (existing) this.shapes = this.shapes.filter(s => !same(s));
+    if (!existing || existing.brand !== brand) {
+      this.shapes.push(from === to ? { square: from, brand: brand } : { from: from, to: to, brand: brand });
+    }
+    this._renderShapes();
+  };
+
   Board.prototype.setHighlights = function (map, opts) {
     if (opts && opts.answer) this.answerHighlights = map || {};
     else this.customHighlights = map || {};
@@ -308,7 +319,10 @@
         '<path d="M0,0 V4 L3,2 Z" class="shape-' + c + '"/></marker>';
     });
     out += '</defs>';
-    const visible = this.peeking ? this.shapes : this.shapes.concat(this.answerShapes);
+    let visible = this.peeking ? this.shapes : this.shapes.concat(this.answerShapes);
+    if (this.drawing) visible = visible.concat([this.drawing.from === this.drawing.to
+      ? { square: this.drawing.from, brand: this.drawing.brand }
+      : { from: this.drawing.from, to: this.drawing.to, brand: this.drawing.brand }]);
     visible.forEach(function (s) {
       const brand = s.brand || 'green';
       if (s.square) {
@@ -376,32 +390,55 @@
 
   Board.prototype._bindInput = function () {
     const self = this;
+    // Arrow drawing follows chessground, the library lichess itself draws with: a
+    // right-drag (or shift-drag) paints a live preview that follows the pointer,
+    // releasing commits it, drawing the same arrow again removes it, and drawing it in
+    // another colour recolours it in place rather than stacking a second arrow on top.
+    function eventBrand(e) {
+      const modA = (e.shiftKey || e.ctrlKey) && e.button === 2;
+      const modB = e.altKey || e.metaKey;
+      return ['green', 'red', 'blue', 'yellow'][(modA ? 1 : 0) + (modB ? 2 : 0)];
+    }
     this.wrap.addEventListener('contextmenu', e => e.preventDefault());
-    this.wrap.addEventListener('pointerdown', function(e) {
-      if (self.opts.viewOnly || e.button !== 2) return;
-      e.preventDefault();
+    this.wrap.addEventListener('pointerdown', function (e) {
+      /* drawing is about the position, not the moves, so it works on view-only boards */
+      if (e.button !== 2 && !(e.button === 0 && e.shiftKey)) return;
       const from = self._keyAt(e);
       if (!from) return;
-      self.drawing = {from, brand:e.altKey?'yellow':e.ctrlKey?'red':e.shiftKey?'blue':'green'};
+      e.preventDefault();
+      self.drawing = { from: from, to: from, brand: eventBrand(e) };
       self.wrap.setPointerCapture(e.pointerId);
-    });
-    this.wrap.addEventListener('pointerup', function(e) {
-      if (!self.drawing) return;
-      const {from,brand}=self.drawing, to=self._keyAt(e);self.drawing=null;
-      if (!to) return;
-      const shape=from===to?{square:from,brand}:{from,to,brand};
-      const index=self.shapes.findIndex(s=>JSON.stringify(s)===JSON.stringify(shape));
-      if(index>=0)self.shapes.splice(index,1);else self.shapes.push(shape);
       self._renderShapes();
     });
-    this.wrap.addEventListener('pointercancel',()=>{self.drawing=null;});
+    this.wrap.addEventListener('pointermove', function (e) {
+      if (!self.drawing || self.drawPending) return;
+      self.drawPending = true;                       // one redraw a frame, as chessground does
+      requestAnimationFrame(function () {
+        self.drawPending = false;
+        if (!self.drawing) return;
+        const to = self._keyAt(e) || self.drawing.from;
+        if (to === self.drawing.to) return;
+        self.drawing.to = to;
+        self._renderShapes();
+      });
+    });
+    this.wrap.addEventListener('pointerup', function (e) {
+      if (!self.drawing) return;
+      const current = self.drawing;
+      self.drawing = null;
+      const to = self._keyAt(e);
+      if (to) self._addShape(current.from, to, current.brand);
+      else self._renderShapes();                     // released off the board: nothing drawn
+    });
+    this.wrap.addEventListener('pointercancel', function () { self.drawing = null; self._renderShapes(); });
 
     this.wrap.addEventListener('pointerdown', function (e) {
       if (self.opts.viewOnly) return;
-      if (e.button !== 0) return;
+      if (e.button !== 0 || e.shiftKey) return;
       const key = self._keyAt(e);
       if (!key) return;
       e.preventDefault();
+      if (!self.selected && self.shapes.length) { self.shapes = []; self._renderShapes(); }
 
       if (self.selected && self.selected !== key && self._destsFrom(self.selected).indexOf(key) > -1) {
         self._tryMove(self.selected, key);

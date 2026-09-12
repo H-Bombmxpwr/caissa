@@ -27,6 +27,15 @@ with tempfile.TemporaryDirectory(prefix='caissa-browser-') as data:
             page.on('pageerror',lambda e:errors.append(str(e)))
             page.goto(url)
             page.wait_for_function('window.Caissa && document.querySelector(".games")')
+            # The golden rule: a1 dark, h1 light, and the board agreeing with Game.squareColor.
+            mismatch=page.evaluate("""()=>{const bad=[];
+              for(const f of 'abcdefgh')for(let r=1;r<=8;r++){const key=f+r;
+                const el=document.querySelector('.board-holder .cg-board square[data-key="'+key+'"]');
+                if(!el){bad.push(key+':missing');continue;}
+                const shown=el.classList.contains('light')?'light':'dark';
+                if(shown!==Chess.squareColor(key))bad.push(key+':'+shown);}
+              return bad;}""")
+            assert mismatch==[],mismatch
             page.evaluate('''async()=>{await Caissa.api('games',{pgn:'[Event "Browser test"]\\n[White "Alpha"]\\n[Black "Beta"]\\n[Result "0-1"]\\n\\n1. f3 e5 2. g4 Qh4# 0-1'});await Caissa.go('database');}''')
             page.locator('tbody tr').first.click()
             page.wait_for_selector('.preview .btn.primary')
@@ -47,6 +56,23 @@ with tempfile.TemporaryDirectory(prefix='caissa-browser-') as data:
             page.mouse.move(x+w*3/16,y+w*11/16)
             page.mouse.up(button='right')
             assert page.locator('.analysis-board .cg-shapes line').count()==1
+            # Drawing the same arrow again removes it; a different colour recolours in place.
+            def sweep(mods=None):
+                page.mouse.move(x+w/16,y+w*15/16)
+                page.keyboard.down(mods) if mods else None
+                page.mouse.down(button='right')
+                page.mouse.move(x+w*3/16,y+w*11/16,steps=6)
+                assert page.locator('.analysis-board .cg-shapes line').count()>=1,'live preview while dragging'
+                page.mouse.up(button='right')
+                page.keyboard.up(mods) if mods else None
+            sweep()
+            assert page.locator('.analysis-board .cg-shapes line').count()==0,'redrawing removes'
+            sweep('Shift')
+            assert page.locator('.analysis-board .cg-shapes line').count()==1
+            assert page.locator('.analysis-board .cg-shapes .shape-red').count()>0,'Shift paints red'
+            sweep()
+            assert page.locator('.analysis-board .cg-shapes .shape-green').count()>0,'recoloured in place'
+            assert page.locator('.analysis-board .cg-shapes line').count()==1,'not stacked'
             page.get_by_role('button',name='Clear arrows',exact=True).click()
             assert page.locator('.analysis-board .cg-shapes line').count()==0
             before=page.locator('.analysis-board .cg-wrap').bounding_box()['width']
@@ -65,6 +91,12 @@ with tempfile.TemporaryDirectory(prefix='caissa-browser-') as data:
             page.get_by_role('button',name='Analyze',exact=True).click()
             page.wait_for_selector('.engine-line',timeout=30000)
             page.wait_for_function('document.querySelector(".dock-main").textContent.includes("Memory")')
+            # Depth is legible on its own, and a line can be walked in the move tree.
+            assert page.locator('.engine-line .line-depth').first.inner_text().startswith('depth')
+            pv=page.locator('.engine-line span').nth(2).inner_text().split()
+            page.get_by_role('button',name='Add to tree',exact=True).first.click()
+            page.wait_for_function('(san)=>Caissa.state.node.san===san',arg=pv[0])
+            assert page.locator('.move-tree button.current').inner_text().strip().startswith(pv[0])
             page.get_by_label('Live analysis',exact=True).uncheck()
             # Annotations land in the game as they are typed - there is no Keep button.
             assert page.get_by_role('button',name='Keep annotation').count()==0
@@ -86,6 +118,55 @@ with tempfile.TemporaryDirectory(prefix='caissa-browser-') as data:
             assert page.locator('[data-panel=tags]').count()==0,'each tab restores its own layout'
             page.locator('.board-tab').nth(1).locator('.tab-close').click()
             page.wait_for_function('document.querySelectorAll(".board-tab").length===1')
+            # Nothing inside the analysis grid should scroll until a panel is given a height,
+            # and the grip has to be able to pull a panel past its own content.
+            overflowing=page.evaluate("""()=>{const out=[];
+              for(const el of document.querySelectorAll('.analysis-grid *')){
+                if(!/auto|scroll/.test(getComputedStyle(el).overflowY))continue;
+                if(el.scrollHeight-el.clientHeight>1)out.push((el.dataset.panel||el.className)+':'+(el.scrollHeight-el.clientHeight));}
+              return out;}""")
+            assert overflowing==[],overflowing
+            grip=page.locator('[data-panel=engine] .panel-grip')
+            grip.hover()
+            spot=grip.bounding_box()
+            short=page.evaluate("document.querySelector('[data-panel=engine] .panel-body').offsetHeight")
+            page.mouse.down()
+            page.mouse.move(spot['x']+spot['width']/2,spot['y']+240,steps=10)
+            page.mouse.up()
+            tall=page.evaluate("document.querySelector('[data-panel=engine] .panel-body').offsetHeight")
+            assert tall>short+150,(short,tall)
+            assert page.evaluate('Caissa.state.boards[Caissa.state.boardIndex].layout.heights.engine')>short+150
+            # Saving offers every collection outright, not just My games.
+            page.evaluate('''async()=>{await Caissa.api('collections',{name:'Model games'});Caissa.state.dirty=false;await Caissa.go('analysis');}''')
+            page.get_by_role('button',name='Save game',exact=True).click()
+            names=page.locator('dialog select').first
+            assert 'Model games' in names.inner_text(),names.inner_text()
+            assert 'My games' in names.inner_text(),names.inner_text()
+            page.get_by_role('button',name='Cancel',exact=True).click()
+            # PGN comment commands: [%evp from,to,...] is the main line's engine eval per
+            # ply. It belongs beside the moves, not in the notes, and must survive a save.
+            evp_pgn=('[Event "Evp"]\n[White "Alpha"]\n[Black "Beta"]\n[Result "*"]\n\n'
+                     '{[%evp 0,4,10,-20,30,-40,50] Opening note.} '
+                     '1. e4 $10 e5 (1... c5 $19 {Sharper.}) 2. Nf3 Nc6 *')
+            page.evaluate('''async(pgn)=>{await Caissa.api('games',{pgn,collection:'Evp'});
+              const found=await Caissa.api('games?'+new URLSearchParams({collection:'Evp',limit:1}));
+              Caissa.state.dirty=false;await Caissa.openGame(found.games[0].id);}''',evp_pgn)
+            page.wait_for_selector('.move-tree button')
+            assert page.evaluate('Caissa.state.parsed.root.comment')=='Opening note.','prose survives the harvest'
+            chips=page.locator('.move-eval').all_inner_texts()
+            assert chips==['-0.20','+0.30','-0.40','+0.50'],chips
+            # The variation shares a ply with the main line but not its evaluation.
+            assert page.evaluate('''(()=>{const v=Caissa.state.parsed.root.children[0].children[1];
+              return v.san+':'+(v.eval?'has':'none');})()''')=='c5:none'
+            texts=page.evaluate('[...document.querySelectorAll(".move-tree button")].map(b=>b.textContent.trim())')
+            assert any(t.startswith('e4') and '=' in t for t in texts),texts
+            assert any(t.startswith('c5') and '\u2212+' in t for t in texts),texts
+            assert '[%evp 0,4,10,-20,30,-40,50]' in page.evaluate('Caissa.serialize(Caissa.state.parsed)')
+            # Put the library back as it was so the import-history checks below stay honest.
+            page.evaluate('''async()=>{const cols=(await Caissa.api('collections')).collections;
+              const evp=cols.find(c=>c.name==='Evp');
+              if(evp)await Caissa.api('collections/'+evp.id,null,'DELETE');
+              Caissa.state.dirty=false;}''')
             page.evaluate('Caissa.go("settings")')
             page.get_by_label('Dark theme',exact=True).check()
             page.wait_for_function('document.body.classList.contains("dark-theme")')

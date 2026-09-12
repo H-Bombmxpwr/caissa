@@ -119,9 +119,13 @@ if you override it, for example `$env:DATA_DIR = 'D:\ChessLibrary'` before launc
   stay in the library. On disk Caissa takes back the `study.json` manifest it wrote and
   the directories it created; a directory holding files you put there yourself is left
   alone and reported in the confirmation.
-- On the analysis board, scroll the wheel to step through moves. Right-drag draws an
-  arrow; right-click draws a circle. Shift uses blue, Ctrl red, Alt yellow; unmodified
-  drawing uses green. Repeat a shape to remove it, or use **Clear arrows**.
+- On the analysis board, scroll the wheel to step through moves. Drawing follows
+  [chessground](https://github.com/lichess-org/chessground), the library lichess draws
+  with, so the habits carry over: right-drag (or shift-drag) paints an arrow that follows
+  the pointer as you go, releasing on the square you started from leaves a circle instead.
+  Plain is green, Shift or Ctrl red, Alt blue, both yellow. Drawing the same arrow again
+  removes it; drawing it in another colour recolours it. A plain click on the board clears
+  every drawing, as does **Clear arrows**. Drawing works on view-only boards too.
 - The analysis board opens in tabs. **＋** adds one, and opening a game from the database
   or from **Master games** puts it on its own tab rather than displacing your work. Each
   tab keeps its own game and its own panel arrangement.
@@ -132,6 +136,18 @@ if you override it, for example `$env:DATA_DIR = 'D:\ChessLibrary'` before launc
   you close last, or tab one if several are open when the app exits.
 - Annotations are saved into the game as you type them; there is no Keep button. **Save
   game** still writes the PGN to disk.
+- PGN comment commands are read rather than shown as noise. `{[%evp from,to,cp,cp,...]}`
+  — lichess's engine evaluation for every ply of the main line — appears as a score beside
+  each move instead of a wall of numbers in your notes, and a per-move `[%eval]` is used
+  where it appears, variations included. A variation move sharing a ply with the main line
+  gets no score of its own, because it is a different position. Commands are put back
+  unchanged when the PGN is written out, and prose in the same comment is untouched.
+- Numeric annotation glyphs are shown as symbols: `$1`–`$6` as `!` `?` `!!` `??` `!?` `?!`,
+  and the standard positional set (`$10` `=`, `$14`–`$19` `⩲ ⩱ ± ∓ +− −+`, `$140` `∆`, and
+  the rest) rather than raw `$n`.
+- Each Stockfish line carries its depth as a chip and an **Add to tree** button that grafts
+  the line into the notation as a variation — up to ten moves of it, or the whole line if
+  it is shorter — and puts you on its first move so the arrow keys walk through it.
 - Drag the board's lower-right corner to resize it. **Copy FEN**, **Reset board**, and
   **Board editor** are available directly in analysis. Editing starts a new study;
   save it to keep it. Blindfold controls belong to the trainer.

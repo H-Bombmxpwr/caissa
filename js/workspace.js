@@ -85,6 +85,53 @@
   }
   function colourSelect(current){return select([['','Either colour'],['white','Played White'],['black','Played Black']],current||'');}
   function outcomeSelect(current){return select([['','Any outcome'],['win','Won'],['loss','Lost'],['draw','Drew']],current||'');}
+  // lichess and ChessBase hide machine data inside comments as {[%name body]} commands.
+  // The big one is [%evp from,to,cp,cp,...]: a centipawn score for every ply in that
+  // range. Left alone it reads as noise in the notes, so the commands are lifted out of
+  // the comment text, shown beside the moves they belong to, and put back by serialize().
+  const PGN_COMMAND=/\[%(\w+)\s*([^\]]*)\]/g;
+  const NAG_SYMBOLS={$1:'!',$2:'?',$3:'!!',$4:'??',$5:'!?',$6:'?!',$7:'□',$10:'=',$11:'=',$12:'=',
+    $13:'∞',$14:'⩲',$15:'⩱',$16:'±',$17:'∓',$18:'+−',$19:'−+',
+    $22:'⊙',$23:'⊙',$32:'⟳',$33:'⟳',$36:'→',$37:'→',$40:'↑',$41:'↑',
+    $44:'=∞',$132:'⇆',$133:'⇆',$140:'∆',$141:'∇',$142:'⌓',$145:'RR'};
+  function allNodes(root){const out=[];(function walk(n){out.push(n);n.children.forEach(walk);})(root);return out;}
+  function harvestCommands(parsed){
+    if(parsed.harvested)return parsed;
+    const evals={};
+    for(const node of allNodes(parsed.root)){
+      if(!node.comment)continue;
+      const kept=[];
+      const text=node.comment.replace(PGN_COMMAND,(whole,name,body)=>{
+        kept.push(whole);
+        const lower=name.toLowerCase();
+        if(lower==='evp'){
+          const numbers=body.split(',').map(v=>parseInt(v,10));
+          const from=numbers[0],to=numbers[1];
+          if(Number.isFinite(from)&&Number.isFinite(to))
+            for(let i=2;i<numbers.length&&from+i-2<=to;i++)
+              if(Number.isFinite(numbers[i]))evals[from+i-2]={cp:numbers[i]};
+        } else if(lower==='eval'){
+          const mate=/^#(-?\d+)/.exec(body.trim());
+          // A per-move [%eval] belongs to this node wherever it sits, variations included.
+          if(mate)node.eval={mate:parseInt(mate[1],10)};
+          else if(Number.isFinite(parseFloat(body)))node.eval={cp:Math.round(parseFloat(body)*100)};
+        }
+        return ' ';
+      }).replace(/\s+/g,' ').trim();
+      if(kept.length){node.commands=(node.commands||[]).concat(kept);node.comment=text||null;}
+    }
+    // evp is a list for the game's main line, so only the main line takes those scores:
+    // a variation move at the same ply is a different position and borrows nothing.
+    for(const node of [parsed.root,...PGN.mainline(parsed.root)])
+      if(!node.eval&&evals[node.ply])node.eval=evals[node.ply];
+    parsed.harvested=true;
+    return parsed;
+  }
+  function evalLabel(entry){
+    if(!entry)return '';
+    if(entry.mate!=null)return (entry.mate<0?'-#':'#')+Math.abs(entry.mate);
+    return (entry.cp>0?'+':entry.cp<0?'-':'')+Math.abs(entry.cp/100).toFixed(2);
+  }
   // Nobody remembers 500 ECO codes. Show the PGN's own opening name when it has one,
   // and otherwise the volume the code belongs to, with the code itself always in view.
   const ECO_VOLUMES = {A:'Flank openings', B:'Semi-open games', C:'Open games and the French',
@@ -294,7 +341,9 @@
   }
   async function savePrefs() {applyPrefs();await api('settings/appearance',{value:JSON.stringify(state.prefs)},'PUT');}
   function serialize(parsed) {
-    function comment(n){return (n.nags.length?' '+n.nags.join(' '):'')+(n.comment?' {'+n.comment.replace(/[{}]/g,'')+'}':'');}
+    // Harvested commands ride back into the same comment they were lifted from.
+    function comment(n){const body=[...(n.commands||[]),n.comment||''].join(' ').trim();
+      return (n.nags.length?' '+n.nags.join(' '):'')+(body?' {'+body.replace(/[{}]/g,'')+'}':'');}
     function token(n){const fen=n.parent.fenAfter.split(' ');return fen[5]+(fen[1]==='w'?'. ':'... ')+n.san+comment(n);}
     function branch(parent){if(!parent.children.length)return '';const first=parent.children[0];return token(first)+' '+parent.children.slice(1).map(n=>'('+token(n)+' '+branch(n)+')').join(' ')+' '+branch(first);}
     const esc=s=>String(s).replace(/\\/g,'\\\\').replace(/"/g,'\\"');
@@ -417,6 +466,7 @@
     if(!state.parsed)newGame();
     stashBoard();
     const parsed=state.parsed, layout=activeBoard().layout;
+    harvestCommands(parsed);
     const saveBtn=button(state.dirty?'Save changes *':'Save game',saveGame,'primary');
     content.append(heading('Understand every move',parsed.headers.White+' — '+parsed.headers.Black,[parsed.headers.Event,parsed.headers.Date].filter(Boolean).join(' · ')||'An open board for your ideas',[
       button('Panels',panelDialog),button('Reset board',()=>{if(state.dirty&&!confirm('Discard unsaved analysis and reset to the starting position?'))return;newGame();go('analysis');}),button('Board editor',boardEditor),button('Export PGN',()=>download(serialize(parsed),'caissa-study.pgn')),button('Add to repertoire',addToRepertoire),saveBtn]));
@@ -462,7 +512,7 @@
     const splitter=h('div.dock-splitter',{title:'Drag to divide the two columns'});
     const grid=h('div.analysis-grid',[h('div.analysis-board',[
       h('div.player-strip',[h('b',{text:parsed.headers.Black||'Black'}),h('span.muted',{text:parsed.headers.BlackElo||''})]),holder,
-      h('div.player-strip',[h('b',{text:parsed.headers.White||'White'}),h('span.muted',{text:parsed.headers.WhiteElo||''})]),controls,moveForm,h('div.toolbar',[button('Copy FEN',async()=>{await navigator.clipboard.writeText(state.node.fenAfter);App.toast('FEN copied');}),button('Clear arrows',()=>board.setShapes([]))]),h('p.muted',{text:'Wheel: moves · Right drag: arrows · Shift: blue · Ctrl: red · Alt: yellow'}),fen]),
+      h('div.player-strip',[h('b',{text:parsed.headers.White||'White'}),h('span.muted',{text:parsed.headers.WhiteElo||''})]),controls,moveForm,h('div.toolbar',[button('Copy FEN',async()=>{await navigator.clipboard.writeText(state.node.fenAfter);App.toast('FEN copied');}),button('Clear arrows',()=>board.setShapes([]))]),h('p.muted',{text:'Wheel: moves · Right-drag or Shift-drag: arrow · Shift or Ctrl: red · Alt: blue · both: yellow · Click the board to clear'}),fen]),
       dockMain,splitter,dockSide]);
     content.append(grid);
     function panelControls(id){
@@ -483,7 +533,7 @@
       }
       for(const [id] of PANELS){
         const spot=built[id];
-        spot.box.style.maxHeight=layout.heights[id]?layout.heights[id]+'px':'';
+        spot.box.style.height=layout.heights[id]?layout.heights[id]+'px':'';
         const stale=spot.head.querySelector('.panel-controls');if(stale)stale.remove();
         if(!layout.hidden.includes(id))spot.head.append(panelControls(id));
       }
@@ -507,7 +557,7 @@
       const spot=built[id];
       spot.handle.addEventListener('pointerdown',event=>{event.preventDefault();spot.handle.setPointerCapture(event.pointerId);
         const startY=event.clientY,startHeight=spot.box.getBoundingClientRect().height;
-        const move=ev=>{const next=Math.max(90,Math.round(startHeight+ev.clientY-startY));layout.heights[id]=next;spot.box.style.maxHeight=next+'px';};
+        const move=ev=>{const next=Math.max(90,Math.round(startHeight+ev.clientY-startY));layout.heights[id]=next;spot.box.style.height=next+'px';};
         const end=()=>{spot.handle.removeEventListener('pointermove',move);spot.handle.removeEventListener('pointerup',end);spot.handle.removeEventListener('pointercancel',end);};
         spot.handle.addEventListener('pointermove',move);spot.handle.addEventListener('pointerup',end);spot.handle.addEventListener('pointercancel',end);});
     }
@@ -524,16 +574,40 @@
     let wheelAt=0;holder.addEventListener('wheel',e=>{e.preventDefault();if(!e.deltaY||Date.now()-wheelAt<100)return;wheelAt=Date.now();jump(e.deltaY>0?(state.node.children[0]||state.node):(state.node.parent||state.node));},{passive:false});
     pv.addEventListener('change',()=>{if(live)evaluate();});
     function markDirty(){state.dirty=true;activeBoard().dirty=true;saveBtn.textContent='Save changes *';}
+    const PV_PLIES=20;                       // ten moves of it, or the whole line if shorter
+    function addEngineLine(fromFen,sans){
+      const start=allNodes(parsed.root).find(n=>n.fenAfter===fromFen);
+      if(!start)throw new Error('That position has left the board; analyze again to add this line.');
+      const game=new Chess(fromFen);
+      let node=start,first=null,added=0;
+      for(const san of sans.slice(0,PV_PLIES)){
+        const moved=game.move(san);
+        if(!moved)break;
+        let child=node.children.find(c=>c.san===moved.san);
+        if(!child){child={san:moved.san,move:moved,parent:node,children:[],fenAfter:game.fen(),comment:null,nags:[],ply:node.ply+1};node.children.push(child);added++;}
+        node=child;
+        if(!first)first=child;
+      }
+      if(!first)throw new Error('This line has no moves to add.');
+      if(added)markDirty();
+      App.toast(added?added+' moves added as a variation':'That line was already on the board');
+      jump(first);                           // land on its first move so the arrows walk it
+    }
     function jump(n){if(n===state.node)return;state.node=n;board.setShapes([]);render();}
     function play(input){const g=new Chess(state.node.fenAfter);const moved=g.move(input);if(!moved)throw new Error('That move is not legal in this position.');let n=state.node.children.find(c=>c.san===moved.san);if(!n){n={san:moved.san,move:moved,parent:state.node,children:[],fenAfter:g.fen(),comment:null,nags:[],ply:state.node.ply+1};state.node.children.push(n);markDirty();}jump(n);}
     // Two notations over the same tree: a running paragraph, or one row per move
     // number with the variations broken out between the rows. ctx carries the row
     // a line is currently filling; clearing it starts the next move on a fresh row.
     function renderMoves(){const rows=state.prefs.moveRows!==false;moves.replaceChildren();moves.classList.toggle('by-move',rows);
-      function nags(n){return n.nags.map(v=>({'$1':'!','$2':'?','$3':'!!','$4':'??','$5':'!?','$6':'?!'}[v]||v)).join('');}
+      function nags(n){return n.nags.map(v=>NAG_SYMBOLS[v]||v).join('');}
       function place(n,target,ctx){const f=n.parent.fenAfter.split(' '),number=f[5],white=f[1]==='w';let into=target;
         if(rows){if(white||!ctx.row||ctx.number!==number){ctx.row=h('div.move-row',[h('span.move-no',{text:number+'.'})]);ctx.number=number;target.append(ctx.row);if(!white)ctx.row.append(h('span.move-skip',{text:'…'}));}into=ctx.row;}
-        into.append(h('button'+(n===state.node?'.current':''),{text:(rows?'':number+(white?'. ':'… '))+n.san+' '+nags(n),onclick:()=>jump(n)}));
+        const move=h('button'+(n===state.node?'.current':''),{text:(rows?'':number+(white?'. ':'… '))+n.san+' '+nags(n),onclick:()=>jump(n)});
+        const score=n.eval,label=evalLabel(score);
+        const side=!label?'':(score.mate!=null?(score.mate<0?'.black-better':'.white-better'):score.cp>0?'.white-better':score.cp<0?'.black-better':'');
+        const chip=label?h('small.move-eval'+side,{text:label,title:'Engine evaluation stored in the PGN'}):null;
+        if(rows)into.append(h('span.move-cell',[move,chip]));
+        else {into.append(move);if(chip)into.append(chip);}
         if(n.comment){if(rows){target.append(h('div.move-note',{text:n.comment}));ctx.row=null;}else target.append(h('span.move-comment',{text:n.comment}));}}
       function walk(parent,target,ctx){if(!parent.children.length)return;const n=parent.children[0];place(n,target,ctx);
         for(const alt of parent.children.slice(1)){const sub=h('div.variation'),branch={row:null,number:null};place(alt,sub,branch);walk(alt,sub,branch);target.append(sub);ctx.row=null;}
@@ -545,7 +619,7 @@
     // carry the same colour. Map before filtering: a line with no PV still owns its slot.
     function brandFor(i){return ['green','blue','red','yellow'][i%4];}
     function drawBest(){board.setShapes(arrows.checked?latestLines.map((l,i)=>l.pv?.[0]?{from:l.pv[0].slice(0,2),to:l.pv[0].slice(2,4),brand:brandFor(i),label:String(i+1)}:null).filter(Boolean):[],{answer:true});}
-    function showEvaluation(data,position){latestLines=data.lines||[];drawBest();engineBody.replaceChildren(...latestLines.map((l,i)=>{const g=new Chess(position),sans=[];for(const m of l.pv||[]){const done=g.move(m);if(!done)break;sans.push(done.san);}const sign=position.split(' ')[1]==='w'?1:-1;const score=l.mate!=null?'M'+l.mate*sign:(sign*(l.cp||0)/100).toFixed(2);return h('div.engine-line',{style:{'--line-color':'var(--shape-'+brandFor(i)+')'}},[h('span.line-rank',{text:String(i+1)}),h('strong',{text:score}),h('span',{text:sans.join(' ')}),h('small',{text:' Depth '+l.depth+' · White perspective'})]);}));if(data.cpu_percent!=null)resources.textContent='CPU '+data.cpu_percent.toFixed(1)+'% (100% = one core) · Memory '+data.memory_mb+' MB';else resources.textContent='Install psutil for measured CPU and memory usage.';}
+    function showEvaluation(data,position){latestLines=data.lines||[];drawBest();engineBody.replaceChildren(...latestLines.map((l,i)=>{const g=new Chess(position),sans=[];for(const m of l.pv||[]){const done=g.move(m);if(!done)break;sans.push(done.san);}const sign=position.split(' ')[1]==='w'?1:-1;const score=l.mate!=null?'M'+l.mate*sign:(sign*(l.cp||0)/100).toFixed(2);return h('div.engine-line',{style:{'--line-color':'var(--shape-'+brandFor(i)+')'}},[h('span.line-rank',{text:String(i+1)}),h('strong',{text:score}),h('span.line-depth',{text:'depth '+l.depth,title:'Search depth reached'}),h('span',{text:sans.join(' ')}),h('small',{text:' White perspective'}),button('Add to tree',()=>addEngineLine(position,sans),'line-add')]);}));if(data.cpu_percent!=null)resources.textContent='CPU '+data.cpu_percent.toFixed(1)+'% (100% = one core) · Memory '+data.memory_mb+' MB';else resources.textContent='Install psutil for measured CPU and memory usage.';}
     async function evaluate(){clearTimeout(livePoll);const id=++evalRequest,position=state.node.fenAfter;
       try{const data=await api('engine/live',{fen:position,multipv:Number(pv.value)});if(closed||id!==evalRequest)return;liveId=data.id;
         async function update(){try{const result=await api('engine/live');if(closed||id!==evalRequest||result.id!==liveId||state.node.fenAfter!==position)return;if(result.lines.length)showEvaluation(result,position);if(result.error)throw new Error(result.error);if(result.running)livePoll=setTimeout(update,250);}catch(err){if(!closed&&id===evalRequest)resources.textContent=err.message;}}
@@ -573,7 +647,32 @@
     document.addEventListener('keydown',key);const oldGoCleanup=()=>{closed=true;++evalRequest;++tbRequest;clearTimeout(livePoll);document.removeEventListener('keydown',key);api('engine/live',null,'DELETE').catch(()=>{});};state.analysisCleanup=oldGoCleanup;
   }
   async function saveGame(){if(state.selected){await api('games/'+state.selected.id,{pgn:serialize(state.parsed)},'PUT');state.dirty=false;App.toast('Annotations saved to PGN');return go('analysis');}
-    modal('Save to your library',(body,close)=>{const collection=h('input',{value:'My games',list:'collection-names'}),event=h('input',{value:state.parsed.headers.Event||'Study'});body.append(field('Study title / event',event),field('Collection',collection),h('datalist',{id:'collection-names'},state.collections.map(c=>h('option',{value:c.name}))),h('div.dialog-actions',[button('Cancel',close),button('Save',async()=>{state.parsed.headers.Event=event.value;const data=await api('games',{pgn:serialize(state.parsed),collection:collection.value});state.dirty=false;close();App.toast(data.added?'Saved to your library':'This game is already in your library');const found=await api('games?'+new URLSearchParams({collection:collection.value,sort:'added',limit:1}));if(found.games.length)await openGame(found.games[0].id);},'primary')]));});}
+    // A datalist only suggests once the box is empty, so every collection is listed outright.
+    modal('Save to your library',(body,close)=>{
+      const existing=state.collections.map(c=>[c.name,c.name+' · '+c.games.toLocaleString()+' games']);
+      const preferred=state.collections.some(c=>c.name==='My games')?'My games':(existing[0]||['__new'])[0];
+      const choices=select([...existing,['__new','＋ New collection…']],preferred);
+      const fresh=h('input',{placeholder:'e.g. Autumn tournament preparation'});
+      const freshField=field('New collection name',fresh);
+      const event=h('input',{value:state.parsed.headers.Event||'Study'});
+      function sync(){freshField.hidden=choices.value!=='__new';}
+      choices.addEventListener('change',sync);
+      body.append(field('Study title / event',event),field('Collection',choices),freshField,
+        h('div.dialog-actions',[button('Cancel',close),button('Save',async()=>{
+          const name=(choices.value==='__new'?fresh.value:choices.value).trim();
+          if(!name)throw new Error('Name the collection to save into.');
+          state.parsed.headers.Event=event.value;
+          const data=await api('games',{pgn:serialize(state.parsed),collection:name});
+          state.dirty=false;close();
+          App.toast(data.added?'Saved to '+name:'This game is already in your library');
+          await refreshMeta();
+          // Adopt the saved game into this same tab; opening it would spawn another.
+          const found=await api('games?'+new URLSearchParams({collection:name,sort:'added',limit:1}));
+          if(found.games.length)state.selected=found.games[0];
+          stashBoard();await go('analysis');
+        },'primary')]));
+      sync();
+    });}
   function pinDialog(fen,refresh){modal('Keep this idea',(body,close)=>{const title=h('input',{placeholder:'Why this position matters'}),url=h('input',{placeholder:'https://… (optional)'}),note=h('textarea',{rows:4,placeholder:'Your notes, available offline'});body.append(field('Title',title),field('Link',url),field('Note',note),h('div.dialog-actions',[button('Cancel',close),button('Save to position',async()=>{await api('study/pins',{fen,title:title.value,url:url.value,note:note.value});close();refresh();},'primary')]));});}
   async function addToRepertoire(){const path=PGN.pathTo(state.node);if(!path.length)throw new Error('Choose a position after at least one move.');const list=await api('repertoires');modal('Keep this line in your repertoire',(body,close)=>{const choices=select([['','Create a repertoire'],...list.repertoires.map(r=>[String(r.id),r.name])],'');const title=h('input',{value:'My White repertoire'}),side=select([['w','White'],['b','Black']],'w');body.append(field('Repertoire',choices),field('New repertoire name',title),field('Play as',side),h('p.muted',{text:PGN.lineToText(path)}),h('div.dialog-actions',[button('Cancel',close),button('Add line',async()=>{let rep={name:title.value,color:side.value,data:{lines:[]}};if(choices.value){rep=(await api('repertoires/'+choices.value)).repertoire;rep.data=JSON.parse(rep.data);}rep.data.lines=rep.data.lines||[];const sans=path.map(n=>n.san);if(!rep.data.lines.some(l=>l.moves.join(' ')===sans.join(' ')&&l.fen===state.parsed.startFen))rep.data.lines.push({moves:sans,fen:state.parsed.startFen,due:0,interval:0,successes:0});await api('repertoires'+(choices.value?'/'+choices.value:''),rep,choices.value?'PUT':'POST');close();App.toast('Line added to repertoire');},'primary')]));});}
   async function repertoires(){const data=await api('repertoires');content.append(heading('Prepare with purpose','Your repertoire','Keep your lines. Revisit the uncertain moves. Make the ideas yours.',[button('Build on the board',()=>go('analysis'),'primary')]));const grid=h('div.cards-grid');content.append(grid);if(!data.repertoires.length)grid.append(empty('Start with one good line','Open a game or build a line on the analysis board, then choose Add to repertoire.',[button('Open analysis board',()=>go('analysis'),'primary')]));for(const meta of data.repertoires){const rep=(await api('repertoires/'+meta.id)).repertoire;const data=JSON.parse(rep.data),lines=data.lines||[],due=lines.filter(l=>(l.due||0)<=Date.now());grid.append(h('section.card.study-card',[h('div.eyebrow',{text:meta.color==='w'?'White repertoire':'Black repertoire'}),h('h3',{text:meta.name}),h('p.muted',{text:lines.length+' lines · '+due.length+' due for review'}),h('div.toolbar',[button('Drill due lines',()=>{if(!due.length)throw new Error('All lines reviewed. Come back when they are due.');drillLine(due[0].moves,due[0].fen,rep,due[0]);},'primary'),button('Browse lines',()=>browseRepertoire(rep)),button('Export PGN',()=>{const pgn=lines.map(l=>'[Event "'+meta.name.replace(/"/g,'')+'"]\n[SetUp "1"]\n[FEN "'+l.fen+'"]\n[Result "*"]\n\n'+l.moves.map((m,i)=>(i%2===0?(Math.floor(i/2)+1)+'. ':'')+m).join(' ')+' *').join('\n\n');download(pgn,'repertoire.pgn');})])]));}}

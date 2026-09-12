@@ -38,7 +38,16 @@
 .dock-splitter:hover{background:linear-gradient(var(--accent),var(--accent)) center/3px 80px no-repeat}
 .panel{position:relative;min-width:0}
 .panel .card-head{gap:10px;flex-wrap:wrap}
+/* One scroller per panel, and only where a height is set. The inner caps these bodies
+   wrap (.move-tree, .context-body) would otherwise stack a second scrollbar inside the
+   first and leave the resize grip with nothing to pull against. */
 .panel .panel-body{overflow:auto;min-height:0}
+.panel .move-tree,.panel .context-body{max-height:none;overflow:visible}
+.panel[data-panel=notation] .panel-body{height:430px;overflow:hidden;display:flex;flex-direction:column}
+.panel[data-panel=notation] .panel-body>div{display:flex;flex-direction:column;min-height:0;flex:1}
+.panel[data-panel=notation] .move-tree{flex:1;min-height:0;overflow:auto}
+.panel[data-panel=notation] .editor{flex:none}
+.panel[data-panel=context] .panel-body{height:520px}
 .panel-controls{gap:1px;margin-left:auto}
 .panel-btn{border:0;background:none;color:var(--text-dim);padding:2px 5px;border-radius:4px;font-size:11px;line-height:1}
 .panel-btn:hover{background:var(--bg-3);color:var(--text-strong)}
@@ -52,6 +61,17 @@
 .import-banner .progress-track.indeterminate span{width:38%;animation:caissa-drift 1.2s ease-in-out infinite}
 @keyframes caissa-drift{0%{margin-left:0}50%{margin-left:62%}100%{margin-left:0}}
 @media(prefers-reduced-motion:reduce){.import-banner .progress-track.indeterminate span{animation:none;width:100%}}
+/* Engine evaluations carried in the PGN, shown against the move they belong to. */
+.move-cell{display:flex;align-items:baseline;gap:5px;min-width:0}
+.move-cell>button{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.move-eval{font:10px Consolas,monospace;color:var(--text-dim);white-space:nowrap}
+.move-eval.white-better{color:#4a7c59}
+.move-eval.black-better{color:#a4614b}
+.dark-theme .move-eval.white-better{color:#7fc094}
+.dark-theme .move-eval.black-better{color:#d08f78}
+.engine-line .btn.line-add{padding:2px 9px;font-size:11px;margin-left:9px;vertical-align:1px}
+/* Depth is what tells you how much the score is worth, so it reads as a chip, not fine print. */
+.line-depth{display:inline-block;margin:0 10px 0 3px;padding:1px 7px;border-radius:4px;background:var(--bg-3);color:var(--text-strong);font:600 11px Consolas,monospace;vertical-align:1px}
 .eco-code{display:inline-block;margin-right:7px;padding:1px 5px;border-radius:3px;background:var(--bg-3);color:var(--text-dim);font:600 10px Consolas,monospace;letter-spacing:.5px;vertical-align:1px}
 .line-rank{display:inline-block;min-width:17px;height:17px;line-height:17px;margin-right:9px;border-radius:50%;background:var(--line-color,var(--accent));color:#fff;font-size:10px;font-weight:600;text-align:center;vertical-align:1px}
 .cg-shapes .shape-label{fill:#fff;stroke:none;font:600 .21px 'Segoe UI',sans-serif;text-anchor:middle;dominant-baseline:central}
