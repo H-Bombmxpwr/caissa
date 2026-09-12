@@ -177,6 +177,47 @@ class WorkspaceApiTests(unittest.TestCase):
         with self.assertRaises(ApiError):
             self.call("POST", "/api/study/folders", body={"name": "   "})
 
+    def test_deleting_a_folder_takes_its_subfolders_and_frees_the_collections(self):
+        status, parent = self.call("POST", "/api/study/folders", body={"name": "Autumn prep"})
+        status, child = self.call("POST", "/api/study/folders",
+                                  body={"name": "Sidelines", "parent_id": parent["id"]})
+        collection = self.api.library.collection("My games")
+        self.call("POST", "/api/study/assign",
+                  body={"folder_id": child["id"], "collection_id": collection["id"]})
+
+        status, result = self.call("DELETE", "/api/study/folders/%d" % parent["id"])
+        self.assertEqual(result["deleted"], 2)
+        self.assertEqual(result["kept"], [])
+        self.assertFalse(os.path.exists(parent["path"]))
+
+        folders = self.call("GET", "/api/study/folders")[1]
+        self.assertNotIn("Autumn prep", [f["name"] for f in folders["folders"]])
+        self.assertNotIn(child["id"], [a["folder_id"] for a in folders["assignments"]])
+        self.assertIsNotNone(self.api.library.collection("My games"), "the collection itself survives")
+
+    def test_deleting_a_folder_keeps_a_directory_holding_your_own_files(self):
+        status, folder = self.call("POST", "/api/study/folders", body={"name": "Loose notes"})
+        note = os.path.join(folder["path"], "notes.txt")
+        with open(note, "w", encoding="utf-8") as handle:
+            handle.write("mine")
+
+        status, result = self.call("DELETE", "/api/study/folders/%d" % folder["id"])
+        self.assertEqual(result["kept"], [os.path.realpath(folder["path"])])
+        self.assertTrue(os.path.exists(note), "a file the user put there is never removed")
+        self.assertFalse(os.path.exists(os.path.join(folder["path"], "study.json")))
+
+    def test_deleting_a_folder_leaves_a_sibling_sharing_its_name(self):
+        status, short = self.call("POST", "/api/study/folders", body={"name": "Open"})
+        self.call("POST", "/api/study/folders", body={"name": "Open files"})
+        status, result = self.call("DELETE", "/api/study/folders/%d" % short["id"])
+        self.assertEqual(result["deleted"], 1)
+        names = [f["name"] for f in self.call("GET", "/api/study/folders")[1]["folders"]]
+        self.assertIn("Open files", names)
+
+    def test_deleting_an_unknown_folder_is_refused(self):
+        with self.assertRaises(ApiError):
+            self.call("DELETE", "/api/study/folders/424242")
+
     # ---------- repertoires ----------
 
     def test_repertoire_roundtrip(self):

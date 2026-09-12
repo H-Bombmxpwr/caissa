@@ -101,6 +101,11 @@ if you override it, for example `$env:DATA_DIR = 'D:\ChessLibrary'` before launc
   feature have no batch history: use collection/date filters for those.
 - Index a collection from **Study folders** before searching its positions. Indexing
   now includes the entire game; re-index older collections to include their endgames.
+- **Study folders → Delete** removes a folder and everything nested inside it. The
+  collections filed there are only released, never deleted: their games and PGN files
+  stay in the library. On disk Caissa takes back the `study.json` manifest it wrote and
+  the directories it created; a directory holding files you put there yourself is left
+  alone and reported in the confirmation.
 - On the analysis board, scroll the wheel to step through moves. Right-drag draws an
   arrow; right-click draws a circle. Shift uses blue, Ctrl red, Alt yellow; unmodified
   drawing uses green. Repeat a shape to remove it, or use **Clear arrows**.
@@ -111,8 +116,15 @@ if you override it, for example `$env:DATA_DIR = 'D:\ChessLibrary'` before launc
   without replacing them with a thinking message. Toggle **Best move arrows** and
   **Color variations** separately. CPU is measured with 100% representing one core;
   memory is the engine process's resident memory, not its configured hash size.
-- Toggle **Endgame tablebase** for positions with at most seven pieces. The initial
-  lookup needs internet; cached positions remain available offline. Results are from
+- Engine lines keep a fixed colour by rank: first green, second blue, third red, fourth
+  yellow. A line's rank badge, its evaluation and the arrow it draws all share that
+  colour, and each arrow is numbered with its rank so the board and the panel line up.
+- **Notation → One move per line** lays the game out one move number per row, White and
+  Black side by side, with variations broken out between the rows. Switch it off for the
+  running paragraph. The choice is saved with your other appearance settings.
+- **Endgame tablebase** appears only once the position is down to seven pieces, which
+  is as far as the lichess tables reach; above that the card stays out of the way.
+  Toggle it to look a position up. The initial lookup needs internet; cached positions remain available offline. Results are from
   the side-to-move perspective, including each candidate move's result for that player.
   Cursed wins and blessed losses account for the 50-move rule. No large tablebase files
   are bundled. API semantics: [lichess tablebase](https://github.com/lichess-org/lila-tablebase#http-api).
@@ -120,8 +132,16 @@ if you override it, for example `$env:DATA_DIR = 'D:\ChessLibrary'` before launc
   imports the selected player collection, then applies local filters. For Fischer's
   King's Indian games, use Fischer and ECO E60–E99. This works even without opening
   names in the PGN; it does not search an un-downloaded game's moves remotely.
-- **Appearance** includes dark mode, Cburnett/Merida/Chessnut piece sets, board palettes,
-  and animation preferences. All are stored with your library.
+- **Settings → Appearance** covers dark mode, fourteen board palettes (four of them dark),
+  nine piece sets and four piece treatments, orientation, coordinates and animation. The
+  piece set and treatment pickers show real thumbnails of the artwork on a light/dark
+  square pair, and the treatment previews follow whichever set you have chosen. All of it
+  is stored with your library.
+- **Settings → Storage location → Show in folder** opens the library folder in your file
+  manager. It needs the desktop app; browser launches show the path but cannot open it.
+- The database's opening column shows the ECO code beside the opening name from the PGN.
+  When a game carries a code but no name, the code's volume is shown instead (A flank,
+  B semi-open, C open and French, D closed and semi-closed, E Indian).
 
 ## Where things live
 
@@ -207,8 +227,11 @@ Bundling Stockfish (GPLv3) and the cburnett piece set (GPL) makes this applicati
 - [Stockfish](https://github.com/official-stockfish/Stockfish) — engine
 - [lichess](https://lichess.org) — piece distribution, game export API, tablebase;
   board interactions informed by [Chessground](https://github.com/lichess-org/chessground)
-- Cburnett: Colin M. L. Burnett, GPLv2+; Merida: Armando Hernandez Marroquin, GPLv2+;
-  Chessnut: Alexis Luengas, Apache 2.0. See `assets/piece/LICHESS-COPYING.md` and the
-  bundled license texts. `py tools/fetch_pieces.py` refreshes the extra sets.
+- Piece sets are credited one by one in `assets/piece/CREDITS.md`, alongside the upstream
+  `assets/piece/LICHESS-COPYING.md` and the bundled license texts.
+  `py tools/fetch_pieces.py` refreshes them. Two carry conditions worth knowing before
+  you redistribute this repository: **Alpha** (Eric Bentzen) is free for personal
+  non-commercial use only, and **Maestro** (sadsnake1) is CC BY-NC-SA 4.0. Cburnett,
+  Merida, Chessnut, Fantasy, Celtic, Spatial and Rhos are free software or public domain.
 - Chess Tempo — tactics, used in-app through their own site, never copied
 - Exercises: AdviceCabinet, *7 Levels of Blindfold Chess Exercises for Everyone*

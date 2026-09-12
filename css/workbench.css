@@ -9,13 +9,43 @@
 .card>div>p.muted{padding:0 16px}.import-history{margin-bottom:24px}.import-history .context-item{display:flex;gap:15px;align-items:center;justify-content:space-between}
 .dialog-backdrop{max-height:90vh;overflow:auto}.dialog-content pre{white-space:pre-wrap;overflow-wrap:anywhere}
 .color-lines .engine-line{border-left:4px solid var(--line-color,var(--accent))}
+/* The four arrow brands, named once so a Stockfish line's score, its border and
+   the arrow it draws on the board are always the same colour. */
+:root{--shape-green:#15781b;--shape-blue:#003088;--shape-red:#882020;--shape-yellow:#e68f00}
+.dark-theme{--shape-green:#63bd6c;--shape-blue:#7ba4ec;--shape-red:#e07f77;--shape-yellow:#efac3f}
+.engine-line strong{color:var(--line-color,var(--accent))}
+/* Piece treatments, named once: the board filters and the settings thumbnails
+   both read these, so a tweak here changes the preview and the real board together. */
+:root{--treat-outline:contrast(1.15) drop-shadow(0 1px 1px #1f382c66);--treat-wood:sepia(.8) saturate(.7);--treat-slate:grayscale(1) contrast(.85)}
+.piece-swatch .piece-pair{display:flex;align-items:center;justify-content:center;gap:1px;width:62px;height:44px;border-radius:3px;background:linear-gradient(90deg,var(--light-sq) 50%,var(--dark-sq) 50%)}
+.piece-swatch .piece-pair img{width:29px;height:29px;display:block}
+.piece-swatch .treat-outline img{filter:var(--treat-outline)}
+.piece-swatch .treat-wood img{filter:var(--treat-wood)}
+.piece-swatch .treat-slate img{filter:var(--treat-slate)}
+.eco-code{display:inline-block;margin-right:7px;padding:1px 5px;border-radius:3px;background:var(--bg-3);color:var(--text-dim);font:600 10px Consolas,monospace;letter-spacing:.5px;vertical-align:1px}
+.line-rank{display:inline-block;min-width:17px;height:17px;line-height:17px;margin-right:9px;border-radius:50%;background:var(--line-color,var(--accent));color:#fff;font-size:10px;font-weight:600;text-align:center;vertical-align:1px}
+.cg-shapes .shape-label{fill:#fff;stroke:none;font:600 .21px 'Segoe UI',sans-serif;text-anchor:middle;dominant-baseline:central}
+/* Notation: one row per move number, variations broken out between the rows. */
+.move-tree.by-move{line-height:1.75}
+.move-tree.by-move .move-row{display:grid;grid-template-columns:2.9em minmax(0,1fr) minmax(0,1fr);align-items:baseline;column-gap:4px;border-radius:4px}
+.move-tree.by-move .move-row:hover{background:var(--bg-3)}
+.move-tree.by-move .move-no{color:var(--text-dim);font-size:12px;text-align:right;padding-right:4px}
+.move-tree.by-move .move-skip{color:var(--text-dim);padding-left:6px}
+.move-tree.by-move button{text-align:left}
+.move-tree .move-note{color:#758574;font:11px 'Segoe UI',sans-serif;line-height:1.6;margin:1px 0 7px 3.2em}
+.dark-theme .move-tree .move-note{color:var(--text-dim)}
 .color-lines .variation{border-color:#4682b4;background:#4682b410}.color-lines .variation .variation{border-color:#c05a55;background:#c05a5510}.color-lines .variation .variation .variation{border-color:#b99732}
+/* The theme class lives on <body>, but the canvas is painted from <html>, which sits
+   outside it and would keep the light palette wherever the page is shorter than the
+   viewport - the unused space below the blindfold trainer. A transparent root hands
+   the canvas back to the body's own background, in both themes. */
+html{background:transparent}
 .dark-theme{color-scheme:dark;--bg:#191e22;--bg-2:#232a2f;--bg-3:#2b343a;--border:#414b52;--text:#d4dbdc;--text-strong:#edf2ed;--text-dim:#abb8b9;--accent:#8fc9a5;--good:#8fc9a5}
 .dark-theme .desk-top,.dark-theme #trainer header.top{background:var(--bg-2)}
 .dark-theme table.games th,.dark-theme .note-card,.dark-theme .result-pill{background:var(--bg-3);color:var(--text)}
 .dark-theme table.games tbody tr:hover,.dark-theme table.games tbody tr.selected{background:#34483e}
 .dark-theme table.games td,.dark-theme .engine-line,.dark-theme .context-item{border-color:var(--border)}
-.dark-theme .engine-line strong,.dark-theme .status-message{color:var(--accent)}
+.dark-theme .status-message{color:var(--accent)}
 .bottom img{vertical-align:middle;margin-right:12px}.sidebar-foot img{display:block;margin:0 auto 12px}
 .cg-wrap{touch-action:none}.cg-pieces piece.dragging{will-change:transform}
 @media(max-width:1400px){.analysis-grid{grid-template-columns:minmax(260px,var(--board-size,1fr)) minmax(280px,1fr)}.analysis-context{grid-column:1/-1}}

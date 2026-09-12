@@ -69,16 +69,24 @@ with tempfile.TemporaryDirectory(prefix='caissa-browser-') as data:
             page.evaluate('Caissa.go("settings")')
             page.get_by_label('Dark theme',exact=True).check()
             page.wait_for_function('document.body.classList.contains("dark-theme")')
-            page.get_by_label('Piece set',exact=True).select_option('merida')
+            page.get_by_role('button',name='Merida',exact=True).click()
             page.wait_for_function('document.querySelector(".settings-grid piece").style.backgroundImage.includes("merida")')
+            assert 'merida' in page.locator('.piece-swatch.active .piece-pair img').first.get_attribute('src')
+            treatment=page.get_by_role('button',name='Warm wood',exact=True)
+            assert 'merida' in treatment.locator('img').first.get_attribute('src'),'treatment thumbnails follow the chosen set'
+            treatment.click()
+            page.wait_for_function('document.body.classList.contains("piece-wood")')
             page.evaluate('''async()=>{
-              window.__storageChoice=null;window.__storageSaved=false;
+              window.__storageChoice=null;window.__storageSaved=false;window.__revealed=false;
               window.pywebview={api:{storage_info:async()=>({path:'C:/CurrentLibrary'}),
+                reveal_storage_folder:async()=>{window.__revealed=true;return {opened:'C:/CurrentLibrary'};},
                 choose_storage_folder:async()=>window.__storageChoice,
                 use_storage_folder:async()=>{window.__storageSaved=true;return {pending:window.__storageChoice};},
                 cancel_storage_change:async()=>({cancelled:true})}};
               await Caissa.go('settings');
             }''')
+            page.get_by_role('button',name='Show in folder',exact=True).click()
+            assert page.evaluate('window.__revealed'),'Show in folder reaches the native bridge'
             page.get_by_role('button',name='Browse folders…',exact=True).click()
             assert page.get_by_role('button',name='Use selected folder',exact=True).is_disabled()
             page.evaluate('window.__storageChoice="D:/MyChess"')

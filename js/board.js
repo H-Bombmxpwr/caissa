@@ -15,9 +15,11 @@
   const SCRIPT_SRC = (document.currentScript && document.currentScript.src) || '';
   const BASE = SCRIPT_SRC ? SCRIPT_SRC.replace(/\/js\/board\.js.*$/, '/') : '';
   let PIECE_SET = 'cburnett';
+  function pieceArt(set, color, type) {
+    return BASE + 'assets/piece/' + set + '/' + color + type.toUpperCase() + '.svg';
+  }
   function pieceUrl(piece) {
-    return BASE + 'assets/piece/' + PIECE_SET + '/' +
-      piece.color + piece.type.toUpperCase() + '.svg';
+    return pieceArt(PIECE_SET, piece.color, piece.type);
   }
 
   function el(tag, className) {
@@ -284,7 +286,8 @@
     this.setOrientation(this.opts.orientation === 'w' ? 'b' : 'w');
   };
 
-  /* shapes: [{from,to,brand}] arrows or [{square,brand}] circles */
+  /* shapes: [{from,to,brand,label}] arrows or [{square,brand,label}] circles.
+     label is a short badge drawn in the destination square's corner. */
   Board.prototype.setShapes = function (shapes, opts) {
     if (opts && opts.answer) this.answerShapes = shapes || [];
     else this.shapes = shapes || [];
@@ -293,6 +296,12 @@
 
   Board.prototype._renderShapes = function () {
     const o = this.opts.orientation;
+    function badge(label, x, y, brand) {
+      if (label === undefined || label === null || label === '') return '';
+      const text = String(label).replace(/[&<>]/g, '');
+      return '<circle cx="' + (x + 0.19) + '" cy="' + (y + 0.19) + '" r="0.17" stroke-width="0" class="shape-' + brand + '"/>' +
+        '<text x="' + (x + 0.19) + '" y="' + (y + 0.19) + '" class="shape-label">' + text + '</text>';
+    }
     let out = '<defs>';
     ['green', 'blue', 'red', 'yellow'].forEach(function (c) {
       out += '<marker id="arrow-' + c + '" orient="auto" markerWidth="4" markerHeight="8" refX="2.05" refY="2.01">' +
@@ -305,7 +314,7 @@
       if (s.square) {
         const [x, y] = keyToCoords(s.square, o);
         out += '<circle cx="' + (x + 0.5) + '" cy="' + (y + 0.5) + '" r="0.44" class="shape-' + brand +
-          '" fill="none" stroke-width="0.07"/>';
+          '" fill="none" stroke-width="0.07"/>' + badge(s.label, x, y, brand);
       } else if (s.from && s.to) {
         const [x1, y1] = keyToCoords(s.from, o);
         const [x2, y2] = keyToCoords(s.to, o);
@@ -315,6 +324,7 @@
         bx -= (dx / len) * 0.3; by -= (dy / len) * 0.3;
         out += '<line x1="' + ax + '" y1="' + ay + '" x2="' + bx + '" y2="' + by +
           '" class="shape-' + brand + '" stroke-width="0.12" marker-end="url(#arrow-' + brand + ')"/>';
+        out += badge(s.label, x2, y2, brand);
       }
     });
     this.svg.innerHTML = out;
@@ -462,6 +472,10 @@
   Board.prototype.selectSquare = function (key) { this.selected = key; this._renderSquares(); };
 
   global.Board = Board;
-  Board.setPieceSet = function(name){PIECE_SET=['cburnett','merida','chessnut'].includes(name)?name:'cburnett';};
+  // The bundled sets, in the order the settings picker offers them.
+  Board.PIECE_SETS = [['cburnett','Cburnett'],['merida','Merida'],['alpha','Alpha'],['maestro','Maestro'],
+    ['chessnut','Chessnut'],['fantasy','Fantasy'],['celtic','Celtic'],['spatial','Spatial'],['rhosgfx','Rhos']];
+  Board.pieceArt = pieceArt;
+  Board.setPieceSet = function(name){PIECE_SET=Board.PIECE_SETS.some(s=>s[0]===name)?name:'cburnett';};
   Board.prototype.refreshPieceArt = function(){Object.values(this.pieces).forEach(p=>p.el.style.backgroundImage='url("'+pieceUrl(p)+'")');};
 })(window);

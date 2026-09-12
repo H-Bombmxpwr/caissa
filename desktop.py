@@ -13,6 +13,7 @@ import argparse
 import json
 import os
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -45,6 +46,19 @@ class DesktopSettings:
         prefs = storage_preferences()
         return {'path': self.data_dir, 'overridden': self.overridden,
                 'pending': prefs.get('pending', {}).get('target'), 'error': prefs.get('error')}
+
+    def reveal_storage_folder(self):
+        """Open the library folder in the desktop's own file manager."""
+        if not os.path.isdir(self.data_dir):
+            return {'error': 'That folder is not there any more: ' + self.data_dir}
+        try:
+            if sys.platform == 'win32':
+                os.startfile(self.data_dir)          # noqa: S606 - the app's own library folder
+            else:
+                subprocess.Popen(['open' if sys.platform == 'darwin' else 'xdg-open', self.data_dir])
+        except OSError as err:
+            return {'error': str(err)}
+        return {'opened': self.data_dir}
 
     def choose_storage_folder(self):
         import webview

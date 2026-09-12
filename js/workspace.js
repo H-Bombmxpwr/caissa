@@ -36,6 +36,24 @@
   function link(text,url) {return h('a',{text,href:url,target:'_blank',rel:'noopener noreferrer'});}
   function field(label, control) {if(/INPUT|SELECT|TEXTAREA/.test(control.tagName)&&!control.hasAttribute('aria-label'))control.setAttribute('aria-label',label);return h('label.field',[h('span',{text:label}),control]);}
   function select(options,value,onchange) {const el=h('select',{onchange},options.map(o=>h('option',{value:Array.isArray(o)?o[0]:o,text:Array.isArray(o)?o[1]:o})));el.value=value;return el;}
+  // Nobody remembers 500 ECO codes. Show the PGN's own opening name when it has one,
+  // and otherwise the volume the code belongs to, with the code itself always in view.
+  const ECO_VOLUMES = {A:'Flank openings', B:'Semi-open games', C:'Open games and the French',
+    D:'Closed and semi-closed games', E:'Indian defences'};
+  function openingLabel(game){
+    const eco=(game.eco||'').trim().toUpperCase(), name=(game.opening||'').trim();
+    return {name:name||ECO_VOLUMES[eco[0]]||'Unclassified', eco:/^[A-E]\d\d$/.test(eco)?eco:''};
+  }
+  // A row of labelled thumbnails, used where a <select> cannot show what it is offering.
+  function thumbPicker(label,items,current,onpick){
+    const group=h('div.swatches',{role:'group','aria-label':label});
+    for(const [value,text,art] of items){
+      const choice=h('button.swatch.piece-swatch'+(current===value?'.active':''),{type:'button',title:text,'aria-pressed':String(current===value),
+        onclick:act(async()=>{group.querySelectorAll('button').forEach(b=>{b.classList.toggle('active',b===choice);b.setAttribute('aria-pressed',String(b===choice));});await onpick(value);})},[art,h('small',{text})]);
+      group.append(choice);
+    }
+    return group;
+  }
   function heading(kicker,title,description,actions) {return h('div.page-heading',[h('div',[h('div.eyebrow',{text:kicker}),h('h1',{text:title}),h('p',{text:description})]),h('div.toolbar',actions||[])]);}
   function card(title,body,actions) {return h('section.card',[h('div.card-head',[h('h2',{text:title}),h('div.toolbar',actions||[])]),body]);}
   function empty(title,text,actions) {return h('div.empty',[h('h3',{text:title}),h('p',{text}),h('div.toolbar',{style:{justifyContent:'center'}},actions||[])]);}
@@ -66,11 +84,16 @@
       const selected=await window.pywebview.api.choose_storage_folder();
       selection.textContent=selected?'Selected: '+selected:'';use.disabled=!selected;
     });
+    const reveal=button('Show in folder',async()=>{
+      if(!window.pywebview?.api?.reveal_storage_folder)throw new Error('Open the desktop app (desktop.py or Caissa.exe) to open the folder from here.');
+      const result=await window.pywebview.api.reveal_storage_folder();
+      if(result.error)throw new Error(result.error);
+    });reveal.disabled=!bridge?.reveal_storage_folder;
     const cancel=button('Cancel pending change',async()=>{await window.pywebview.api.cancel_storage_change();status.textContent='Storage change cancelled. Your current folder is unchanged.';cancel.hidden=true;selection.textContent='';use.disabled=true;});cancel.hidden=!info.pending;
     if(info.overridden){choose.disabled=true;use.disabled=true;status.textContent='DATA_DIR controls this launch. Remove that override to choose a folder here.';}
     content.append(h('div',{style:{marginBottom:'25px'}},[card('Storage location',h('div.card-pad',[field('Current storage folder',path),h('p.muted',{text:'Games, studies, repertoires, settings, trainer progress, and cached data stay together in this folder. Choose an empty folder; Caissa copies everything on the next launch and retains the original as a backup.'}),
       ...(!bridge?.storage_info?[h('p.muted',{text:'The native folder picker is available in the desktop app. Browser launches use the saved folder too.'})]:[]),
-      h('div.toolbar',[choose,use,cancel]),selection,status]))]));
+      h('div.toolbar',[reveal,choose,use,cancel]),selection,status]))]));
   }
   async function deleteMatching(reload){
     const data=await api('games/delete-preview',{filters:state.filters});
@@ -191,9 +214,9 @@
     const previewDetails=h('div');previewBody.append(previewDetails);aside.append(h('section.card',[previewBody]),h('section.note-card',[h('div.eyebrow',{text:'A connected workspace'}),h('h3',{text:'Follow the position.'}),h('p',{text:'Analyze a game, keep the critical line in your repertoire, and rehearse it without seeing the pieces.'}),button('Organize your studies',()=>go('studies'))]));
     content.append(h('div.library-grid',[list,aside]));let request=0;
     async function loadGames(){const id=++request;const params=new URLSearchParams({...state.filters,limit:30,offset:state.offset});const data=await api('games?'+params);if(id!==request||state.view!=='database')return;rows.replaceChildren();
-      data.games.forEach(g=>{const row=h('tr',{tabindex:0,ondblclick:act(()=>openGame(g.id)),onkeydown:act(e=>{if(e.key==='Enter')return openGame(g.id);}),onclick:()=>{rows.querySelectorAll('tr').forEach(r=>r.classList.remove('selected'));row.classList.add('selected');showPreview(g);}},[
+      data.games.forEach(g=>{const opening=openingLabel(g);const row=h('tr',{tabindex:0,ondblclick:act(()=>openGame(g.id)),onkeydown:act(e=>{if(e.key==='Enter')return openGame(g.id);}),onclick:()=>{rows.querySelectorAll('tr').forEach(r=>r.classList.remove('selected'));row.classList.add('selected');showPreview(g);}},[
         h('td',[h('div.player-name',{text:g.white+' — '+g.black}),h('div.subline',{text:[g.white_elo&&g.black_elo?g.white_elo+' · '+g.black_elo:'',g.event].filter(Boolean).join('  /  ')})]),
-        h('td',[h('span.result-pill',{text:g.result})]),h('td',[h('div',{text:g.opening||g.eco||'Unclassified'}),h('div.subline',{text:Math.ceil(g.ply_count/2)+' moves'})]),h('td',{text:g.date||'Unknown'})]);rows.append(row);});
+        h('td',[h('span.result-pill',{text:g.result})]),h('td',[h('div',[opening.eco?h('span.eco-code',{text:opening.eco}):null,opening.name]),h('div.subline',{text:Math.ceil(g.ply_count/2)+' moves'})]),h('td',{text:g.date||'Unknown'})]);rows.append(row);});
       if(!data.games.length)rows.append(h('tr',[h('td',{colspan:4},[empty('Make room for your chess',stats.games?'No games match these filters.':'Import a PGN or bring in your online games to start your library.',[button('Import games',()=>go('imports'),'primary')])])]));
       count.textContent=data.total?`${state.offset+1}–${Math.min(state.offset+30,data.total)} of ${data.total.toLocaleString()} games`:'0 games';
       const prev=button('← Previous',()=>{state.offset=Math.max(0,state.offset-30);return loadGames();});prev.disabled=state.offset===0;
@@ -220,18 +243,20 @@
     const colorLines=h('input',{type:'checkbox',checked:!!state.prefs.colorLines,onchange:act(async()=>{state.prefs.colorLines=colorLines.checked;await savePrefs();})});
     const liveBox=h('input',{type:'checkbox',onchange:()=>{live=liveBox.checked;if(live)evaluate();else {clearTimeout(liveTimer);clearTimeout(livePoll);++evalRequest;liveId=null;api('engine/live',null,'DELETE').catch(()=>{});}}});
     const pv=select(['1','2','3','5'],'3');
+    const rowsBox=h('input',{type:'checkbox',checked:state.prefs.moveRows!==false,onchange:act(async()=>{state.prefs.moveRows=rowsBox.checked;renderMoves();await savePrefs();})});
     const notation=card('Notation',h('div',[moves,h('div.editor',[field('Position comment',comment),nag,h('div.toolbar',[
       button('Keep annotation',()=>{state.node.comment=comment.value;state.node.nags=nag.value?[nag.value]:[];markDirty();renderMoves();}),
-      button('Remove branch',()=>{const n=state.node;if(!n.parent)return;if(!confirm('Remove this move and everything following it in this branch?'))return;n.parent.children=n.parent.children.filter(c=>c!==n);state.node=n.parent;markDirty();render();})])])]));
+      button('Remove branch',()=>{const n=state.node;if(!n.parent)return;if(!confirm('Remove this move and everything following it in this branch?'))return;n.parent.children=n.parent.children.filter(c=>c!==n);state.node=n.parent;markDirty();render();})])])]),[h('label.toolbar',[rowsBox,'One move per line'])]);
     const contextTabs=h('div.context-tabs');['Library','Study','History'].forEach(t=>contextTabs.append(h('button',{text:t,onclick:()=>{state.context=t;renderContext();}})));
     const controls=h('div.board-navigation',[button('⏮',()=>jump(parsed.root)),button('←',()=>jump(state.node.parent||state.node)),button('→',()=>jump(state.node.children[0]||state.node)),button('⏭',()=>{let n=state.node;while(n.children.length)n=n.children[0];jump(n);}),button('Flip',()=>board.toggleOrientation())]);
     controls.querySelectorAll('button').forEach((b,i)=>b.setAttribute('aria-label',['First position','Previous move','Next move','Last move','Flip board'][i]));
     const fen=h('div.fen');const sanInput=h('input',{placeholder:'Enter a move, e.g. Nf3','aria-label':'Move in SAN'});
     const moveForm=h('form.toolbar',{onsubmit:act(e=>{e.preventDefault();play(sanInput.value);sanInput.value='';})},[sanInput,h('button.btn',{text:'Play move',type:'submit'})]);
     const tablebaseBody=h('div.card-pad');const tablebaseToggle=h('input',{type:'checkbox',onchange:()=>renderTablebase()});
+    const tablebaseCard=card('Endgame tablebase',h('div',[h('label.toolbar.card-pad',[tablebaseToggle,'Show exact endgame results (online)']),tablebaseBody]));
     content.append(h('div.analysis-grid',[h('div.analysis-board',[
       h('div.player-strip',[h('b',{text:parsed.headers.Black||'Black'}),h('span.muted',{text:parsed.headers.BlackElo||''})]),holder,
-      h('div.player-strip',[h('b',{text:parsed.headers.White||'White'}),h('span.muted',{text:parsed.headers.WhiteElo||''})]),controls,moveForm,h('div.toolbar',[button('Copy FEN',async()=>{await navigator.clipboard.writeText(state.node.fenAfter);App.toast('FEN copied');}),button('Clear arrows',()=>board.setShapes([]))]),h('p.muted',{text:'Wheel: moves · Right drag: arrows · Shift: blue · Ctrl: red · Alt: yellow'}),fen,card('Endgame tablebase',h('div',[h('label.toolbar.card-pad',[tablebaseToggle,'Show exact endgame results (online)']),tablebaseBody]))]),
+      h('div.player-strip',[h('b',{text:parsed.headers.White||'White'}),h('span.muted',{text:parsed.headers.WhiteElo||''})]),controls,moveForm,h('div.toolbar',[button('Copy FEN',async()=>{await navigator.clipboard.writeText(state.node.fenAfter);App.toast('FEN copied');}),button('Clear arrows',()=>board.setShapes([]))]),h('p.muted',{text:'Wheel: moves · Right drag: arrows · Shift: blue · Ctrl: red · Alt: yellow'}),fen,tablebaseCard]),
       h('div.section-stack',[notation,card('Stockfish · local analysis',h('div',[h('div.filters',[h('label.toolbar',[liveBox,'Live analysis']),field('Lines',pv),button('Analyze',evaluate),h('label.toolbar',[arrows,'Best move arrows']),h('label.toolbar',[colorLines,'Color variations'])]),resources,engineBody]),[button('Annotate game',annotate)]),
       card('Game tags',h('div.card-pad',[button('Edit tags',editTags),button('Delete game',deleteGame,'danger')]))]),
       h('aside.analysis-context.card',[contextTabs,contextBody]) ]));
@@ -241,17 +266,36 @@
     function markDirty(){state.dirty=true;saveBtn.textContent='Save changes *';}
     function jump(n){if(n===state.node)return;state.node=n;board.setShapes([]);render();}
     function play(input){const g=new Chess(state.node.fenAfter);const moved=g.move(input);if(!moved)throw new Error('That move is not legal in this position.');let n=state.node.children.find(c=>c.san===moved.san);if(!n){n={san:moved.san,move:moved,parent:state.node,children:[],fenAfter:g.fen(),comment:null,nags:[],ply:state.node.ply+1};state.node.children.push(n);markDirty();}jump(n);}
-    function renderMoves(){moves.replaceChildren();function walk(parent,target){if(!parent.children.length)return;const n=parent.children[0];append(n,target);for(const alt of parent.children.slice(1)){const sub=h('div.variation');append(alt,sub);walk(alt,sub);target.append(sub);}walk(n,target);}function append(n,target){const f=n.parent.fenAfter.split(' ');target.append(h('button'+(n===state.node?'.current':''),{text:f[5]+(f[1]==='w'?'. ':'… ')+n.san+' '+n.nags.map(v=>({'$1':'!','$2':'?','$3':'!!','$4':'??','$5':'!?','$6':'?!'}[v]||v)).join(''),onclick:()=>jump(n)}));if(n.comment)target.append(h('span.move-comment',{text:n.comment}));}walk(parsed.root,moves);if(!parsed.root.children.length)moves.append(h('p.muted',{text:'Move a piece or enter SAN to begin. Alternative moves become saved variations.'}));}
+    // Two notations over the same tree: a running paragraph, or one row per move
+    // number with the variations broken out between the rows. ctx carries the row
+    // a line is currently filling; clearing it starts the next move on a fresh row.
+    function renderMoves(){const rows=state.prefs.moveRows!==false;moves.replaceChildren();moves.classList.toggle('by-move',rows);
+      function nags(n){return n.nags.map(v=>({'$1':'!','$2':'?','$3':'!!','$4':'??','$5':'!?','$6':'?!'}[v]||v)).join('');}
+      function place(n,target,ctx){const f=n.parent.fenAfter.split(' '),number=f[5],white=f[1]==='w';let into=target;
+        if(rows){if(white||!ctx.row||ctx.number!==number){ctx.row=h('div.move-row',[h('span.move-no',{text:number+'.'})]);ctx.number=number;target.append(ctx.row);if(!white)ctx.row.append(h('span.move-skip',{text:'…'}));}into=ctx.row;}
+        into.append(h('button'+(n===state.node?'.current':''),{text:(rows?'':number+(white?'. ':'… '))+n.san+' '+nags(n),onclick:()=>jump(n)}));
+        if(n.comment){if(rows){target.append(h('div.move-note',{text:n.comment}));ctx.row=null;}else target.append(h('span.move-comment',{text:n.comment}));}}
+      function walk(parent,target,ctx){if(!parent.children.length)return;const n=parent.children[0];place(n,target,ctx);
+        for(const alt of parent.children.slice(1)){const sub=h('div.variation'),branch={row:null,number:null};place(alt,sub,branch);walk(alt,sub,branch);target.append(sub);ctx.row=null;}
+        walk(n,target,ctx);}
+      walk(parsed.root,moves,{row:null,number:null});
+      if(!parsed.root.children.length)moves.append(h('p.muted',{text:'Move a piece or enter SAN to begin. Alternative moves become saved variations.'}));}
     function render(){const g=new Chess(state.node.fenAfter);board.setPosition(g);board.setLastMove(state.node.move?[state.node.move.from,state.node.move.to]:null);board.setMovable({color:g.turnColor(),dests:g.destinationsMap(),onMove:(from,to)=>{const p=g.get(from);if(p?.type==='p'&&/[18]$/.test(to)){modal('Promote pawn',(body,close)=>body.append(h('div.toolbar',['q','r','b','n'].map(promo=>button(promo.toUpperCase(),()=>{close();play({from,to,promotion:promo});})))));}else play({from,to});}});comment.value=state.node.comment||'';nag.value=state.node.nags[0]||'';fen.textContent=state.node.fenAfter;latestLines=[];drawBest();renderTablebase();renderMoves();renderContext();clearTimeout(liveTimer);if(live)liveTimer=setTimeout(evaluate,350);}
-    function drawBest(){board.setShapes(arrows.checked?latestLines.filter(l=>l.pv?.[0]).map((l,i)=>({from:l.pv[0].slice(0,2),to:l.pv[0].slice(2,4),brand:['green','blue','red','yellow','green'][i]})):[],{answer:true});}
-    function showEvaluation(data,position){latestLines=data.lines||[];drawBest();engineBody.replaceChildren(...latestLines.map((l,i)=>{const g=new Chess(position),sans=[];for(const m of l.pv||[]){const done=g.move(m);if(!done)break;sans.push(done.san);}const sign=position.split(' ')[1]==='w'?1:-1;const score=l.mate!=null?'M'+l.mate*sign:(sign*(l.cp||0)/100).toFixed(2);return h('div.engine-line',{style:{'--line-color':['#488b60','#4682b4','#c05a55','#b99732'][i%4]}},[h('strong',{text:score}),h('span',{text:sans.join(' ')}),h('small',{text:' Depth '+l.depth+' · White perspective'})]);}));if(data.cpu_percent!=null)resources.textContent='CPU '+data.cpu_percent.toFixed(1)+'% (100% = one core) · Memory '+data.memory_mb+' MB';else resources.textContent='Install psutil for measured CPU and memory usage.';}
+    // One brand per engine line, so a line's arrow, its border and its score all
+    // carry the same colour. Map before filtering: a line with no PV still owns its slot.
+    function brandFor(i){return ['green','blue','red','yellow'][i%4];}
+    function drawBest(){board.setShapes(arrows.checked?latestLines.map((l,i)=>l.pv?.[0]?{from:l.pv[0].slice(0,2),to:l.pv[0].slice(2,4),brand:brandFor(i),label:String(i+1)}:null).filter(Boolean):[],{answer:true});}
+    function showEvaluation(data,position){latestLines=data.lines||[];drawBest();engineBody.replaceChildren(...latestLines.map((l,i)=>{const g=new Chess(position),sans=[];for(const m of l.pv||[]){const done=g.move(m);if(!done)break;sans.push(done.san);}const sign=position.split(' ')[1]==='w'?1:-1;const score=l.mate!=null?'M'+l.mate*sign:(sign*(l.cp||0)/100).toFixed(2);return h('div.engine-line',{style:{'--line-color':'var(--shape-'+brandFor(i)+')'}},[h('span.line-rank',{text:String(i+1)}),h('strong',{text:score}),h('span',{text:sans.join(' ')}),h('small',{text:' Depth '+l.depth+' · White perspective'})]);}));if(data.cpu_percent!=null)resources.textContent='CPU '+data.cpu_percent.toFixed(1)+'% (100% = one core) · Memory '+data.memory_mb+' MB';else resources.textContent='Install psutil for measured CPU and memory usage.';}
     async function evaluate(){clearTimeout(livePoll);const id=++evalRequest,position=state.node.fenAfter;
       try{const data=await api('engine/live',{fen:position,multipv:Number(pv.value)});if(closed||id!==evalRequest)return;liveId=data.id;
         async function update(){try{const result=await api('engine/live');if(closed||id!==evalRequest||result.id!==liveId||state.node.fenAfter!==position)return;if(result.lines.length)showEvaluation(result,position);if(result.error)throw new Error(result.error);if(result.running)livePoll=setTimeout(update,250);}catch(err){if(!closed&&id===evalRequest)resources.textContent=err.message;}}
         live=true;liveBox.checked=true;await update();
       }catch(err){if(!closed&&id===evalRequest)resources.textContent=err.message;}}
-    async function renderTablebase(){const id=++tbRequest,position=state.node.fenAfter;tablebaseBody.replaceChildren();if(!tablebaseToggle.checked)return;
-      if(Object.keys(new Chess(position).piecesMap()).length>7){tablebaseBody.textContent='Available with seven or fewer pieces, including kings.';return;}
+    // The lichess tablebase stops at seven pieces, so above that the card has nothing
+    // to offer and stays out of the way entirely.
+    async function renderTablebase(){const id=++tbRequest,position=state.node.fenAfter;tablebaseBody.replaceChildren();
+      tablebaseCard.hidden=Object.keys(new Chess(position).piecesMap()).length>7;
+      if(tablebaseCard.hidden||!tablebaseToggle.checked)return;
       tablebaseBody.textContent='Looking up the endgame…';try{const data=await api('tablebase?'+new URLSearchParams({fen:position}));if(id!==tbRequest||closed)return;
         const invert={win:'loss',loss:'win',draw:'draw','cursed-win':'blessed-loss','blessed-loss':'cursed-win','maybe-win':'maybe-loss','maybe-loss':'maybe-win','syzygy-win':'syzygy-loss','syzygy-loss':'syzygy-win'};
         tablebaseBody.replaceChildren(h('b',{text:(position.split(' ')[1]==='w'?'White':'Black')+' to move: '+data.category}),h('p.muted',{text:'DTZ '+(data.dtz??'unknown')+' · Cursed wins and blessed losses draw under the 50-move rule.'}),...(data.moves||[]).map(m=>button(m.san+' · '+(invert[m.category]||m.category)+' · DTZ '+(m.dtz??'?'),()=>play(m.uci))));
@@ -280,10 +324,26 @@
     function advance(){if(rep)while(index<sans.length&&g.turnColor()!==rep.color){g.move(sans[index++]);}b.setPosition(g);completed=index===sans.length;prompt.textContent=completed?'Line complete':`Move ${index+1} of ${sans.length} · ${g.turnColor()==='w'?'White':'Black'} to move`;finish.disabled=!completed;input.disabled=completed;if(completed){b.setBlindfold('off');feedback.textContent=mistakes+' retries. '+(mistakes?'Review again tomorrow.':'A little more of the board is yours.');}}
     body.append(h('label.toolbar',[blind,'Blindfold mode']),holder,prompt,form,feedback,h('div.dialog-actions',[peek,button('Close',close),finish]));advance();});}
   async function studies(){content.append(heading('A place for your ideas','Study folders','Organize preparation into real folders, with portable PGNs behind every collection.',[button('Create collection',collectionDialog),button('＋ Study folder',()=>folderDialog(),'primary')]));content.append(h('p.muted',{text:state.studyRoot}));const grid=h('div.cards-grid');content.append(grid);if(!state.folders.length)grid.append(empty('Build your study space','Create a folder such as Tournament preparation, then add White repertoire, Black repertoire, Model games, and Endgames beneath it.',[button('Create study structure',async()=>{const root=await api('study/folders',{name:'Chess study'});for(const name of ['White repertoire','Black repertoire','Annotated games','Model games','Endgames','Tactics'])await api('study/folders',{name,parent_id:root.id});await go('studies');},'primary')]));
-    for(const folder of state.folders){const collections=state.assignments.filter(a=>a.folder_id===folder.id).map(a=>state.collections.find(c=>c.id===a.collection_id)).filter(Boolean);grid.append(h('section.card.study-card',[h('div.folder-icon',{text:'▱'}),h('div.eyebrow',{text:folder.path}),h('h3',{text:folder.name}),h('p.muted',{text:collections.length+' collections · '+collections.reduce((n,c)=>n+c.games,0)+' games'}),...collections.map(c=>button(c.name+'  ('+c.games+')',()=>{state.filters={collection:String(c.id)};state.offset=0;go('database');})),h('div.toolbar',[button('Add collection',()=>assignDialog(folder)),button('Subfolder',()=>folderDialog(folder.id))])]));}
+    for(const folder of state.folders){const collections=state.assignments.filter(a=>a.folder_id===folder.id).map(a=>state.collections.find(c=>c.id===a.collection_id)).filter(Boolean);grid.append(h('section.card.study-card',[h('div.folder-icon',{text:'▱'}),h('div.eyebrow',{text:folder.path}),h('h3',{text:folder.name}),h('p.muted',{text:collections.length+' collections · '+collections.reduce((n,c)=>n+c.games,0)+' games'}),...collections.map(c=>button(c.name+'  ('+c.games+')',()=>{state.filters={collection:String(c.id)};state.offset=0;go('database');})),h('div.toolbar',[button('Add collection',()=>assignDialog(folder)),button('Subfolder',()=>folderDialog(folder.id)),button('Delete',()=>deleteFolderDialog(folder),'danger')])]));}
     const collections=h('div.card-pad');for(const c of state.collections)collections.append(h('div.context-item',[h('b',{text:c.name+' · '+c.games+' games'}),h('div.toolbar',[button('Browse',()=>{state.filters={collection:String(c.id)};state.offset=0;go('database');}),button('Index positions',async()=>{await api('study/index',{collection:c.id});App.toast('Position indexing started');watchIndex();}),h('a.btn',{href:'/api/collections/'+c.id+'/pgn',download:c.name+'.pgn',text:'Export PGN'})])]));const status=h('p.status-message');collections.append(status);content.append(h('div',{style:{marginTop:'24px'}},[card('Collections & position indexing',collections)]));
     function watchIndex(){clearInterval(poll);poll=setInterval(act(async()=>{const s=await api('study/index');status.textContent=s.running?`Indexing ${s.collection}: ${s.done} / ${s.total} games`:`Indexed ${s.done} games; ${s.errors} could not be indexed.`;if(s.error)status.textContent=s.error;if(!s.running)clearInterval(poll);}),700);}if((await api('study/index')).running)watchIndex();}
   function folderDialog(parent){modal('Create a study folder',(body,close)=>{const name=h('input',{placeholder:'e.g. Autumn tournament preparation'}),parents=select([['','Top level'],...state.folders.map(f=>[String(f.id),f.path])],parent?String(parent):'');body.append(field('Folder name',name),field('Inside',parents),h('div.dialog-actions',[button('Cancel',close),button('Create folder',async()=>{await api('study/folders',{name:name.value,parent_id:parents.value?Number(parents.value):null});close();go('studies');},'primary')]));});}
+  function deleteFolderDialog(folder){
+    const nested=state.folders.filter(f=>f.path===folder.path||f.path.startsWith(folder.path+'/'));
+    const ids=new Set(nested.map(f=>f.id));
+    const released=state.assignments.filter(a=>ids.has(a.folder_id)).map(a=>state.collections.find(c=>c.id===a.collection_id)).filter(Boolean);
+    modal('Delete '+folder.name+'?',(body,close)=>{
+      body.append(h('p',{text:nested.length>1?'This removes the folder and the '+(nested.length-1)+' folders nested inside it:':'This removes the folder:'}),
+        ...nested.map(f=>h('p.muted',{text:f.path})),
+        h('p',{text:released.length?'These collections stay in your library — they simply stop belonging to a folder:':'No collections are filed here.'}),
+        ...released.map(c=>h('p.muted',{text:c.name+' · '+c.games+' games'})),
+        h('p.muted',{text:'Games and PGN files are never touched, and any file you put in the folder yourself is left on disk.'}),
+        h('div.dialog-actions',[button('Cancel',close),button('Delete folder',async()=>{
+          const result=await api('study/folders/'+folder.id,null,'DELETE');close();
+          App.toast(result.kept.length?result.deleted+' removed · '+result.kept.length+' kept on disk because they still hold your own files':result.deleted+(result.deleted===1?' folder removed':' folders removed'));
+          await go('studies');},'danger')]));
+    });
+  }
   function collectionDialog(){modal('Create a collection',(body,close)=>{const name=h('input',{placeholder:'e.g. My annotated tournament games'});body.append(field('Collection name',name),h('div.dialog-actions',[button('Cancel',close),button('Create',async()=>{await api('collections',{name:name.value});close();go('studies');},'primary')]));});}
   function assignDialog(folder){modal('Add a collection to '+folder.name,(body,close)=>{const choices=select(state.collections.map(c=>[String(c.id),c.name]),String(state.collections[0]?.id||''));body.append(field('Collection',choices),h('p.muted',{text:'A collection belongs to one study folder. Its PGN remains in the library’s collections directory; the folder manifest records its location.'}),h('div.dialog-actions',[button('Cancel',close),button('Save',async()=>{if(!choices.value)throw new Error('Create a collection first.');await api('study/assign',{folder_id:folder.id,collection_id:Number(choices.value)});close();go('studies');},'primary')]));});}
   async function imports(){await importHistory();content.append(heading('Bring your chess home','Import games','PGN files, master collections, and your own online games — together in one library.'));const collection=h('input',{value:'My games'}),status=h('div.status-message'),pgn=h('textarea',{rows:9,placeholder:'Paste one game or an entire collection in PGN format…'}),files=h('input',{type:'file',accept:'.pgn',multiple:true});
@@ -300,12 +360,20 @@
   async function settings(){content.append(heading('Make Caissa yours','Settings','Choose where your library lives and how your board looks.'));const holder=h('div.board-holder',{style:{maxWidth:'460px',margin:'auto'}});preview=new Board(holder,{viewOnly:true});preview.setPosition(new Chess());
     const swatches=h('div.swatches');Object.entries(themes).forEach(([name,colors])=>{const b=h('button.swatch'+((state.prefs.theme||'Sage')===name?'.active':''),{title:name,onclick:act(async()=>{state.prefs.theme=name;delete state.prefs.light;delete state.prefs.dark;await savePrefs();swatches.querySelectorAll('button').forEach(x=>x.classList.toggle('active',x===b));light.value=colors[0];dark.value=colors[1];})},[h('span',{style:{background:`conic-gradient(${colors[1]} 25%,${colors[0]} 0 50%,${colors[1]} 0 75%,${colors[0]} 0)`,backgroundSize:'31px 22px'}}),h('small',{text:name})]);swatches.append(b);});
     const colors=themes[state.prefs.theme]||themes.Sage,light=h('input',{type:'color',value:state.prefs.light||colors[0],oninput:act(async()=>{state.prefs.light=light.value;await savePrefs();})}),dark=h('input',{type:'color',value:state.prefs.dark||colors[1],oninput:act(async()=>{state.prefs.dark=dark.value;await savePrefs();})});
-    const pieces=select([['classic','Classic · cburnett'],['outline','Crisp contrast'],['wood','Warm wood'],['slate','Soft graphite']],state.prefs.pieces||'classic',act(async()=>{state.prefs.pieces=pieces.value;await savePrefs();}));
+    // Both pickers preview real artwork: the set on a light/dark square pair, the
+    // treatment on whichever set is currently chosen.
+    const pieceSetName=()=>state.prefs.pieceSet||'cburnett';
+    const pair=(set,extra)=>h('span.piece-pair'+(extra||''),[h('img',{src:Board.pieceArt(set,'w','k'),alt:'','data-piece':'wk',loading:'lazy'}),h('img',{src:Board.pieceArt(set,'b','q'),alt:'','data-piece':'bq',loading:'lazy'})]);
+    const treatments=thumbPicker('Piece treatment',[['classic','Natural'],['outline','Crisp contrast'],['wood','Warm wood'],['slate','Soft graphite']]
+      .map(([value,text])=>[value,text,pair(pieceSetName(),'.treat-'+value)]),state.prefs.pieces||'classic',async value=>{state.prefs.pieces=value;await savePrefs();});
+    const pieceSet=thumbPicker('Piece set',Board.PIECE_SETS.map(([value,text])=>[value,text,pair(value)]),pieceSetName(),async value=>{
+      state.prefs.pieceSet=value;
+      treatments.querySelectorAll('img[data-piece]').forEach(img=>{img.src=Board.pieceArt(value,img.dataset.piece[0],img.dataset.piece[1]);});
+      await savePrefs();});
     await storageSettings();
-    const pieceSet=select([['cburnett','Cburnett'],['merida','Merida'],['chessnut','Chessnut']],state.prefs.pieceSet||'cburnett',act(async()=>{state.prefs.pieceSet=pieceSet.value;await savePrefs();}));
     const orientation=select([['w','White at the bottom'],['b','Black at the bottom']],state.prefs.orientation||'w',act(async()=>{state.prefs.orientation=orientation.value;await savePrefs();}));
     const coordinates=h('input',{type:'checkbox',checked:state.prefs.coordinates!==false,onchange:act(async()=>{state.prefs.coordinates=coordinates.checked;await savePrefs();})}),animate=h('input',{type:'checkbox',checked:state.prefs.animate!==false,onchange:act(async()=>{state.prefs.animate=animate.checked;await savePrefs();})});
-    content.append(h('div.settings-grid',[card('Board & pieces',h('div.card-pad',[field('Board palette',swatches),h('div.toolbar',[field('Light squares',light),field('Dark squares',dark)]),field('Dark theme',h('input',{type:'checkbox',checked:!!state.prefs.darkMode,onchange:act(async e=>{state.prefs.darkMode=e.target.checked;await savePrefs();})})),field('Piece set',pieceSet),field('Piece treatment',pieces),field('Default orientation',orientation),field('Coordinates',coordinates),field('Animate moves',animate)])),card('Preview',h('div.card-pad',[holder,h('p.muted',{style:{marginTop:'20px'},text:'Your palette applies to analysis, previews, and all seven blindfold exercises.'})]))]));applyPrefs();}
+    content.append(h('div.settings-grid',[card('Board & pieces',h('div.card-pad',[field('Board palette',swatches),h('div.toolbar',[field('Light squares',light),field('Dark squares',dark)]),field('Dark theme',h('input',{type:'checkbox',checked:!!state.prefs.darkMode,onchange:act(async e=>{state.prefs.darkMode=e.target.checked;await savePrefs();})})),field('Piece set',pieceSet),field('Piece treatment',treatments),field('Default orientation',orientation),field('Coordinates',coordinates),field('Animate moves',animate)])),card('Preview',h('div.card-pad',[holder,h('p.muted',{style:{marginTop:'20px'},text:'Your palette applies to analysis, previews, and all seven blindfold exercises.'})]))]));applyPrefs();}
   document.addEventListener('DOMContentLoaded',async()=>{
     await App.persistenceReady;
     const initial=location.hash;const originalGo=go; // App boots first so the original trainer stays intact.

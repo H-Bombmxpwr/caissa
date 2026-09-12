@@ -89,6 +89,8 @@ class Api:
                 return 200, self.study.folders()
             if method == 'POST':
                 return 200, self.study.create_folder(body)
+            if method == 'DELETE' and len(rest) == 2:
+                return 200, self.study.delete_folder(rest[1])
         if action == 'assign' and method == 'POST':
             return 200, self.study.assign(body)
         if action == 'tags' and method == 'GET':

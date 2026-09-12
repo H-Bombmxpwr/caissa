@@ -128,6 +128,45 @@ class Study:
         self.write_manifest(cur.lastrowid)
         return {'id': cur.lastrowid, 'path': target}
 
+    def delete_folder(self, folder_id):
+        """Remove a folder and everything nested inside it.
+
+        Collections are only unassigned: their PGN files live in the library's
+        collections directory, not in the study folder. On disk we take back the
+        manifest we wrote and the directories we created, but a directory the user
+        has put their own files in is left alone and reported back.
+        """
+        db = self.library.connect()
+        folder = db.execute('SELECT * FROM folders WHERE id=?', (int(folder_id),)).fetchone()
+        if not folder:
+            raise ValueError('No such folder')
+        prefix = folder['path'] + '/'
+        doomed = [dict(r) for r in db.execute('SELECT id, name, path FROM folders')
+                  if r['path'] == folder['path'] or r['path'].startswith(prefix)]
+        # Children first: parent_id is a real foreign key.
+        doomed.sort(key=lambda f: f['path'].count('/'), reverse=True)
+        with self.library._write_lock, db:
+            for row in doomed:
+                db.execute('DELETE FROM collection_folders WHERE folder_id=?', (row['id'],))
+            for row in doomed:
+                db.execute('DELETE FROM folders WHERE id=?', (row['id'],))
+        base = os.path.realpath(os.path.join(self.library.dir, 'studies'))
+        kept = []
+        for row in doomed:
+            if not row['path']:
+                continue
+            target = os.path.realpath(os.path.join(base, row['path']))
+            if os.path.commonpath([base, target]) != base or not os.path.isdir(target):
+                continue
+            manifest = os.path.join(target, 'study.json')
+            if os.path.isfile(manifest):
+                os.remove(manifest)
+            try:
+                os.rmdir(target)
+            except OSError:                      # the folder still holds the user's own files
+                kept.append(target)
+        return {'deleted': len(doomed), 'kept': kept}
+
     def assign(self, body):
         db = self.library.connect()
         folder_id, collection_id = int(body['folder_id']), int(body['collection_id'])

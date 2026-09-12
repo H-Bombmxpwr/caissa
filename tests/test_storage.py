@@ -31,8 +31,8 @@ class StorageTests(unittest.TestCase):
         self.temp.cleanup()
 
     def test_native_picker_and_restart_copy(self):
-        self.bridge.window = Mock()
-        self.bridge.window.create_file_dialog.return_value = [str(self.target)]
+        self.bridge._window = Mock()
+        self.bridge._window.create_file_dialog.return_value = [str(self.target)]
         self.assertEqual(self.bridge.choose_storage_folder(), str(self.target))
         self.assertEqual(self.bridge.use_storage_folder()['pending'], str(self.target))
         self.assertEqual(list(self.target.iterdir()), [])
@@ -50,9 +50,18 @@ class StorageTests(unittest.TestCase):
         self.assertEqual((self.target/'notes.txt').read_text(), 'Keep my files')
         self.assertTrue((self.source/'library.db').exists())
 
+    def test_show_in_folder_opens_the_library(self):
+        with patch('desktop.sys.platform', 'win32'), patch('desktop.os.startfile', create=True) as opened:
+            self.assertEqual(self.bridge.reveal_storage_folder()['opened'], str(self.source))
+        opened.assert_called_once_with(str(self.source))
+
+    def test_show_in_folder_reports_a_missing_library(self):
+        missing = DesktopSettings(str(self.root/'gone'))
+        self.assertIn('not there any more', missing.reveal_storage_folder()['error'])
+
     def test_cancel_picker_and_pending_change(self):
-        self.bridge.window = Mock()
-        self.bridge.window.create_file_dialog.return_value = None
+        self.bridge._window = Mock()
+        self.bridge._window.create_file_dialog.return_value = None
         self.assertIsNone(self.bridge.choose_storage_folder())
         self.assertIn('error', self.bridge.use_storage_folder())
         paths.schedule_storage_change(str(self.source), str(self.target))
