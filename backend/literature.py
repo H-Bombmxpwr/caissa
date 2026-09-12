@@ -316,5 +316,53 @@ def game_facts(headers, online=True):
     message = None
     if not groups:
         message = "Wikipedia has nothing under these names. Games by well-known players at named events are the ones it covers."
-    return {"groups": groups, "message": message,
-            "query": {"white": white, "black": black, "event": event, "year": year}}
+    note = gemini_note(headers)
+    return {"groups": groups, "message": message, "query": query, "note": note}
+
+
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent"
+GEMINI_PROMPT = (
+    "You are annotating one game in a personal chess study database.\n"
+    "Write 2 to 4 sentences of historical context: the tournament, its significance, and "
+    "where this meeting sat in the players' rivalry.\n"
+    "Rules you must follow:\n"
+    "- If you do not specifically recognise this game, say so in the first sentence and "
+    "describe the event and the players at that time instead.\n"
+    "- Never state moves, results, dates, rounds or ratings that are not given below. Do "
+    "not correct or contradict the tags given below.\n"
+    "- No speculation presented as fact, and no praise of the app or the user.\n\n"
+)
+
+
+def gemini_note(headers, timeout=20):
+    """A short prose note from Gemini, or None when no key is configured.
+
+    This is generated text, not a source. The caller labels it as such: it sits below
+    the Wikipedia results so the checkable material is what a reader meets first.
+    """
+    key = os.environ.get("GEMINI_API_KEY", "").strip()
+    if not key:
+        return None
+    model = os.environ.get("GEMINI_MODEL", "").strip() or "gemini-3.6-flash"
+    tags = "\n".join("%s: %s" % (name, headers.get(name) or "unknown")
+                     for name in ("White", "Black", "Event", "Site", "Date", "Round", "Result"))
+    body = json.dumps({
+        "contents": [{"parts": [{"text": GEMINI_PROMPT + tags}]}],
+        # Gemini 3 spends output budget on thinking, so a small cap truncates the answer.
+        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 2000,
+                             "thinkingConfig": {"thinkingLevel": "low"}},
+    }).encode("utf-8")
+    request = urllib.request.Request(
+        GEMINI_URL % urllib.parse.quote(model) + "?key=" + urllib.parse.quote(key),
+        data=body, headers={"Content-Type": "application/json", "User-Agent": USER_AGENT})
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as res:
+            data = json.loads(res.read().decode("utf-8"))
+    except (urllib.error.URLError, OSError, ValueError):
+        return None
+    try:
+        parts = data["candidates"][0]["content"]["parts"]
+    except (KeyError, IndexError, TypeError):
+        return None
+    text = " ".join(part.get("text", "") for part in parts).strip()
+    return {"model": model, "text": text} if text else None

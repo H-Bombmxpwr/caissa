@@ -72,6 +72,14 @@
 .engine-line .btn.line-add{padding:2px 9px;font-size:11px;margin-left:9px;vertical-align:1px}
 /* Depth is what tells you how much the score is worth, so it reads as a chip, not fine print. */
 .line-depth{display:inline-block;margin:0 10px 0 3px;padding:1px 7px;border-radius:4px;background:var(--bg-3);color:var(--text-strong);font:600 11px Consolas,monospace;vertical-align:1px}
+/* Generated prose, kept visually distinct from the sourced links above it. */
+.ai-note{margin-top:18px;padding:14px 15px;border:1px dashed var(--border);border-radius:8px;background:var(--bg-3)}
+.ai-note p{font-size:12px;line-height:1.65;margin:8px 0 0}
+/* A move carrying a note or a drawing is marked, the way lichess marks its move list. */
+.move-mark{color:var(--accent);font-size:8px;line-height:1;vertical-align:2px}
+.tags-list{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
+.tag-chip{padding:3px 9px;border-radius:20px;background:var(--bg-3);color:var(--text);font-size:11px}
+.tags-list p{margin:0}
 .eco-code{display:inline-block;margin-right:7px;padding:1px 5px;border-radius:3px;background:var(--bg-3);color:var(--text-dim);font:600 10px Consolas,monospace;letter-spacing:.5px;vertical-align:1px}
 .line-rank{display:inline-block;min-width:17px;height:17px;line-height:17px;margin-right:9px;border-radius:50%;background:var(--line-color,var(--accent));color:#fff;font-size:10px;font-weight:600;text-align:center;vertical-align:1px}
 .cg-shapes .shape-label{fill:#fff;stroke:none;font:600 .21px 'Segoe UI',sans-serif;text-anchor:middle;dominant-baseline:central}

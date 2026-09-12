@@ -25,6 +25,7 @@ with tempfile.TemporaryDirectory(prefix='caissa-browser-') as data:
             page=browser.new_page(viewport={'width':1600,'height':1100})
             errors=[]
             page.on('pageerror',lambda e:errors.append(str(e)))
+            page.on('dialog',lambda d:d.accept())
             page.goto(url)
             page.wait_for_function('window.Caissa && document.querySelector(".games")')
             # The golden rule: a1 dark, h1 light, and the board agreeing with Game.squareColor.
@@ -91,13 +92,14 @@ with tempfile.TemporaryDirectory(prefix='caissa-browser-') as data:
             page.get_by_role('button',name='Analyze',exact=True).click()
             page.wait_for_selector('.engine-line',timeout=30000)
             page.wait_for_function('document.querySelector(".dock-main").textContent.includes("Memory")')
+            # Stop the search first: live analysis rewrites these lines underneath you.
+            page.get_by_label('Live analysis',exact=True).uncheck()
             # Depth is legible on its own, and a line can be walked in the move tree.
             assert page.locator('.engine-line .line-depth').first.inner_text().startswith('depth')
             pv=page.locator('.engine-line span').nth(2).inner_text().split()
             page.get_by_role('button',name='Add to tree',exact=True).first.click()
             page.wait_for_function('(san)=>Caissa.state.node.san===san',arg=pv[0])
             assert page.locator('.move-tree button.current').inner_text().strip().startswith(pv[0])
-            page.get_by_label('Live analysis',exact=True).uncheck()
             # Annotations land in the game as they are typed - there is no Keep button.
             assert page.get_by_role('button',name='Keep annotation').count()==0
             page.get_by_label('Position comment',exact=True).fill('key idea')
@@ -120,12 +122,16 @@ with tempfile.TemporaryDirectory(prefix='caissa-browser-') as data:
             page.wait_for_function('document.querySelectorAll(".board-tab").length===1')
             # Nothing inside the analysis grid should scroll until a panel is given a height,
             # and the grip has to be able to pull a panel past its own content.
+            # The move list is the one scroller a panel is meant to have. Anything else
+            # scrolling means the inner caps are stacking scrollbars again.
             overflowing=page.evaluate("""()=>{const out=[];
               for(const el of document.querySelectorAll('.analysis-grid *')){
+                if(el.classList.contains('move-tree'))continue;
                 if(!/auto|scroll/.test(getComputedStyle(el).overflowY))continue;
                 if(el.scrollHeight-el.clientHeight>1)out.push((el.dataset.panel||el.className)+':'+(el.scrollHeight-el.clientHeight));}
               return out;}""")
             assert overflowing==[],overflowing
+            assert page.evaluate("getComputedStyle(document.querySelector('[data-panel=notation] .panel-body')).overflowY")=='hidden'
             grip=page.locator('[data-panel=engine] .panel-grip')
             grip.hover()
             spot=grip.bounding_box()
@@ -162,6 +168,33 @@ with tempfile.TemporaryDirectory(prefix='caissa-browser-') as data:
             assert any(t.startswith('e4') and '=' in t for t in texts),texts
             assert any(t.startswith('c5') and '\u2212+' in t for t in texts),texts
             assert '[%evp 0,4,10,-20,30,-40,50]' in page.evaluate('Caissa.serialize(Caissa.state.parsed)')
+            # Drawings belong to the move, survive stepping away and back, are marked in
+            # the move list, and are written into the PGN as [%cal]/[%csl] like lichess.
+            page.evaluate('''async()=>{Caissa.state.dirty=false;await Caissa.go('analysis');}''')
+            page.wait_for_selector('.analysis-board .cg-wrap')
+            page.get_by_role('button',name='Next move',exact=True).click()
+            wrap=page.locator('.analysis-board .cg-wrap').bounding_box()
+            bx,by,bw=wrap['x'],wrap['y'],wrap['width']
+            page.mouse.move(bx+bw/16,by+bw*15/16)
+            page.mouse.down(button='right')
+            page.mouse.move(bx+bw*3/16,by+bw*11/16,steps=6)
+            page.mouse.up(button='right')
+            page.wait_for_function('(Caissa.state.node.shapes||[]).length===1')
+            drawn=page.evaluate('Caissa.state.node.shapes[0]')
+            assert drawn['from']=='a1' and drawn['to']=='b3' and drawn['brand']=='green',drawn
+            assert page.locator('.move-tree .move-mark').count()>=1,'the move list marks it'
+            page.get_by_role('button',name='First position',exact=True).click()
+            assert page.locator('.analysis-board .cg-shapes line').count()==0,'other moves keep their own board'
+            page.get_by_role('button',name='Next move',exact=True).click()
+            page.wait_for_function('document.querySelectorAll(".analysis-board .cg-shapes line").length===1')
+            written=page.evaluate('Caissa.serialize(Caissa.state.parsed)')
+            assert '[%cal Ga1b3]' in written,written[-260:]
+            # And they come back when the game is reopened.
+            page.evaluate('''async(pgn)=>{const parsed=PGN.parse(pgn);Caissa.state.parsed=parsed;
+              Caissa.state.node=parsed.root;Caissa.state.dirty=false;await Caissa.go('analysis');}''',written)
+            page.wait_for_selector('.move-tree button')
+            assert page.evaluate('''(()=>{const n=Caissa.state.parsed.root.children[0];
+              return (n.shapes||[]).map(s=>s.brand+s.from+s.to).join();})()''')=='greena1b3'
             # The Facts tab reads Wikipedia; the lookup is stubbed so the test stays offline.
             page.route('**/api/facts?*',lambda r:r.fulfill(json={'groups':[{'label':'The players','note':None,
               'items':[{'title':'Alpha','extract':'A player.','url':'https://en.wikipedia.org/wiki/Alpha'}]}],
@@ -208,7 +241,6 @@ with tempfile.TemporaryDirectory(prefix='caissa-browser-') as data:
             page.evaluate('delete window.pywebview')
             page.evaluate('Caissa.go("imports")')
             page.get_by_role('button',name='Undo import',exact=True).wait_for()
-            page.on('dialog',lambda d:d.accept())
             page.get_by_role('button',name='Undo import',exact=True).click()
             page.wait_for_function('document.querySelector(".import-history").textContent.includes("Undone")')
             assert page.evaluate('async()=>(await Caissa.api("stats")).games')==0

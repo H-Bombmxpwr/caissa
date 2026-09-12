@@ -94,7 +94,8 @@ class WorkbenchTests(unittest.TestCase):
             {'title': 'Nothing Here', 'missing': True},
         ]}}
         search = {'query': {'search': [{'title': 'Game of the Century (chess)'}]}}
-        with patch.object(literature, '_wikipedia_search', return_value=['Game of the Century (chess)']), \
+        with patch.object(literature, 'gemini_note', return_value=None), \
+             patch.object(literature, '_wikipedia_search', return_value=['Game of the Century (chess)']), \
              patch.object(literature, '_wikipedia', return_value={
                  p['title']: {'title': p['title'], 'extract': p['extract'], 'url': p['fullurl']}
                  for p in pages['query']['pages'] if not p.get('missing')
@@ -111,6 +112,7 @@ class WorkbenchTests(unittest.TestCase):
 
     def test_game_facts_says_so_when_there_is_nothing_to_look_up(self):
         from backend import literature
+        self.enterContext(patch.object(literature, 'gemini_note', return_value=None))
         blank = literature.game_facts({'White': 'White', 'Black': 'Black', 'Event': 'Study', 'Site': '', 'Date': ''})
         self.assertEqual(blank['groups'], [])
         self.assertIn('nothing to look up', blank['message'])
@@ -142,6 +144,19 @@ class WorkbenchTests(unittest.TestCase):
         with patch.object(literature, 'game_facts', fake):
             self.call('GET', 'facts', None, {'white': 'Nobody At All'})
         self.assertEqual(len(calls), 2, 'an offline miss must not be remembered as the answer')
+
+    def test_the_ai_note_is_optional_and_labelled(self):
+        from backend import literature
+        with patch.dict(os.environ, {'GEMINI_API_KEY': ''}):
+            self.assertIsNone(literature.gemini_note({'White': 'A', 'Black': 'B'}),
+                              'no key configured means no note, not an error')
+        with patch.object(literature, 'gemini_note', return_value={'model': 'test-model', 'text': 'Context.'}), \
+             patch.object(literature, '_wikipedia', return_value={}), \
+             patch.object(literature, '_wikipedia_search', return_value=[]):
+            found = literature.game_facts({'White': 'Karpov, Anatoly', 'Black': 'Kasparov, Garry',
+                                           'Event': 'Linares', 'Site': '', 'Date': '1993.??.??'})
+        self.assertEqual(found['note'], {'model': 'test-model', 'text': 'Context.'})
+        self.assertEqual(found['groups'], [], 'a note is not a source and never becomes one')
 
     def test_facts_route_needs_something_to_search_for(self):
         with self.assertRaises(ApiError):

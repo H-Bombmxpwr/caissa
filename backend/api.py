@@ -91,6 +91,8 @@ class Api:
         There is no bundled ECO table and inventing one would be worse than useless, so
         the suggestions and the ranges behind them come from the games already imported.
         """
+        if method == 'POST' and rest == ['classify']:
+            return 200, self.library.name_openings((body or {}).get('collection'))
         if method != 'GET':
             raise ApiError('unsupported openings request', 405)
         term = (query.get('q') or '').strip()
@@ -397,7 +399,7 @@ class Api:
             return 200, found
         found = literature.game_facts(headers, online=query.get("offline") != "1")
         # Only a real answer is worth keeping; an offline miss must not become permanent.
-        if found.get("groups"):
+        if found.get("groups") or found.get("note"):
             self.library.setting(key, json.dumps(found))
         return 200, found
 

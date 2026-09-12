@@ -20,6 +20,7 @@ import hashlib
 import uuid
 from datetime import datetime, timedelta
 
+from . import openings
 from . import pgnutil
 
 SCHEMA = """
@@ -169,6 +170,29 @@ class Library:
         os.makedirs(os.path.join(self.collections_dir, slugify(name)), exist_ok=True)
         return self.collection(name)
 
+    def name_openings(self, collection=None):
+        """Fill in opening names for games imported before, or without, an Opening tag."""
+        db = self.connect()
+        sql = "SELECT id, eco, opening, first_moves, fen FROM games WHERE opening IS NULL OR opening = ''"
+        params = []
+        if collection:
+            info = self.collection(collection)
+            if not info:
+                return {"named": 0, "checked": 0}
+            sql += " AND collection_id = ?"
+            params.append(info["id"])
+        rows = db.execute(sql, params).fetchall()
+        updates = []
+        for row in rows:
+            found = openings.name_for({"opening": row["opening"], "eco": row["eco"], "fen": row["fen"]},
+                                      (row["first_moves"] or "").split())
+            if found:
+                updates.append((found["eco"], found["opening"], row["id"]))
+        if updates:
+            with self._write_lock, db:
+                db.executemany("UPDATE games SET eco = ?, opening = ? WHERE id = ?", updates)
+        return {"named": len(updates), "checked": len(rows)}
+
     def delete_collection(self, ident, remove_files=False):
         info = self.collection(ident)
         if not info:
@@ -234,6 +258,11 @@ class Library:
                         signature in known or conn.execute('SELECT 1 FROM games WHERE signature=? LIMIT 1', (signature,)).fetchone()):
                         duplicates += 1
                         continue
+                    # A file carrying only an ECO code would otherwise show up with no
+                    # opening name at all; its own Opening tag is never overwritten.
+                    named = openings.name_for(meta, meta["first_moves"].split())
+                    if named:
+                        meta["eco"], meta["opening"] = named["eco"], named["opening"]
                     if meta["source_id"]:
                         known.add(meta["source_id"])
                     known.add(signature)

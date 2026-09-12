@@ -21,6 +21,8 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from backend.api import Api, ApiError          # noqa: E402
+from backend import dotenv                      # noqa: E402
+dotenv.load()
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 from backend.paths import default_data_dir

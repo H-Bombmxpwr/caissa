@@ -33,3 +33,8 @@ library/
 build/
 dist/
 *.spec.bak
+
+# Secrets. Never commit these, and never bundle them into a build.
+.env
+.env.*
+!.env.example

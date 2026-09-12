@@ -136,6 +136,16 @@ if you override it, for example `$env:DATA_DIR = 'D:\ChessLibrary'` before launc
   you close last, or tab one if several are open when the app exits.
 - Annotations are saved into the game as you type them; there is no Keep button. **Save
   game** still writes the PGN to disk.
+- Arrows and circles belong to the move you drew them on. Step away and back and they
+  return; the move list marks any move carrying a note or a drawing. They are written into
+  the PGN as `[%cal]` and `[%csl]`, the same commands lichess uses, so they survive a round
+  trip and open correctly elsewhere. **Clear arrows** clears that move's drawings.
+- A game's opening name comes from the library index when the PGN file has no `[Opening]`
+  tag of its own, so the analysis board and the database agree and the Study tab's teacher
+  links work. Saving the game writes the tag into the PGN.
+- **Library** and **History** read the position index. Until a collection is indexed they
+  say so and offer to index the open game's collection there and then, rather than looking
+  broken. **Game tags** lists the tags a game already has.
 - PGN comment commands are read rather than shown as noise. `{[%evp from,to,cp,cp,...]}`
   — lichess's engine evaluation for every ply of the main line — appears as a score beside
   each move instead of a wall of numbers in your notes, and a per-move `[%eval]` is used
@@ -145,6 +155,13 @@ if you override it, for example `$env:DATA_DIR = 'D:\ChessLibrary'` before launc
 - Numeric annotation glyphs are shown as symbols: `$1`–`$6` as `!` `?` `!!` `??` `!?` `?!`,
   and the standard positional set (`$10` `=`, `$14`–`$19` `⩲ ⩱ ± ∓ +− −+`, `$140` `∆`, and
   the rest) rather than raw `$n`.
+- **Optional AI note.** Copy `.env.example` to `.env` and set `GEMINI_API_KEY` to add a
+  short, generated note about the game at the bottom of the Facts tab, below the sourced
+  links. It is labelled as generated, because that is what it is: prose from a language
+  model, not a source, and capable of being wrong. Everything else in the tab works
+  without a key, and `.env` is gitignored and is not in `caissa.spec`'s bundle list, so no
+  key is carried into a build. Dates, rounds and tournaments are *not* asked of the model
+  — they are already in the PGN's own tags, where they are facts rather than recollection.
 - The position context panel has a **Facts** tab: background reading about the game from
   Wikipedia, grouped by what each article is actually about — the players, the event and
   place, and anything a search for both players turns up, which is offered as *possibly*
@@ -185,9 +202,13 @@ if you override it, for example `$env:DATA_DIR = 'D:\ChessLibrary'` before launc
   is stored with your library.
 - **Settings → Storage location → Show in folder** opens the library folder in your file
   manager. It needs the desktop app; browser launches show the path but cannot open it.
-- The database's opening column shows the ECO code beside the opening name from the PGN.
-  When a game carries a code but no name, the code's volume is shown instead (A flank,
-  B semi-open, C open and French, D closed and semi-closed, E Indian).
+- The database's opening column shows the ECO code beside the opening's name. A PGN that
+  names its own opening is trusted; one carrying only a code is named from the moves it
+  actually played, against lichess's CC0 opening data (`data/openings.eco.json`, rebuilt
+  with `py tools/fetch_openings.py`). Matching on position rather than code means a game
+  gets the specific line — *King's Indian Defense: Sämisch Variation*, not *E86* or
+  *Indian defences* — and still lands correctly when it transposes. **Name openings** on
+  the database page backfills games imported before this existed.
 
 ## Where things live
 
@@ -224,6 +245,8 @@ tests/                see below
 
 ```powershell
 py -m unittest discover -s tests -p "test_*.py"    # backend regressions, no network
+py tools/build_exe.py                              # rebuild dist/Caissa/Caissa.exe
+py tools/build_exe.py --clean                      # ...from scratch
 powershell -File tests\run.ps1                     # chess engine perft + SAN + data validity
 ```
 
@@ -273,6 +296,8 @@ Bundling Stockfish (GPLv3) and the cburnett piece set (GPL) makes this applicati
 - [Stockfish](https://github.com/official-stockfish/Stockfish) — engine
 - [lichess](https://lichess.org) — piece distribution, game export API, tablebase;
   board interactions informed by [Chessground](https://github.com/lichess-org/chessground)
+- Opening names and lines: [lichess chess-openings](https://github.com/lichess-org/chess-openings),
+  CC0 public domain.
 - Piece sets are credited one by one in `assets/piece/CREDITS.md`, alongside the upstream
   `assets/piece/LICHESS-COPYING.md` and the bundled license texts.
   `py tools/fetch_pieces.py` refreshes them. Two carry conditions worth knowing before

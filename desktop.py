@@ -23,6 +23,8 @@ from http.server import ThreadingHTTPServer
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, ROOT)
+from backend import dotenv                      # noqa: E402
+dotenv.load()
 
 APP_NAME = "Caissa"
 

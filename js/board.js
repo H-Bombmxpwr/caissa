@@ -276,6 +276,12 @@
       this.shapes.push(from === to ? { square: from, brand: brand } : { from: from, to: to, brand: brand });
     }
     this._renderShapes();
+    this._shapesChanged();
+  };
+
+  /* Only the user's own edits report back; setShapes() is the app talking to the board. */
+  Board.prototype._shapesChanged = function () {
+    if (this.opts.onShapes) this.opts.onShapes(this.shapes.slice());
   };
 
   Board.prototype.setHighlights = function (map, opts) {
@@ -438,7 +444,7 @@
       const key = self._keyAt(e);
       if (!key) return;
       e.preventDefault();
-      if (!self.selected && self.shapes.length) { self.shapes = []; self._renderShapes(); }
+      if (!self.selected && self.shapes.length) { self.shapes = []; self._renderShapes(); self._shapesChanged(); }
 
       if (self.selected && self.selected !== key && self._destsFrom(self.selected).indexOf(key) > -1) {
         self._tryMove(self.selected, key);

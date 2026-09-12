@@ -90,6 +90,18 @@
   // range. Left alone it reads as noise in the notes, so the commands are lifted out of
   // the comment text, shown beside the moves they belong to, and put back by serialize().
   const PGN_COMMAND=/\[%(\w+)\s*([^\]]*)\]/g;
+  // chessground's own colour letters, the same ones lichess writes into [%cal]/[%csl].
+  const SHAPE_BRAND={G:'green',R:'red',Y:'yellow',B:'blue'};
+  const SHAPE_LETTER={green:'G',red:'R',yellow:'Y',blue:'B'};
+  function shapeCommands(node){
+    const shapes=node.shapes||[];
+    const arrows=shapes.filter(s=>s.from&&s.to).map(s=>(SHAPE_LETTER[s.brand]||'G')+s.from+s.to);
+    const circles=shapes.filter(s=>s.square).map(s=>(SHAPE_LETTER[s.brand]||'G')+s.square);
+    const out=[];
+    if(arrows.length)out.push('[%cal '+arrows.join(',')+']');
+    if(circles.length)out.push('[%csl '+circles.join(',')+']');
+    return out;
+  }
   const NAG_SYMBOLS={$1:'!',$2:'?',$3:'!!',$4:'??',$5:'!?',$6:'?!',$7:'□',$10:'=',$11:'=',$12:'=',
     $13:'∞',$14:'⩲',$15:'⩱',$16:'±',$17:'∓',$18:'+−',$19:'−+',
     $22:'⊙',$23:'⊙',$32:'⟳',$33:'⟳',$36:'→',$37:'→',$40:'↑',$41:'↑',
@@ -102,14 +114,24 @@
       if(!node.comment)continue;
       const kept=[];
       const text=node.comment.replace(PGN_COMMAND,(whole,name,body)=>{
-        kept.push(whole);
         const lower=name.toLowerCase();
+        if(lower!=='cal'&&lower!=='csl')kept.push(whole);
         if(lower==='evp'){
           const numbers=body.split(',').map(v=>parseInt(v,10));
           const from=numbers[0],to=numbers[1];
           if(Number.isFinite(from)&&Number.isFinite(to))
             for(let i=2;i<numbers.length&&from+i-2<=to;i++)
               if(Number.isFinite(numbers[i]))evals[from+i-2]={cp:numbers[i]};
+        } else if(lower==='cal'||lower==='csl'){
+          // Held as shapes rather than text, so editing them rewrites the command.
+          const arrow=lower==='cal';
+          const found=body.split(',').map(token=>{
+            const match=(arrow?/^([GRYB])([a-h][1-8])([a-h][1-8])$/:/^([GRYB])([a-h][1-8])$/).exec(token.trim());
+            if(!match)return null;
+            return arrow?{from:match[2],to:match[3],brand:SHAPE_BRAND[match[1]]}:{square:match[2],brand:SHAPE_BRAND[match[1]]};
+          }).filter(Boolean);
+          if(found.length)node.shapes=(node.shapes||[]).concat(found);
+          return ' ';                        // not kept in commands: shapeCommands rebuilds it
         } else if(lower==='eval'){
           const mate=/^#(-?\d+)/.exec(body.trim());
           // A per-move [%eval] belongs to this node wherever it sits, variations included.
@@ -342,7 +364,7 @@
   async function savePrefs() {applyPrefs();await api('settings/appearance',{value:JSON.stringify(state.prefs)},'PUT');}
   function serialize(parsed) {
     // Harvested commands ride back into the same comment they were lifted from.
-    function comment(n){const body=[...(n.commands||[]),n.comment||''].join(' ').trim();
+    function comment(n){const body=[...shapeCommands(n),...(n.commands||[]),n.comment||''].join(' ').trim();
       return (n.nags.length?' '+n.nags.join(' '):'')+(body?' {'+body.replace(/[{}]/g,'')+'}':'');}
     function token(n){const fen=n.parent.fenAfter.split(' ');return fen[5]+(fen[1]==='w'?'. ':'... ')+n.san+comment(n);}
     function branch(parent){if(!parent.children.length)return '';const first=parent.children[0];return token(first)+' '+parent.children.slice(1).map(n=>'('+token(n)+' '+branch(n)+')').join(' ')+' '+branch(first);}
@@ -356,6 +378,10 @@
     // A tab already holding work of its own steps aside; an untouched one is reused.
     const current=activeBoard();stashBoard();
     if(current.selected||current.dirty||current.parsed?.root.children.length)state.boards.splice(++state.boardIndex,0,makeBoard());
+    // The opening is named in the library index; the PGN on disk often has no tag for it,
+    // and without this the analysis board would believe the game has no opening at all.
+    if(!parsed.headers.Opening&&game.opening)parsed.headers.Opening=game.opening;
+    if(!parsed.headers.ECO&&game.eco)parsed.headers.ECO=game.eco;
     state.selected=game;state.parsed=parsed;state.node=parsed.root;state.dirty=false;stashBoard();
     await go('analysis');
   }
@@ -426,7 +452,7 @@
   }
   async function database() {
     content.append(heading('Your chess, collected','Game database','A home for every game and every idea worth keeping.',[
-      button('New study',()=>{if(state.dirty&&!confirm('Discard unsaved analysis?'))return;newGame();go('analysis');}),button('＋ Import games',()=>go('imports'),'primary')]));
+      button('New study',()=>{if(state.dirty&&!confirm('Discard unsaved analysis?'))return;newGame();go('analysis');}),button('Name openings',async()=>{const r=await api('openings/classify',{});App.toast(r.checked?r.named+' of '+r.checked+' unnamed games identified':'Every game already names its opening',5000);if(r.named)await go('database');}),button('＋ Import games',()=>go('imports'),'primary')]));
     const statGrid=h('div.stat-grid');content.append(statGrid);
     // The tiles are counts of the whole library, not of the current filter, so they have
     // to be re-read whenever the library itself changes rather than on every table load.
@@ -504,7 +530,8 @@
     panel('notation','Notation',h('div',[moves,h('div.editor',[field('Position comment',comment),nag,h('div.toolbar',[
       button('Remove branch',()=>{const n=state.node;if(!n.parent)return;if(!confirm('Remove this move and everything following it in this branch?'))return;n.parent.children=n.parent.children.filter(c=>c!==n);state.node=n.parent;markDirty();render();})])])]),[h('label.toolbar',[rowsBox,'One move per line'])]);
     panel('engine','Stockfish · local analysis',h('div',[h('div.filters',[h('label.toolbar',[liveBox,'Live analysis']),field('Lines',pv),button('Analyze',evaluate),h('label.toolbar',[arrows,'Best move arrows']),h('label.toolbar',[colorLines,'Color variations'])]),resources,engineBody]),[button('Annotate game',annotate)]);
-    panel('tags','Game tags',h('div.card-pad',[button('Edit tags',editTags),button('Delete game',deleteGame,'danger')]));
+    const tagsBody=h('div.tags-list');
+    panel('tags','Game tags',h('div.card-pad',[tagsBody,h('div.toolbar',[button('Edit tags',editTags),button('Delete game',deleteGame,'danger')])]));
     panel('context','Position context',h('div',[contextTabs,contextBody]));
     panel('tablebase','Endgame tablebase',h('div',[h('label.toolbar.card-pad',[tablebaseToggle,'Show exact endgame results (online)']),tablebaseBody]));
     const tablebaseCard=built.tablebase.node;
@@ -512,7 +539,7 @@
     const splitter=h('div.dock-splitter',{title:'Drag to divide the two columns'});
     const grid=h('div.analysis-grid',[h('div.analysis-board',[
       h('div.player-strip',[h('b',{text:parsed.headers.Black||'Black'}),h('span.muted',{text:parsed.headers.BlackElo||''})]),holder,
-      h('div.player-strip',[h('b',{text:parsed.headers.White||'White'}),h('span.muted',{text:parsed.headers.WhiteElo||''})]),controls,moveForm,h('div.toolbar',[button('Copy FEN',async()=>{await navigator.clipboard.writeText(state.node.fenAfter);App.toast('FEN copied');}),button('Clear arrows',()=>board.setShapes([]))]),h('p.muted',{text:'Wheel: moves · Right-drag or Shift-drag: arrow · Shift or Ctrl: red · Alt: blue · both: yellow · Click the board to clear'}),fen]),
+      h('div.player-strip',[h('b',{text:parsed.headers.White||'White'}),h('span.muted',{text:parsed.headers.WhiteElo||''})]),controls,moveForm,h('div.toolbar',[button('Copy FEN',async()=>{await navigator.clipboard.writeText(state.node.fenAfter);App.toast('FEN copied');}),button('Clear arrows',()=>{board.setShapes([]);if(state.node.shapes){state.node.shapes=undefined;markDirty();renderMoves();}})]),h('p.muted',{text:'Wheel: moves · Right-drag or Shift-drag: arrow · Shift or Ctrl: red · Alt: blue · both: yellow · Click the board to clear'}),fen]),
       dockMain,splitter,dockSide]);
     content.append(grid);
     function panelControls(id){
@@ -570,7 +597,12 @@
       const end=()=>{splitter.removeEventListener('pointermove',move);splitter.removeEventListener('pointerup',end);splitter.removeEventListener('pointercancel',end);};
       splitter.addEventListener('pointermove',move);splitter.addEventListener('pointerup',end);splitter.addEventListener('pointercancel',end);});
     applyLayout();
-    board=new Board(holder,{viewOnly:false});applyPrefs();resizeBoard(holder);
+    board=new Board(holder,{viewOnly:false,onShapes:shapes=>{
+      const node=state.node;
+      if(JSON.stringify(node.shapes||[])===JSON.stringify(shapes))return;
+      node.shapes=shapes.length?shapes:undefined;
+      markDirty();renderMoves();
+    }});applyPrefs();resizeBoard(holder);
     let wheelAt=0;holder.addEventListener('wheel',e=>{e.preventDefault();if(!e.deltaY||Date.now()-wheelAt<100)return;wheelAt=Date.now();jump(e.deltaY>0?(state.node.children[0]||state.node):(state.node.parent||state.node));},{passive:false});
     pv.addEventListener('change',()=>{if(live)evaluate();});
     function markDirty(){state.dirty=true;activeBoard().dirty=true;saveBtn.textContent='Save changes *';}
@@ -593,7 +625,7 @@
       App.toast(added?added+' moves added as a variation':'That line was already on the board');
       jump(first);                           // land on its first move so the arrows walk it
     }
-    function jump(n){if(n===state.node)return;state.node=n;board.setShapes([]);render();}
+    function jump(n){if(n===state.node)return;state.node=n;board.setShapes(n.shapes||[]);render();}
     function play(input){const g=new Chess(state.node.fenAfter);const moved=g.move(input);if(!moved)throw new Error('That move is not legal in this position.');let n=state.node.children.find(c=>c.san===moved.san);if(!n){n={san:moved.san,move:moved,parent:state.node,children:[],fenAfter:g.fen(),comment:null,nags:[],ply:state.node.ply+1};state.node.children.push(n);markDirty();}jump(n);}
     // Two notations over the same tree: a running paragraph, or one row per move
     // number with the variations broken out between the rows. ctx carries the row
@@ -606,15 +638,17 @@
         const score=n.eval,label=evalLabel(score);
         const side=!label?'':(score.mate!=null?(score.mate<0?'.black-better':'.white-better'):score.cp>0?'.white-better':score.cp<0?'.black-better':'');
         const chip=label?h('small.move-eval'+side,{text:label,title:'Engine evaluation stored in the PGN'}):null;
-        if(rows)into.append(h('span.move-cell',[move,chip]));
-        else {into.append(move);if(chip)into.append(chip);}
+        const carries=(n.comment&&n.comment.trim())||(n.shapes&&n.shapes.length);
+        const mark=carries?h('span.move-mark',{text:'\u25cf',title:n.shapes&&n.shapes.length?'Has notes or drawings':'Has a note'}):null;
+        if(rows)into.append(h('span.move-cell',[move,mark,chip]));
+        else {into.append(move);if(mark)into.append(mark);if(chip)into.append(chip);}
         if(n.comment){if(rows){target.append(h('div.move-note',{text:n.comment}));ctx.row=null;}else target.append(h('span.move-comment',{text:n.comment}));}}
       function walk(parent,target,ctx){if(!parent.children.length)return;const n=parent.children[0];place(n,target,ctx);
         for(const alt of parent.children.slice(1)){const sub=h('div.variation'),branch={row:null,number:null};place(alt,sub,branch);walk(alt,sub,branch);target.append(sub);ctx.row=null;}
         walk(n,target,ctx);}
       walk(parsed.root,moves,{row:null,number:null});
       if(!parsed.root.children.length)moves.append(h('p.muted',{text:'Move a piece or enter SAN to begin. Alternative moves become saved variations.'}));}
-    function render(){const g=new Chess(state.node.fenAfter);board.setPosition(g);board.setLastMove(state.node.move?[state.node.move.from,state.node.move.to]:null);board.setMovable({color:g.turnColor(),dests:g.destinationsMap(),onMove:(from,to)=>{const p=g.get(from);if(p?.type==='p'&&/[18]$/.test(to)){modal('Promote pawn',(body,close)=>body.append(h('div.toolbar',['q','r','b','n'].map(promo=>button(promo.toUpperCase(),()=>{close();play({from,to,promotion:promo});})))));}else play({from,to});}});comment.value=state.node.comment||'';nag.value=state.node.nags[0]||'';fen.textContent=state.node.fenAfter;latestLines=[];drawBest();renderTablebase();renderMoves();renderContext();clearTimeout(liveTimer);if(live)liveTimer=setTimeout(evaluate,350);}
+    function render(){const g=new Chess(state.node.fenAfter);board.setPosition(g);board.setLastMove(state.node.move?[state.node.move.from,state.node.move.to]:null);board.setMovable({color:g.turnColor(),dests:g.destinationsMap(),onMove:(from,to)=>{const p=g.get(from);if(p?.type==='p'&&/[18]$/.test(to)){modal('Promote pawn',(body,close)=>body.append(h('div.toolbar',['q','r','b','n'].map(promo=>button(promo.toUpperCase(),()=>{close();play({from,to,promotion:promo});})))));}else play({from,to});}});comment.value=state.node.comment||'';nag.value=state.node.nags[0]||'';fen.textContent=state.node.fenAfter;latestLines=[];board.setShapes(state.node.shapes||[]);drawBest();renderTablebase();renderMoves();renderContext();clearTimeout(liveTimer);if(live)liveTimer=setTimeout(evaluate,350);}
     // One brand per engine line, so a line's arrow, its border and its score all
     // carry the same colour. Map before filtering: a line with no PV still owns its slot.
     function brandFor(i){return ['green','blue','red','yellow'][i%4];}
@@ -652,20 +686,55 @@
             contextBody.append(h('div.context-item',[link(item.title,item.url),h('p.muted',{text:item.extract})]));
         }
         if(data.message)contextBody.append(h('p',{text:data.message}));
+        if(data.note)contextBody.append(h('div.ai-note',[
+          h('div.eyebrow',{text:'AI note \u00b7 '+data.note.model}),
+          h('p',{text:data.note.text}),
+          h('p.muted',{text:'Written by a language model from this game\u2019s tags. Unlike the links above it is not a source, and it can be wrong \u2014 check anything you mean to rely on.'})]));
         contextBody.append(h('p.muted',{text:data.cached
           ?'Kept from an earlier lookup, so this reads offline too.'
           :'Summaries are Wikipedia\u2019s words, matched from this game\u2019s tags. Follow a link before relying on it.'}));
       }catch(err){if(id===contextRequest)contextBody.replaceChildren(h('p.error-message',{text:err.message}));}
     }
+    // Offer the indexing this game's own collection needs, rather than sending the
+    // reader off to find the button on another page.
+    function indexButton(){
+      const collection=state.selected&&(state.selected.collection_id||state.selected.collection);
+      if(!collection)return h('p.muted',{text:'Open a saved game, then index its collection from Study folders.'});
+      const status=h('p.status-message');
+      const start=button('Index this collection now',async()=>{
+        await api('study/index',{collection});
+        status.textContent='Indexing started\u2026';
+        clearInterval(poll);
+        poll=setInterval(act(async()=>{
+          const state_=await api('study/index');
+          status.textContent=state_.running?`Indexing ${state_.collection}: ${state_.done} / ${state_.total} games`
+            :`Indexed ${state_.done} games. Reopen this tab to see the history.`;
+          if(!state_.running){clearInterval(poll);renderContext();}
+        }),700);
+      },'primary');
+      return h('div',[start,status]);
+    }
     async function renderContext(){const id=++contextRequest,position=state.node.fenAfter;contextTabs.querySelectorAll('button').forEach(b=>b.classList.toggle('active',b.textContent===state.context));if(state.context==='Facts')return renderFacts(id);contextBody.replaceChildren(h('p.muted',{text:'Finding connections…'}));try{const data=await api('study/position?'+new URLSearchParams({fen:position}));if(id!==contextRequest||state.view!=='analysis')return;contextBody.replaceChildren();
       if(state.context==='Library'){contextBody.append(h('p.muted',{text:data.indexed_games.toLocaleString()+' games position-indexed · first 24 plies'}));if(!data.moves.length)contextBody.append(h('p',{text:'No indexed continuations here. Index a collection from Study folders.'}));for(const m of data.moves)contextBody.append(h('div.context-item',[button(m.san,()=>play(m.san)),h('span.muted',{text:'  '+m.games+' games · '+m.white+' / '+m.draws+' / '+m.black})]));for(const g of data.games.slice(0,12))contextBody.append(h('div.context-item',[button(g.white+' — '+g.black,()=>openGame(g.id)),h('div.muted',{text:g.date+' · '+g.result})]));}
+      if(!data.indexed_games&&(state.context==='History'||state.context==='Library')){
+        contextBody.append(h('div.eyebrow',{text:'Nothing indexed yet'}),
+          h('p',{text:'Library and History read a position index, and none has been built. Indexing walks a collection\u2019s games and records every position in them.'}),
+          indexButton());
+        return;
+      }
       if(state.context==='History'){const earliest=data.games.find(g=>g.date&&!g.date.startsWith('0000'));contextBody.append(h('div.eyebrow',{text:'First seen in your indexed library'}),h('h3',{text:earliest?earliest.white+' — '+earliest.black:'No dated games indexed'}),h('p.muted',{text:earliest?earliest.event+' · '+earliest.date:'Import historical games and index their collection to discover provenance.'}));if(earliest)contextBody.append(button('Open earliest game',()=>openGame(earliest.id)));const max=Math.max(1,...data.decades.map(d=>d.games));for(const d of data.decades)contextBody.append(h('div.timeline-bar',[h('span',{text:d.decade+'s'}),h('i',{style:{width:(d.games/max*110)+'px'}}),h('span',{text:d.games})]));contextBody.append(h('p.muted',{text:'Dates and counts come from your indexed PGNs; this is not a claim of the first game ever played.'}));}
       if(state.context==='Study'){contextBody.append(h('div.eyebrow',{text:'Your position notebook'}),button('＋ Pin a link or note',()=>pinDialog(position,renderContext)));for(const pin of data.pins)contextBody.append(h('div.context-item',[pin.url?link(pin.title,pin.url):h('b',{text:pin.title}),h('p.muted',{text:pin.note}),button('Remove',async()=>{await api('study/pins/'+pin.id,null,'DELETE');renderContext();})]));const opening=parsed.headers.Opening;contextBody.append(h('div.divider'),h('h3',{text:'Free study material'}));if(opening)contextBody.append(link('Wikipedia: '+opening,'https://en.wikipedia.org/wiki/'+encodeURIComponent(opening.split(':')[0].replace(/ /g,'_'))));const path=PGN.pathTo(state.node).map((n,i)=>((i%2===0?Math.floor(i/2)+1+'.':Math.floor(i/2)+1+'...')+n.san));contextBody.append(button('Find opening references',async()=>{const refs=await api('literature?'+new URLSearchParams({moves:JSON.stringify(PGN.pathTo(state.node).map(n=>n.san)),opening:opening||'',eco:parsed.headers.ECO||''}));const box=h('div');for(const ref of refs.links)box.append(h('div.context-item',[link(ref.title,ref.url)]));if(refs.message)box.append(h('p.muted',{text:refs.message}));contextBody.append(box);}));contextBody.append(h('p.muted',{text:'Online references need a connection. Your saved notes and PGNs are available offline.'}));}
     }catch(err){contextBody.replaceChildren(h('p.error-message',{text:err.message}));}}
     async function annotate(){await api('engine/annotate',{game_id:state.selected?.id,positions:[parsed.root,...PGN.mainline(parsed.root)].map(n=>({ply:n.ply,fen:n.fenAfter,san:n.san})),movetime:200});clearInterval(poll);poll=setInterval(act(async()=>{const status=await api('engine/annotate');engineBody.replaceChildren(h('p.muted',{style:{padding:'16px'},text:`Annotating ${status.done} / ${status.total} positions…`}),button('Stop annotation',()=>api('engine/stop',{})));if(!status.running){clearInterval(poll);if(status.error)throw new Error(status.error);const nodes=[parsed.root,...PGN.mainline(parsed.root)];status.results.forEach((r,i)=>{const n=nodes[i];if(!n)return;n.comment=((n.comment||'')+' '+(r.cp!==null?'[%eval '+(r.cp/100).toFixed(2)+']':'')).trim();if(r.played_judgment&&nodes[i+1])nodes[i+1].nags=[{'blunder':'$4','mistake':'$2','inaccuracy':'$6'}[r.played_judgment]];});markDirty();render();engineBody.replaceChildren(h('p.muted',{style:{padding:'16px'},text:'Annotation complete. Save changes to keep these evaluations in your PGN.'}));}}),700);}
-    async function editTags(){if(!state.selected)throw new Error('Save this game first.');const data=await api('study/tags?game_id='+state.selected.id);modal('Organize this game',(body,close)=>{const input=h('input',{value:data.tags.join(', '),placeholder:'model game, tournament prep, endgame'});body.append(field('Tags, separated by commas',input),h('div.dialog-actions',[button('Cancel',close),button('Save tags',async()=>{await api('study/tags',{game_id:state.selected.id,tags:input.value.split(',')},'PUT');close();},'primary')]));});}
+    async function renderTags(){
+      if(!state.selected){tagsBody.replaceChildren(h('p.muted',{text:'Save this game to the library before tagging it.'}));return;}
+      try{const data=await api('study/tags?game_id='+state.selected.id);
+        tagsBody.replaceChildren(...(data.tags.length?data.tags.map(t=>h('span.tag-chip',{text:t})):[h('p.muted',{text:'No tags yet.'})]));
+      }catch(err){tagsBody.replaceChildren(h('p.error-message',{text:err.message}));}
+    }
+    async function editTags(){if(!state.selected)throw new Error('Save this game first.');const data=await api('study/tags?game_id='+state.selected.id);modal('Organize this game',(body,close)=>{const input=h('input',{value:data.tags.join(', '),placeholder:'model game, tournament prep, endgame'});body.append(field('Tags, separated by commas',input),h('div.dialog-actions',[button('Cancel',close),button('Save tags',async()=>{const saved=input.value.split(',').map(t=>t.trim()).filter(Boolean);await api('study/tags',{game_id:state.selected.id,tags:saved},'PUT');close();App.toast(saved.length?'Tags saved: '+saved.join(', '):'Tags cleared');await renderTags();},'primary')]));});}
     async function deleteGame(){if(!state.selected)throw new Error('This game has not been saved.');if(confirm('Remove this game from your library index?')){await api('games/'+state.selected.id,null,'DELETE');newGame();go('database');}}
-    render();
+    render();renderTags();
     const key=e=>{if(state.view!=='analysis'||/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)||document.querySelector('dialog[open]'))return;if(e.key==='ArrowLeft'){e.preventDefault();jump(state.node.parent||state.node);}if(e.key==='ArrowRight'){e.preventDefault();jump(state.node.children[0]||state.node);}};
     document.addEventListener('keydown',key);const oldGoCleanup=()=>{closed=true;++evalRequest;++tbRequest;clearTimeout(livePoll);document.removeEventListener('keydown',key);api('engine/live',null,'DELETE').catch(()=>{});};state.analysisCleanup=oldGoCleanup;
   }
