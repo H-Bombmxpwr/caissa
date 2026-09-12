@@ -1079,14 +1079,73 @@
   // A lichess personal access token, kept in the local library and never handed back
   // out to the page. It is what makes private studies reachable: without study:read
   // lichess will not even admit an unlisted study exists.
+  // Games arrive on their own once this is on: the server asks lichess every so often
+  // what has been played since it last looked, and files the answer. Switching it on
+  // starts from now — nobody wants a decade of blitz for ticking a box — so the manual
+  // importer is still how you bring in history.
+  function autoImportControls(){
+    const enabled=h('input',{type:'checkbox'});
+    const every=select([['5','Every 5 minutes'],['15','Every 15 minutes'],['30','Every half hour'],
+                        ['60','Every hour'],['180','Every three hours'],['720','Twice a day']],'15');
+    const collection=h('input',{value:'My lichess games'});
+    const most=select([['10','10'],['50','50'],['100','100'],['300','300']],'50');
+    const rated=h('input',{type:'checkbox'});
+    const indexAfter=h('input',{type:'checkbox'});
+    const report=h('p.status-message',{role:'status'});
+    const options=h('div',{hidden:true},[
+      h('div.toolbar',[field('How often',every),field('Most games per check',most)]),
+      field('Collection',collection),
+      h('label.toolbar',[rated,'Rated games only']),
+      h('label.toolbar',[indexAfter,'Index positions after each import, so new games are searchable by position']),
+    ]);
+    const checkNow=button('Check lichess now',async()=>{
+      report.textContent='Asking lichess…';
+      const out=await api('lichess/autoimport',{},'POST');
+      App.toast(out.added?(out.added===1?'1 new game imported':out.added+' new games imported')
+                         :'Nothing new since the last check');
+      show(out.status);
+    });
+    const root=h('div.autoimport',[
+      h('div.divider'),h('div.eyebrow',{text:'Automatic imports'}),
+      h('label.toolbar',[enabled,'Import my games as they are played']),
+      options,h('div.toolbar',[checkNow]),report]);
+    function ago(stamp){
+      if(!stamp)return 'not yet';
+      const seconds=Math.max(0,Math.round(Date.now()/1000-stamp));
+      if(seconds<90)return 'just now';
+      if(seconds<5400)return Math.round(seconds/60)+' minutes ago';
+      return Math.round(seconds/3600)+' hours ago';
+    }
+    function show(data){
+      enabled.checked=!!data.enabled;every.value=String(data.interval_minutes);
+      collection.value=data.collection;most.value=String(data.max_games);
+      rated.checked=!!data.rated_only;indexAfter.checked=!!data.index_after;
+      options.hidden=!data.enabled;
+      const brought=data.total_added===1?'1 game':data.total_added+' games';
+      report.textContent=data.last_error?'Last check failed: '+data.last_error
+        :data.enabled?'Watching '+(data.user||'your account')+' · last checked '+ago(data.last_checked)
+          +' · '+brought+' imported since this app started'
+        :'Off. Your games arrive only when you import them by hand.';
+    }
+    async function save(changes){show(await api('lichess/autoimport',changes,'PUT'));}
+    enabled.addEventListener('change',act(()=>save({enabled:enabled.checked})));
+    every.addEventListener('change',act(()=>save({interval_minutes:Number(every.value)})));
+    most.addEventListener('change',act(()=>save({max_games:Number(most.value)})));
+    collection.addEventListener('change',act(()=>save({collection:collection.value})));
+    rated.addEventListener('change',act(()=>save({rated_only:rated.checked})));
+    indexAfter.addEventListener('change',act(()=>save({index_after:indexAfter.checked})));
+    api('lichess/autoimport').then(show).catch(err=>{report.textContent=err.message;});
+    return root;
+  }
   async function lichessAccount(){
     const status=h('p.status-message',{role:'status'});
     const detail=h('p.muted');
     const token=h('input',{type:'password',placeholder:'lip_… paste your token here',autocomplete:'off',spellcheck:false});
     const actions=h('div.toolbar');
+    const watcher=h('div');
     const body=h('div.card-pad',[
       h('p.muted',{text:'Connect your lichess account to import your own games and your private or unlisted studies. The token is stored in your local library and is never sent anywhere but lichess.'}),
-      detail,field('Personal access token',token),actions,status]);
+      detail,field('Personal access token',token),actions,status,watcher]);
     async function refresh(){
       const data=await api('lichess/account');
       actions.replaceChildren();
@@ -1099,7 +1158,9 @@
         actions.append(button('Import my studies',()=>lichessStudies()),
           button('Import my games',()=>go('imports')),
           button('Forget this token',async()=>{await api('lichess/account',null,'DELETE');await refresh();App.toast('The lichess token was removed from your library.');},'danger'));
+        watcher.replaceChildren(autoImportControls());
       }else{
+        watcher.replaceChildren();
         detail.replaceChildren(h('span',{text:'Not connected. '}),link('Create a token with the right permissions',data.token_url));
         status.textContent=data.error?'The stored token was rejected: '+data.error:'';
         actions.append(button('Connect account',async()=>{

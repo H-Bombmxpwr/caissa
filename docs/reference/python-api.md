@@ -59,6 +59,13 @@ Generated from the backend's own docstrings, so it cannot drift from the code.
    :members:
 ```
 
+## Automatic imports
+
+```{eval-rst}
+.. automodule:: backend.autoimport
+   :members:
+```
+
 ## lichess client
 
 ```{eval-rst}

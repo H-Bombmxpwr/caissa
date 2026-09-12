@@ -13,6 +13,7 @@ import uuid
 import urllib.parse
 
 from . import lichess
+from .autoimport import AutoImport
 from .engine import AnnotationJob, Engine, EngineError, LiveAnalysis
 from .store import Library
 from .study import Study
@@ -46,6 +47,9 @@ class Api:
         self.engine = Engine()
         self.live = LiveAnalysis()
         self.annotation = AnnotationJob(self.engine, self.library)
+        # Watches the linked lichess account for new games. Off unless switched on, and
+        # started here so it survives the view that turned it on being navigated away from.
+        self.autoimport = AutoImport(self.library, self._lichess_token, self.study)
         self.import_lock = threading.Lock()
         self.delete_previews = {}
         # A starter collection for an empty library only. Re-creating one the user has
@@ -54,6 +58,7 @@ class Api:
             self.library.ensure_collection("My games")
         self.import_status = {'running': False, 'label': '', 'done': 0, 'total': 0,
                               'added': 0, 'duplicates': 0, 'skipped': 0, 'error': None, 'batch_id': None}
+        self.autoimport.apply()
 
     # ---------- dispatch ----------
 
@@ -717,11 +722,14 @@ class Api:
                 raise ApiError("Paste the personal access token from lichess.")
             details = self._lichess_call(lambda: lichess.account(token))
             self.library.setting("lichess_token", token)
+            self.autoimport.state["user"] = details.get("username")
+            self.autoimport.apply()
             details.update(connected=True, saved=True)
             return 200, details
 
         if action == "account" and method == "DELETE":
             self.library.setting("lichess_token", "")
+            self.autoimport.stop()
             return 200, {"connected": False, "forgotten": True}
 
         if action == "studies" and method == "GET":
@@ -736,6 +744,21 @@ class Api:
 
         if action == "studies" and method == "POST":
             return self._import_lichess_studies(body)
+
+        if action == "autoimport":
+            if method == "GET":
+                return 200, self.autoimport.status()
+            if method == "PUT":
+                if body.get("enabled") and not self._lichess_token():
+                    raise ApiError("Connect your lichess account before switching this on.", 401)
+                self.autoimport.save(body)
+                return 200, self.autoimport.status()
+            if method == "POST":
+                # An explicit "check now", which also works while the watcher is off.
+                result = self.autoimport.run_once()
+                if result.get("error"):
+                    raise ApiError(result["error"], 503)
+                return 200, dict(result, status=self.autoimport.status())
 
         raise ApiError("unsupported lichess request", 405)
 

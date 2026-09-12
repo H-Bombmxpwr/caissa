@@ -129,3 +129,5 @@ html{background:transparent}
 .study-pick input{flex:none}
 /* A game on more than one shelf says so in the list. */
 .multi-collection .collection-more{color:var(--accent,#315e48);font-weight:600}
+.autoimport{margin-top:4px}
+.autoimport .eyebrow{margin-bottom:10px}

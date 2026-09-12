@@ -36,6 +36,7 @@ api = Api(DATA_DIR)
 import atexit
 atexit.register(api.engine.stop)
 atexit.register(api.live.stop)
+atexit.register(api.autoimport.stop)
 
 
 class Handler(SimpleHTTPRequestHandler):

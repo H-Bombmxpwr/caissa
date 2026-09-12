@@ -267,6 +267,24 @@ study that cannot be read is reported by name without stopping the others, and t
 import is one undoable batch. See the
 [lichess guide](https://h-bombmxpwr.github.io/caissa/guide/lichess.html).
 
+### Games that import themselves
+
+**Import my games as they are played** puts new games into your library on their own: the
+server asks lichess, every 5 minutes to twice a day as you choose, what has been played
+since it last looked. Set the collection, cap how many a single check may bring in, limit
+it to rated games, and optionally index positions after each import so a game you just
+finished turns up under **Library** and **History** on the analysis board.
+
+Switching it on **starts from now** — nobody wants a decade of blitz for ticking a box —
+so history stays a deliberate act. Each check overlaps the last by ten minutes so a game
+that ended in the gap is still caught, and the repeat costs nothing because duplicates are
+recognised by lichess game id. A failed check does not move the window forward, so a
+dropped connection means the next check re-asks rather than skipping. Every run is an
+undoable batch listed under **Recent imports**. **Check lichess now** runs one on demand.
+
+The watcher stops when you switch it off, when you forget the token, and when the app
+closes; it never runs without a connected account.
+
 ## Online and offline use
 
 **Settings → Connection** shows the device's connection status and updates when it changes.
@@ -529,6 +547,7 @@ backend/
   api.py              JSON API routes
   hardware.py         core counts, CPU temperature and power draw, where published
   repertoire.py       a PGN move tree walked into flat, drillable repertoire lines
+  autoimport.py       watches a linked lichess account for newly played games
   chess.py            chess rules in Python (0x88, perft-verified)
   study.py            position index, pins, study folders on disk
   books.py            PDF library metadata and file storage
@@ -574,6 +593,7 @@ For the workbench interaction regressions (requires installed Microsoft Edge):
 .venv\Scripts\python -m pip install playwright
 .venv\Scripts\python tests\workbench_browser.py
 .venv\Scripts\python tests\sounds_browser.py
+.venv\Scripts\python tests\autoimport_browser.py
 .venv\Scripts\python tests\analysis_quality_browser.py
 ```
 

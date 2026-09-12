@@ -271,6 +271,15 @@ a `machine` object with `cores`, `cpu_percent`, `cpu_mhz`, memory, `temperature_
   - `/api/lichess/studies`
   - `{studies: [{id, name}], collection, kind, as_repertoire, name, color}` — a blank
     `collection` files each study under its own name
+* - `GET`
+  - `/api/lichess/autoimport`
+  - the game watcher's settings and what it last did
+* - `PUT`
+  - `/api/lichess/autoimport`
+  - `{enabled, interval_minutes, collection, max_games, rated_only, index_after}`
+* - `POST`
+  - `/api/lichess/autoimport`
+  - check lichess now, whether or not the watcher is running
 :::
 
 The token is never returned by any endpoint. `GET /api/settings/lichess_token` is

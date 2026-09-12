@@ -21,6 +21,8 @@ against a temporary one.
 | `test_analysis_quality.py` | annotation judgments |
 | `test_repertoire_and_kinds.py` | repertoire import, collection kinds, the lichess account, engine and sensor statistics |
 | `test_chessbase.py` | ChessBase encodings, tags, filters and sorts |
+| `test_collection_links.py` | games shelved in several collections, and the routes that manage them |
+| `test_autoimport.py` | the lichess game watcher: settings, windows, failures and teardown |
 
 ## The JavaScript rules engine
 
@@ -39,6 +41,7 @@ These drive a real Edge through Playwright:
 .venv\Scripts\python -m pip install playwright
 .venv\Scripts\python tests\workbench_browser.py
 .venv\Scripts\python tests\sounds_browser.py
+.venv\Scripts\python tests\autoimport_browser.py
 .venv\Scripts\python tests\analysis_quality_browser.py
 ```
 
@@ -46,6 +49,11 @@ These drive a real Edge through Playwright:
 shapes, panel layout and persistence, the live engine and its telemetry grid, the
 five-colour line palette, tablebase UI, annotation round-trips, import undo, filtered
 deletion, and the two smoke pages.
+
+`autoimport_browser.py` drives the auto-import card with lichess stubbed out: the card
+appears only once an account is connected, settings persist without a save button, a
+check really imports, a second check imports nothing, the run is undoable, and switching
+off — or forgetting the token — stops the watcher.
 
 `sounds_browser.py` checks the sound catalogue against what is actually on disk, that
 every file it claims is served as audio, that every event resolves to a real sample
