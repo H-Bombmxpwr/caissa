@@ -4,8 +4,13 @@
   const h = App.h;
   const state = {view:'database', collections:[], folders:[], assignments:[], offset:0, filters:{},
     selected:null, parsed:null, node:null, dirty:false, context:'Library', route:0, prefs:{}, rep:null};
+  // Light squares first, then dark. The last four are dark palettes; they stay light enough
+  // that the black pieces' outlines still read against the dark squares.
   const themes = {Sage:['#ecebd9','#73917c'], Walnut:['#f0d9b5','#b58863'], Slate:['#e3e7eb','#8293a2'],
-    Sand:['#f5e9d0','#b7a17b'], Forest:['#e1e4cd','#4e7560'], Rose:['#f1e0da','#ae8584']};
+    Sand:['#f5e9d0','#b7a17b'], Forest:['#e1e4cd','#4e7560'], Rose:['#f1e0da','#ae8584'],
+    Ocean:['#dbe6f0','#5a7fa3'], Maple:['#f6e0bf','#c08a4e'], Lilac:['#e9e5f2','#8a7cae'],
+    Coral:['#f7e3d8','#c07f66'], Midnight:['#6b7a91','#3a4759'], Graphite:['#787b7e','#474b4f'],
+    Pine:['#5c7767','#334739'], Espresso:['#7d6155','#4a362e']};
   const modules = [['database','▤','Database'],['analysis','♙','Analysis board'],['repertoire','♧','Repertoire'],
     ['masters','♜','Master games'],['imports','⇣','Online & imports'],['studies','▱','Study folders'],
     ['training','◉','Blindfold training'],['tactics','♞','Tactics'],['settings','⚙','Settings']];
@@ -63,9 +68,9 @@
     });
     const cancel=button('Cancel pending change',async()=>{await window.pywebview.api.cancel_storage_change();status.textContent='Storage change cancelled. Your current folder is unchanged.';cancel.hidden=true;selection.textContent='';use.disabled=true;});cancel.hidden=!info.pending;
     if(info.overridden){choose.disabled=true;use.disabled=true;status.textContent='DATA_DIR controls this launch. Remove that override to choose a folder here.';}
-    content.append(card('Storage location',h('div.card-pad',[field('Current storage folder',path),h('p.muted',{text:'Games, studies, repertoires, settings, trainer progress, and cached data stay together in this folder. Choose an empty folder; Caissa copies everything on the next launch and retains the original as a backup.'}),
+    content.append(h('div',{style:{marginBottom:'25px'}},[card('Storage location',h('div.card-pad',[field('Current storage folder',path),h('p.muted',{text:'Games, studies, repertoires, settings, trainer progress, and cached data stay together in this folder. Choose an empty folder; Caissa copies everything on the next launch and retains the original as a backup.'}),
       ...(!bridge?.storage_info?[h('p.muted',{text:'The native folder picker is available in the desktop app. Browser launches use the saved folder too.'})]:[]),
-      h('div.toolbar',[choose,use,cancel]),selection,status])));
+      h('div.toolbar',[choose,use,cancel]),selection,status]))]));
   }
   async function deleteMatching(reload){
     const data=await api('games/delete-preview',{filters:state.filters});
@@ -298,10 +303,9 @@
     const pieces=select([['classic','Classic · cburnett'],['outline','Crisp contrast'],['wood','Warm wood'],['slate','Soft graphite']],state.prefs.pieces||'classic',act(async()=>{state.prefs.pieces=pieces.value;await savePrefs();}));
     await storageSettings();
     const pieceSet=select([['cburnett','Cburnett'],['merida','Merida'],['chessnut','Chessnut']],state.prefs.pieceSet||'cburnett',act(async()=>{state.prefs.pieceSet=pieceSet.value;await savePrefs();}));
-    content.append(field('Piece set',pieceSet));
     const orientation=select([['w','White at the bottom'],['b','Black at the bottom']],state.prefs.orientation||'w',act(async()=>{state.prefs.orientation=orientation.value;await savePrefs();}));
     const coordinates=h('input',{type:'checkbox',checked:state.prefs.coordinates!==false,onchange:act(async()=>{state.prefs.coordinates=coordinates.checked;await savePrefs();})}),animate=h('input',{type:'checkbox',checked:state.prefs.animate!==false,onchange:act(async()=>{state.prefs.animate=animate.checked;await savePrefs();})});
-    content.append(h('div.settings-grid',[card('Board & pieces',h('div.card-pad',[field('Board palette',swatches),h('div.toolbar',[field('Light squares',light),field('Dark squares',dark)]),field('Dark theme',h('input',{type:'checkbox',checked:!!state.prefs.darkMode,onchange:act(async e=>{state.prefs.darkMode=e.target.checked;await savePrefs();})})),field('Piece treatment',pieces),field('Default orientation',orientation),field('Coordinates',coordinates),field('Animate moves',animate)])),card('Preview',h('div.card-pad',[holder,h('p.muted',{style:{marginTop:'20px'},text:'Your palette applies to analysis, previews, and all seven blindfold exercises.'})]))]));applyPrefs();}
+    content.append(h('div.settings-grid',[card('Board & pieces',h('div.card-pad',[field('Board palette',swatches),h('div.toolbar',[field('Light squares',light),field('Dark squares',dark)]),field('Dark theme',h('input',{type:'checkbox',checked:!!state.prefs.darkMode,onchange:act(async e=>{state.prefs.darkMode=e.target.checked;await savePrefs();})})),field('Piece set',pieceSet),field('Piece treatment',pieces),field('Default orientation',orientation),field('Coordinates',coordinates),field('Animate moves',animate)])),card('Preview',h('div.card-pad',[holder,h('p.muted',{style:{marginTop:'20px'},text:'Your palette applies to analysis, previews, and all seven blindfold exercises.'})]))]));applyPrefs();}
   document.addEventListener('DOMContentLoaded',async()=>{
     await App.persistenceReady;
     const initial=location.hash;const originalGo=go; // App boots first so the original trainer stays intact.

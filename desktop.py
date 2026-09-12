@@ -27,11 +27,17 @@ APP_NAME = "Caissa"
 
 
 class DesktopSettings:
-    """Native folder access is exposed only to the desktop window."""
+    """Native folder access is exposed only to the desktop window.
+
+    pywebview walks this object's public attributes to build window.pywebview.api,
+    so the window reference has to stay private: a public one sends that walk into
+    the WinForms control's .NET properties, which recurses without end and touches
+    the WebView2 controller off the UI thread before the page can finish loading.
+    """
     def __init__(self, data_dir, overridden=False):
         self.data_dir = data_dir
         self.overridden = overridden
-        self.window = None
+        self._window = None
         self.selected_folder = None
 
     def storage_info(self):
@@ -42,7 +48,7 @@ class DesktopSettings:
 
     def choose_storage_folder(self):
         import webview
-        result = self.window.create_file_dialog(webview.FileDialog.FOLDER, directory=self.data_dir)
+        result = self._window.create_file_dialog(webview.FileDialog.FOLDER, directory=self.data_dir)
         self.selected_folder = result[0] if result else None
         return self.selected_folder
 
@@ -150,7 +156,7 @@ def main():
                 background_color="#161512",
                 text_select=True,
             )
-            settings.window = window
+            settings._window = window
             start_args = {
                 "gui": None,
                 "private_mode": False,
