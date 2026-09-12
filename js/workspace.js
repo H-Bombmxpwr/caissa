@@ -232,14 +232,14 @@
       ...data.batches.filter(b=>b.games||b.undone).map(b=>h('div.context-item',[h('span',{text:b.label+' · '+new Date(b.created_at*1000).toLocaleString()+' · '+b.games+' games'}),
         ...(b.games?[button('Undo import',async()=>{if(!confirm('Remove the '+b.games+' games added by this import?'))return;await api('import/undo',{batch_id:b.id});await importHistory();})]:[h('span',{text:' · Undone'})])])),button('Refresh import history',importHistory));
   }
-  function resizeBoard(holder){
+  function resizeBoard(holder,preference='boardSize'){
     const handle=h('button.board-resize',{type:'button',text:'◢',title:'Drag to resize board','aria-label':'Resize board'});
     holder.append(handle);holder.style.position='relative';
-    const apply=width=>{const grid=holder.closest('.analysis-grid');const reserve=window.innerWidth>1400?550:window.innerWidth>950?300:0;const max=Math.max(260,Math.min(1000,grid.getBoundingClientRect().width-reserve));const size=Math.max(260,Math.min(max,width));grid.style.setProperty('--board-size',size+'px');};
-    if(state.prefs.boardSize)apply(state.prefs.boardSize);
+    const apply=width=>{const grid=holder.closest('.analysis-grid,.opening-grid');const reserve=window.innerWidth>1400?550:window.innerWidth>950?300:0;const max=Math.max(260,Math.min(1000,grid.getBoundingClientRect().width-reserve));const size=Math.max(260,Math.min(max,width));grid.style.setProperty('--board-size',size+'px');};
+    if(state.prefs[preference])apply(state.prefs[preference]);
     handle.addEventListener('pointerdown',e=>{e.preventDefault();handle.setPointerCapture(e.pointerId);const x=e.clientX,width=holder.getBoundingClientRect().width;
       const move=e=>apply(width+e.clientX-x);
-      const end=act(async()=>{handle.removeEventListener('pointermove',move);handle.removeEventListener('pointerup',end);handle.removeEventListener('pointercancel',end);state.prefs.boardSize=holder.getBoundingClientRect().width;await savePrefs();});
+      const end=act(async()=>{handle.removeEventListener('pointermove',move);handle.removeEventListener('pointerup',end);handle.removeEventListener('pointercancel',end);state.prefs[preference]=holder.getBoundingClientRect().width;await savePrefs();});
       handle.addEventListener('pointermove',move);handle.addEventListener('pointerup',end);handle.addEventListener('pointercancel',end);
     });
   }
@@ -871,7 +871,7 @@
     content.append(h('div.settings-grid',[card('Board & pieces',h('div.card-pad',[field('Board palette',swatches),h('div.toolbar',[field('Light squares',light),field('Dark squares',dark)]),field('Dark theme',h('input',{type:'checkbox',checked:!!state.prefs.darkMode,onchange:act(async e=>{state.prefs.darkMode=e.target.checked;await savePrefs();})})),field('Piece set',pieceSet),field('Piece treatment',treatments),field('Default orientation',orientation),field('Coordinates',coordinates),field('Animate moves and captures',animate),field('Animation duration',select([['100','Fast · 100 ms'],['200','Normal · 200 ms'],['350','Smooth · 350 ms'],['500','Slow · 500 ms']],String(state.prefs.animationMs||200),act(async e=>{state.prefs.animationMs=Number(e.target.value);await savePrefs();})))])),card('Preview',h('div.card-pad',[holder,h('p.muted',{style:{marginTop:'20px'},text:'Your palette applies to analysis, previews, and all seven blindfold exercises.'})]))]));applyPrefs();}
   document.addEventListener('DOMContentLoaded',async()=>{
     await App.persistenceReady;
-    LibraryTools.init({h,api,button,field,select,heading,openGame,analyzeFen:fen=>{
+    LibraryTools.init({h,api,button,field,select,heading,openGame,resizeBoard,analyzeFen:fen=>{
       stashBoard();state.boards.splice(++state.boardIndex,0,makeBoard());adoptBoard(state.boardIndex);
       state.parsed=PGN.parse('[Event "Opening exploration"]\n[White "White"]\n[Black "Black"]\n[SetUp "1"]\n[FEN "'+fen+'"]\n[Result "*"]\n\n*');state.node=state.parsed.root;state.selected=null;state.dirty=true;stashBoard();return go('analysis');
     }});

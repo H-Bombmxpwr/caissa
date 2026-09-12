@@ -323,6 +323,20 @@ with tempfile.TemporaryDirectory(prefix='caissa-browser-') as data:
             page.locator('[data-panel=books]').get_by_label('Book',exact=True).select_option(str(book_id))
             assert page.locator('[data-panel=books] iframe').is_visible()
             page.evaluate('Caissa.go("openingbook")')
+            page.get_by_role('button',name='Resize board',exact=True).wait_for()
+            before=page.locator('.opening-grid .board-holder').bounding_box()['width']
+            grip=page.get_by_role('button',name='Resize board',exact=True).bounding_box()
+            page.mouse.move(grip['x']+12,grip['y']+12)
+            page.mouse.down()
+            page.mouse.move(grip['x']+112,grip['y']+12,steps=8)
+            page.mouse.up()
+            page.wait_for_function('Caissa.state.prefs.openingBoardSize>550')
+            resized=page.locator('.opening-grid .board-holder').bounding_box()['width']
+            assert resized>before+70
+            page.evaluate('Caissa.go("database")')
+            page.evaluate('Caissa.go("openingbook")')
+            page.get_by_role('button',name='Resize board',exact=True).wait_for()
+            assert abs(page.locator('.opening-grid .board-holder').bounding_box()['width']-resized)<2
             page.get_by_label('Reference database',exact=True).select_option('local')
             page.get_by_label('Collection to index',exact=True).select_option(label='Annotated tests (1)')
             page.get_by_role('button',name='Index positions',exact=True).click()

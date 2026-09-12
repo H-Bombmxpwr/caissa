@@ -7,6 +7,9 @@
 .local-facts{border-bottom:1px solid var(--border);padding-bottom:12px}.local-facts p{font-size:12px}
 .analysis-grid{grid-template-columns:minmax(260px,var(--board-size,1fr)) minmax(0,1.5fr)}
 .analysis-panels{min-width:0;display:grid;gap:18px}
+.opening-grid{display:grid;grid-template-columns:minmax(0,var(--board-size,520px)) minmax(0,1fr);gap:24px;align-items:start}
+.opening-grid>div{min-width:0}.opening-grid .board-holder{width:100%;max-width:none}
+@media(max-width:950px){.opening-grid{grid-template-columns:minmax(0,1fr)}.opening-grid .board-holder{width:min(100%,var(--board-size,520px))}}
 .panel[data-panel=notation] .panel-body{height:600px}
 .example-filters .field{display:flex;flex-direction:column;align-items:stretch;gap:5px}
 .dock-columns{display:grid;grid-template-columns:minmax(0,var(--dock-main,.85fr)) 9px minmax(0,var(--dock-side,.65fr));gap:12px;align-items:start;min-width:0}

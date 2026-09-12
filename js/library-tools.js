@@ -80,11 +80,11 @@
   async function openingView(content){
     const {h,button,heading}=get();let game=new Chess();const history=[];
     content.append(heading('Learn from the games','Opening book','Explore deep lines from Lichess Masters, rated games, or your own indexed PGNs. Choose a reference database below.'));
-    const holder=h('div.board-holder',{style:{maxWidth:'520px'}}),board=new Board(holder,{viewOnly:false});
+    const holder=h('div.board-holder'),board=new Board(holder,{viewOnly:false});
     const panel=openingPanel(()=>game.fen(),play),line=h('p');
     function play(san){if(!game.move(san))throw new Error('Illegal book move');history.push(game.fen());render();}
     function render(){board.setPosition(game);board.setMovable({color:game.turnColor(),dests:game.destinationsMap(),onMove:(from,to)=>play({from,to,promotion:'q'})});line.textContent='Position after '+history.length+' plies';panel.refresh();}
-    content.append(h('div.settings-grid',[h('div',[holder,line,h('div.toolbar',[button('Back',()=>{history.pop();game=new Chess(history[history.length-1]||Chess.DEFAULT_FEN);render();}),button('Reset opening',()=>{history.length=0;game=new Chess();render();}),button('Analyze this position',()=>ui.analyzeFen(game.fen()))])]),h('section.card',[panel.root,indexControls(),h('p.card-pad.muted',{text:'Import PGNs from Master games or Online & imports, then index them. ChessBase CTG/CTB/CTO and Polyglot BIN files are not imported by this module.'})])]));render();
+    content.append(h('div.opening-grid',[h('div',[holder,line,h('div.toolbar',[button('Back',()=>{history.pop();game=new Chess(history[history.length-1]||Chess.DEFAULT_FEN);render();}),button('Reset opening',()=>{history.length=0;game=new Chess();render();}),button('Analyze this position',()=>ui.analyzeFen(game.fen()))])]),h('section.card',[panel.root,indexControls(),h('p.card-pad.muted',{text:'Import PGNs from Master games or Online & imports, then index them. ChessBase CTG/CTB/CTO and Polyglot BIN files are not imported by this module.'})])]));ui.resizeBoard(holder,'openingBoardSize');render();
   }
   function localFacts(parsed){
     const {h}=get(),line=PGN.mainline(parsed.root);let captures=0,promotions=0,castles=0;
