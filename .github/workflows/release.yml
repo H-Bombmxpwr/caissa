@@ -126,6 +126,23 @@ jobs:
         if: runner.os == 'Windows'
         run: uv run --no-sync python tests/check_bundle.py
 
+      # The installer is the recommended Windows download: a .zip arrives from a browser
+      # with the mark of the web on every file Explorer extracts, whereas an installer
+      # copies its payload, so nothing it writes carries that mark. See caissa.iss.
+      - name: Build the Windows installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
+          if (-not (Test-Path $iscc)) { throw "Inno Setup compiler not found at $iscc" }
+          # Inno derives the installer's VersionInfo from AppVersion, which has to be a
+          # real version number: a hand-run build tagged 'dev' would fail the compile.
+          $version = "${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}" -replace '^v', ''
+          if ($version -notmatch '^\d+\.\d+\.\d+$') { $version = '0.0.0' }
+          & $iscc "/DAppVersion=$version" caissa.iss
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup build failed" }
+
       - name: Package (Windows, macOS)
         if: runner.os != 'Linux'
         shell: bash
@@ -147,6 +164,13 @@ jobs:
           path: ${{ matrix.asset }}
           if-no-files-found: error
 
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'Windows'
+        with:
+          name: Caissa-windows-x64-setup.exe
+          path: dist/Caissa-windows-x64-setup.exe
+          if-no-files-found: error
+
   publish:
     name: Publish the release
     needs: build
@@ -166,13 +190,18 @@ jobs:
           cd downloads
           ls -la
           {
-            echo 'Download the build for your platform, unpack it, and run **Caissa**.'
+            echo 'Download the build for your platform and run **Caissa**.'
             echo
             for f in *; do
               size=$(du -h "$f" | cut -f1)
               case "$f" in
-                *windows*) echo "* **Windows** — \`$f\` ($size). SmartScreen will warn about an"
-                           echo "  unsigned application: choose *More info → Run anyway*." ;;
+                *setup.exe) echo "* **Windows, installer** — \`$f\` ($size). The recommended"
+                           echo "  download: installs for the current user, no admin rights needed, and"
+                           echo "  uninstalls from Settings. SmartScreen will warn about an unknown"
+                           echo "  publisher because the build is unsigned: choose *More info → Run anyway*." ;;
+                *windows*) echo "* **Windows, portable** — \`$f\` ($size). The same application as a"
+                           echo "  folder to unzip and run, with nothing installed. Same SmartScreen"
+                           echo "  warning on first launch: *More info → Run anyway*." ;;
                 *macos*)   echo "* **macOS** — \`$f\` ($size). Not notarised, so the first launch"
                            echo "  needs *right-click → Open* rather than a double-click." ;;
                 *linux*)   echo "* **Linux** — \`$f\` ($size). Needs WebKitGTK:"
