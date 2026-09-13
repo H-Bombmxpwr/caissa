@@ -13,7 +13,9 @@ from desktop import DesktopSettings
 class StorageTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
-        self.root = Path(self.temp.name)
+        # macOS hands out /var/folders/… while the app realpaths to /private/var/…;
+        # resolve here so both sides of every comparison spell the path the same way.
+        self.root = Path(self.temp.name).resolve()
         self.env = patch.dict(os.environ, {'APPDATA':str(self.root/'appdata'), 'DATA_DIR':''})
         self.env.start()
         self.source = self.root/'original'
