@@ -372,12 +372,17 @@
       examples.replaceChildren(h('p.muted',{text:found.total+' matching games'+(found.total>12?' · showing the 12 highest rated':'')}));
       for(const g of found.games)examples.append(h('div.context-item',[button(g.white+' — '+g.black,()=>openGame(g.id)),h('p.muted',{text:[g.event,g.date,g.result,Math.ceil(g.ply_count/2)+' moves',g.annotator?'Annotated by '+g.annotator:''].filter(Boolean).join(' · ')} )]));
     }catch(e){if(id===request)examples.textContent=e.message;}}
+    const children=[...root.children],split=children.findIndex(n=>n.tagName==='H3'&&n.textContent.startsWith('Example games'));
+    const tabs=h('div.section-tabs'),pane=h('div');
+    if(split>=0){const groups=[['Continuations',children.slice(0,split)],['Example games',children.slice(split)]];
+      function show(label,nodes){pane.replaceChildren(...nodes);tabs.querySelectorAll('button').forEach(b=>{b.classList.toggle('active',b.textContent===label);b.setAttribute('aria-pressed',String(b.textContent===label));});}
+      groups.forEach(([label,nodes])=>tabs.append(button(label,()=>show(label,nodes))));root.replaceChildren(tabs,pane);show(...groups[0]);}
     find();return root;
   }
   function studyTree(state,actions){
     const {h,button,field,select,api}=get(),tree=h('div.study-tree'),cards=new Map();
     const listFor=id=>state.assignments.filter(a=>a.folder_id===id).map(a=>state.collections.find(c=>c.id===a.collection_id)).filter(Boolean);
-    function collection(c){return h('div.collection-leaf',[h('span.kind-badge',{text:'Collection'}),button(c.name,()=>actions.browse(c)),h('small',{text:c.games+' games'})]);}
+    function collection(c){const count=c.indexed_games||0,ready=c.games>0&&count===c.games;return h('div.collection-leaf'+(ready?'.indexed':'.needs-index'),[h('span.index-badge',{text:ready?'✓ Indexed':count?'Partially indexed':'Not indexed',title:count+' of '+c.games+' games indexed'}),button(c.name,()=>actions.browse(c)),h('small',{text:count+' / '+c.games+' indexed'})]);}
     for(const folder of state.folders){
       const children=state.folders.filter(f=>f.parent_id===folder.id),collections=listFor(folder.id),parent=state.folders.find(f=>f.id===folder.parent_id);
       const node=h('details.study-node',{open:true,'data-folder-id':folder.id},[h('summary',[h('b',{text:folder.name}),h('span.kind-badge',{text:folder.category}),h('small',{text:children.length+' subfolders · '+collections.length+' collections'})]),h('div.folder-tools',[h('p.breadcrumb',{text:'Study folders / '+(parent?folder.path:'Top level / '+folder.name)}),field('Study category',select(categories,folder.category||categories[0],async e=>{await api('study/folders/'+folder.id,{category:e.target.value},'PUT');folder.category=e.target.value;node.querySelector('.kind-badge').textContent=e.target.value;})),h('div.toolbar',[button('Add collection',()=>actions.assign(folder)),button('New subfolder',()=>actions.create(folder.id)),button('Delete folder',()=>actions.remove(folder),'danger')])]),...collections.map(collection)]);

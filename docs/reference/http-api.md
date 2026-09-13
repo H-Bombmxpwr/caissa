@@ -8,6 +8,18 @@ Requests and responses are JSON, except the handful of endpoints that return a f
 Errors come back as `{"error": "…"}` with a 4xx or 5xx status and a message written to be
 shown to a person.
 
+## Computer opponent
+
+`POST /api/engine/play` accepts `{"fen":"…","level":5}`. Level must be 1–11.
+The response uses the analysis payload (`fen`, `bestmove`, `lines`, `engine`).
+This bounded search uses a separate one-thread, 32 MB Stockfish process, with
+Skill Level `(level - 1) * 2` and `100 + level * 75` milliseconds. It does not
+alter the live-analysis or annotation engines. Invalid levels return 400; an
+unavailable engine returns 503.
+
+`GET /api/collections` includes `indexed_games` for each collection, counting
+both owned and linked games that have a completed position index.
+
 ## Library
 
 | Method | Path | What it does |

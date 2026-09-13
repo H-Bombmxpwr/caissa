@@ -189,6 +189,7 @@
   /* Diff current position against the new one and reuse elements so pieces
    * glide to their new square instead of blinking. */
   Board.prototype.setPieces = function (map, opts) {
+    this.positionFen = null;
     opts = opts || {};
     const animate = opts.animate !== false;
     const current = this.pieces;
@@ -248,10 +249,16 @@
   Board.prototype.setPosition = function (fenOrGame, opts) {
     const game = (typeof fenOrGame === 'string') ? new Chess(fenOrGame) : fenOrGame;
     const o = opts || {};
+    const previous = this.positionFen;
+    const next = game.fen();
     if (o.check === undefined) {
       o.check = game.inCheck && game.inCheck() ? findKing(game, game.turnColor()) : null;
     }
     this.setPieces(game.piecesMap(), o);
+    this.positionFen = next;
+    if (previous && o.sound !== false && o.animate !== false && this.opts.sound !== false && global.ChessSounds) {
+      global.ChessSounds.transition(previous, next, this.opts.orientation).catch(function () {});
+    }
   };
 
   function findKing(game, color) {

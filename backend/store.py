@@ -202,7 +202,18 @@ class Library:
                       (SELECT COUNT(*) FROM game_collections l WHERE l.collection_id = c.id) AS linked
                FROM collections c ORDER BY c.name"""
         ).fetchall()
-        return [dict(r) for r in rows]
+        result = [dict(r) for r in rows]
+        db = self.connect()
+        if db.execute("SELECT 1 FROM sqlite_master WHERE name='positions'").fetchone():
+            counts = dict(db.execute('''SELECT collection_id, COUNT(*) FROM (
+                SELECT g.collection_id, g.id FROM games g
+                WHERE EXISTS (SELECT 1 FROM positions p WHERE p.game_id=g.id)
+                UNION SELECT l.collection_id, l.game_id FROM game_collections l
+                WHERE EXISTS (SELECT 1 FROM positions p WHERE p.game_id=l.game_id)
+            ) GROUP BY collection_id'''))
+            for item in result:
+                item['indexed_games'] = counts.get(item['id'], 0)
+        return result
 
     def collection(self, ident):
         conn = self.connect()

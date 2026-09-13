@@ -104,3 +104,16 @@ without one for this platform, no releases yet, and an unreachable API.
 
 The only thing that must hold is that each asset name contains `windows`, `macos` or
 `linux`, which is how the page matches one to the visitor. That is checked too.
+
+
+## Make downloads available from a manual build
+
+In Actions → Release → Run workflow, enter a version tag such as `v2.2.0` and enable
+**Publish the downloads**. The workflow validates the tag, builds and smoke-tests the
+Windows folder, packages `Caissa-windows-x64.zip`, and attaches it to a release at the
+selected commit. Without that checkbox, downloads remain Actions artifacts only.
+The deployed page discovers the latest published release's attached assets. A website
+deployment alone cannot create the Windows download.
+
+The supported Windows distribution is portable: extract the entire ZIP and run
+`Caissa/Caissa.exe`. Keep `_internal` alongside it. The executable is not standalone.

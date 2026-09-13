@@ -93,6 +93,7 @@ with tempfile.TemporaryDirectory(prefix='caissa-browser-') as data:
             page.get_by_text('White to move: draw',exact=True).wait_for()
             page.get_by_role('button',name='Analyze',exact=True).click()
             page.wait_for_selector('.engine-line',timeout=30000)
+            page.get_by_text('Engine & system usage',exact=True).click()
             page.wait_for_function('document.querySelector(".engine-stats")&&document.querySelectorAll(".engine-stat").length>10')
             # The telemetry grid names what it reports, and says so plainly when the
             # machine publishes no sensor rather than printing an invented number.
@@ -297,6 +298,7 @@ with tempfile.TemporaryDirectory(prefix='caissa-browser-') as data:
                 cancel_storage_change:async()=>({cancelled:true})}};
               await Caissa.go('settings');
             }''')
+            page.get_by_role('button',name='Library & storage',exact=True).click()
             page.get_by_role('button',name='Show in folder',exact=True).click()
             assert page.evaluate('window.__revealed'),'Show in folder reaches the native bridge'
             page.get_by_role('button',name='Browse folders…',exact=True).click()
@@ -440,8 +442,13 @@ with tempfile.TemporaryDirectory(prefix='caissa-browser-') as data:
             page.get_by_text('How to use your repertoire',exact=True).wait_for()
             page.route('**/api/network',lambda r:r.fulfill(json={'reachable':False}))
             page.evaluate('Caissa.go("settings")')
+            page.get_by_role('button',name='Account & connection',exact=True).click()
             page.get_by_role('button',name='Check online services',exact=True).click()
             page.get_by_text('PGN Mentor is unreachable.',exact=False).wait_for()
+            from ui_quality import check
+            check(page)
+            from sound_boards import check as check_sounds
+            check_sounds(page)
             for smoke in ['workspace-smoke.html','smoke.html']:
                 page.goto(url+'/tests/'+smoke)
                 page.wait_for_function('document.querySelector("#results").textContent.includes("DONE")',timeout=60000)
@@ -453,6 +460,7 @@ with tempfile.TemporaryDirectory(prefix='caissa-browser-') as data:
     finally:
         server.api.live.stop()
         server.api.engine.stop()
+        server.api.opponent.stop()
         httpd.shutdown()
         httpd.server_close()
         server.api.library.close()

@@ -3,11 +3,17 @@
 ```powershell
 py tools\build_exe.py
 py tools\build_exe.py --clean     # from scratch
+py tools\package_windows.py      # verified portable ZIP and SHA-256 checksum
 ```
 
 The result is `dist/Caissa/Caissa.exe` with an `_internal` folder beside it. The build
-fetches whatever is missing first — the engine, the opening index, the offline opening
-book — so a fresh clone builds in one command.
+fetches the engine and opening names if missing. The offline opening book is required;
+if it is absent, build it with `tools/build_opening_book.py` first.
+
+The packaging command creates `dist/Caissa-windows-x64.zip` and a `.zip.sha256`
+checksum file. Extract the whole ZIP before launching; the executable needs its
+accompanying folder. To put it on the download website, publish a GitHub Release
+using the [release workflow](releasing.md).
 
 ## What goes in
 

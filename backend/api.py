@@ -46,6 +46,7 @@ class Api:
         self.books = Books(self.library)
         self.crawler = lichess.MastersCrawler(self.library)
         self.engine = Engine()
+        self.opponent = Engine(threads=1, hash_mb=32)
         self.live = LiveAnalysis()
         self.annotation = AnnotationJob(self.engine, self.library)
         # Watches the linked lichess account for new games. Off unless switched on, and
@@ -906,6 +907,18 @@ class Api:
                     return 200, self.live.start(fen, max(1, min(5, int(body.get('multipv', 3)))))
                 except EngineError as err:
                     raise ApiError(str(err), 503) from err
+
+        if action == 'play' and method == 'POST':
+            from .chess import Chess
+            level = int(body.get('level', 5))
+            if not 1 <= level <= 11:
+                raise ApiError('Choose a computer level from 1 to 11')
+            fen = Chess(body.get('fen', '')).fen()
+            try:
+                return 200, self.opponent.analyze(fen, skill=(level-1)*2,
+                                                 movetime=100+level*75)
+            except EngineError as err:
+                raise ApiError(str(err), 503) from err
 
         if action == "info" and method == "GET":
             return 200, self.engine.info()

@@ -34,10 +34,24 @@ python deploy/serve.py          # http://localhost:8000
 
 ## What it links to
 
-The page never hosts a binary. It reads the visitor's platform and points the button at
-the matching asset under
-`https://github.com/H-Bombmxpwr/caissa/releases/latest/download/…`, so GitHub does the
-file serving and this page stays the same size however large the builds become.
+Deploying the website does **not** build or upload Caissa.exe. To populate its download
+button, run **Actions → Release → Run workflow**, enter a version such as `v2.2.0`,
+and enable **Publish the downloads**. Alternatively push a `v*` version tag.
+Wait for the Windows build and Publish jobs to finish. A manual run without Publish
+only produces Actions artifacts, which are not public release downloads.
+
+Windows uses a portable ZIP containing `Caissa/Caissa.exe` and its `_internal` folder.
+Extract the entire ZIP and launch the executable. Distributing the executable alone
+does not work: its web view, engine and assets are in the accompanying folder.
+An installer is not needed for this layout, and updates retain the external library.
+
+The page queries GitHub's latest published release and chooses an attached asset for
+the visitor's platform. It shows a source-install fallback if no build exists.
+On API failure it retains the Releases link so downloads remain reachable.
+
+The page never hosts a binary. GitHub serves the selected release asset, so this page
+stays the same size however large the builds become.
 
 The asset names come from `.github/workflows/release.yml`. If you rename one there,
-rename it in `index.html` too — there is no build step to catch the mismatch.
+keep the platform token (`windows`, `macos`, or `linux`) in the filename so the page
+can recognize it.

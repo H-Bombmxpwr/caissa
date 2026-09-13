@@ -25,3 +25,8 @@ As on lichess:
 
 Repertoire drills use the same blindfold board by default, with the same peek control. It
 is the most direct way to find out whether you know a line or merely recognise it.
+
+
+Switching training chapters clears the previous board before the next exercise mounts.
+In Square colors, **Continue / Enter** advances after a miss without requiring a
+keyboard. The shared **Peek** button reveals the position using your hold/flash setting.

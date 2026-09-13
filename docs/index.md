@@ -32,6 +32,7 @@ want your lichess studies? [Your lichess account](guide/lichess.md)
 - [Importing games](guide/importing.md) — PGN, archives, online accounts, ChessBase
 - [The opening explorer](guide/explorer.md) — walking a collection's tree
 - [The analysis board](guide/analysis.md) — engine, telemetry, annotation, context
+- [Play the computer](guide/computer.md) — eleven Stockfish levels, takebacks and saved games
 - [Repertoires](guide/repertoire.md) — building lines and drilling them
 - [Your lichess account](guide/lichess.md) — studies, and games that import themselves
 - [Move sounds](guide/sounds.md) — the bundled sets and your own
@@ -61,6 +62,7 @@ guide/database
 guide/importing
 guide/explorer
 guide/analysis
+guide/computer
 guide/repertoire
 guide/lichess
 guide/sounds

@@ -113,3 +113,33 @@ position-based tab has nothing to read.
 Indexing is per collection, and you only need to redo it when that collection changes.
 Positions are stored under a transposition key, so a position reached by a different
 move order is still the same position.
+
+
+## What position indexing does
+
+Importing makes game headers and PGN searchable. **Index positions** does a separate
+job: it reads each game's PGN, starts at its FEN (or the normal starting position),
+and legally replays its main line. It records the starting position, every position
+after a move, its game and ply, and the next SAN move in SQLite. The position key
+uses piece placement, side to move, castling rights and legal en-passant availability;
+move counters do not distinguish positions. This connects transpositions.
+
+This powers exact-position search, local opening continuations and result counts,
+example games, and the dated History view. It does **not** run Stockfish, evaluate
+moves, download games, annotate your PGNs, or index PGN side variations. Repertoire
+variation trees are a separate feature.
+
+Indexing includes games owned by or linked into the chosen collection. Already indexed
+games are skipped; saving an edited game invalidates its position rows, so the next
+run picks it up again. Writes are committed in batches of 25 games. Completed
+batches remain available if the app closes; start indexing again to finish.
+
+The first run can take time because every move is parsed and checked for legality.
+Long games take longer than short ones. Progress counts games processed in this run,
+including errors, rather than moves or seconds remaining. An invalid main line is
+reported as an error and is not partially indexed. Original PGNs remain unchanged.
+
+In **Study folders**, collections show **Indexed**, **Partially indexed**, or
+**Not indexed**, with an indexed/total count and a distinct border. Importing new
+games or editing existing ones can turn a complete collection into a partial one.
+Use the collection's Index positions action to catch up.

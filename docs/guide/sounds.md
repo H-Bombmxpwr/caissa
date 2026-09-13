@@ -1,6 +1,14 @@
 # Move sounds
 
-Three kinds of sound set, chosen in **Settings → Move sounds**.
+Three kinds of sound set, chosen in **Settings → Sound → Move sounds**.
+
+The same sound settings apply to every moving chess board: analysis, the opening
+explorer's Collection tree and Reference databases, computer play, repertoire drills,
+and blindfold exercises. Mouse moves, keyboard moves and automatic replies all use
+the shared board sound player. Captures, checks, castling, promotion and checkmate
+use their corresponding event; backward navigation and jumps use one move sound.
+Initial board setup and repeated redraws are silent. Volume, disabled events and
+the **Off** sound set are respected everywhere.
 
 ## Bundled sample sets
 

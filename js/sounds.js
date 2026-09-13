@@ -34,6 +34,27 @@
     return mine===false?'opponent':'move';
   }
 
+  // All board views use this path, including keyboard navigation and trainer replies.
+  // Initial positions and silent loads are filtered by Board.setPosition. Repainting
+  // the same position (or changing clocks alone) must never replay a sound.
+  async function transition(before,after,orientation){
+    if((prefs.soundPack||'off')==='off'||Number(prefs.soundVolume??.45)<=0)return;
+    if(before.split(' ')[0]===after.split(' ')[0])return;
+    const game=new Chess(before),moves=game.generateMoves();
+    for(const move of moves){
+      game.makeMove(move);
+      const matches=game.fen()===after;
+      game.undoMove();
+      if(matches){
+        const verbose=game.makeVerbose(move,moves);
+        return window.ChessSounds.play(eventFor(verbose,game.turnColor()===orientation));
+      }
+    }
+    // Backward navigation and jumping along a line get one neutral move sound,
+    // rather than announcing a capture/check as though it had just been played.
+    return window.ChessSounds.play('move');
+  }
+
   /* Which sets are actually installed. chess.com's are optional, so the answer
      comes from the server rather than from a list baked in here. */
   async function sets(){
@@ -149,5 +170,5 @@
     return root;
   }
 
-  window.ChessSounds={configure(p){prefs=p;cache.clear();},play,eventFor,settings,sets,events,sampleFor};
+  window.ChessSounds={configure(p){prefs=p;cache.clear();},play,eventFor,transition,settings,sets,events,sampleFor};
 })();

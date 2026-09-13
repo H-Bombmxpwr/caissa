@@ -49,11 +49,26 @@ class Study:
 
     def _index(self, collection_id):
         db = self.library.connect()
+        pending = []
+        def flush():
+            with self.library._write_lock, db:
+                for game_id, signature, rows in pending:
+                    current = db.execute('SELECT signature FROM games WHERE id=?', (game_id,)).fetchone()
+                    if not current or current[0] != signature:
+                        continue  # An edit or deletion during replay must not get a stale index.
+                    db.execute('DELETE FROM positions WHERE game_id=?', (game_id,))
+                    db.executemany('INSERT INTO positions VALUES (?,?,?,?)', rows)
+            pending.clear()
         try:
-            ids = [r[0] for r in db.execute('SELECT id FROM games WHERE collection_id=?', (collection_id,))]
+            ids = [r[0] for r in db.execute('''SELECT g.id FROM games g
+                WHERE (g.collection_id=? OR g.id IN
+                    (SELECT game_id FROM game_collections WHERE collection_id=?))
+                AND NOT EXISTS (SELECT 1 FROM positions p WHERE p.game_id=g.id)''',
+                (collection_id, collection_id))]
             self.state['total'] = len(ids)
             for game_id in ids:
                 try:
+                    signature = db.execute('SELECT signature FROM games WHERE id=?', (game_id,)).fetchone()[0]
                     pgn = self.library.game_pgn(game_id)
                     game = Chess(pgnutil.headers(pgn).get('FEN') or Chess().fen())
                     moves = pgnutil.moves(pgn)
@@ -62,12 +77,13 @@ class Study:
                         rows.append((game.key(), game_id, ply, moves[ply] if ply < len(moves) else None))
                         if ply < len(moves):
                             game.move(moves[ply])
-                    with self.library._write_lock, db:
-                        db.execute('DELETE FROM positions WHERE game_id=?', (game_id,))
-                        db.executemany('INSERT INTO positions VALUES (?,?,?,?)', rows)
+                    pending.append((game_id, signature, rows))
+                    if len(pending) >= 25:
+                        flush()
                 except (ValueError, TypeError):
                     self.state['errors'] += 1
                 self.state['done'] += 1
+            flush()
         except Exception as err:
             self.state['error'] = str(err)
         finally:

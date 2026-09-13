@@ -107,3 +107,21 @@ Four tabs, each reading the position rather than the game:
 The comment box writes into the PGN as you type. Arrows and circles you draw on the
 board are stored as `[%cal]` and `[%csl]` commands, the same ones lichess writes, so
 they survive a round trip through any other PGN reader.
+
+
+## Navigation and layout
+
+The continuation strip beneath notation lists the main move and every alternative
+from the current position. Use Up/Down to highlight a continuation and Right to enter
+it; Left returns to the parent. When there is no branch ahead, Up/Down switches sibling
+variations. Clicking a continuation enters it directly. Keyboard shortcuts leave text
+fields and dialogs alone.
+
+Panel arrows reorder full-width panels within the full-width row. Sending one to the
+other column also returns it to half width. The Live analysis switch stays visibly on
+while searching. **Engine & system usage** expands below the engine lines.
+
+Position context separates Library continuations and examples, your Study notes,
+History, and sourced Facts. History lists up to 100 games reaching the position,
+oldest first, with direct links to separate analysis tabs and a decade timeline.
+These dates describe your indexed library, not the first occurrence in chess history.

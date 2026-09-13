@@ -22,6 +22,10 @@
       const prompt = h('div.prompt');
       const sub = h('div.sub-prompt', { text: 'light or dark?' });
       const feedback = h('div.feedback');
+      const recovery = h('div.controls', {hidden:true}, [
+        h('button.btn', {text:'Peek',onclick:function(){App.peek.flash();}}),
+        h('button.btn.primary', {text:'Continue / Enter',onclick:function(){if(locked)next();}})
+      ]);
       const statsEl = h('div.stats');
       const timerEl = h('div.timer');
 
@@ -47,7 +51,7 @@
       ctx.root.appendChild(h('div', [
         prompt, sub,
         h('div.answer-grid', [lightBtn, darkBtn]),
-        feedback,
+        feedback,recovery,
         h('div.divider'),
         h('div.controls', [h('label.field', ['Range', fileSel]), sprintBtn, timerEl]),
         h('div.divider'),
@@ -71,6 +75,7 @@
         do { sq = App.util.randomSquare(pool()); } while (sq === square);
         square = sq;
         locked = false;
+        recovery.hidden = true;
         askedAt = Date.now();
         prompt.textContent = square;
         board.setHighlights({});
@@ -98,8 +103,9 @@
         } else {
           streak = 0;
           locked = true;
+          recovery.hidden = false;
           feedback.className = 'feedback err';
-          feedback.textContent = square + ' is ' + truth + ' — look at it, then press Enter.';
+          feedback.textContent = square + ' is ' + truth + ' — peek, then choose Continue or press Enter.';
           App.stat(statKey, { asked: 1 });
           board.setHighlights(Object.fromEntries([[square, truth === 'light' ? 'hl-yellow' : 'hl-blue']]));
           board.setShapes([{ square: square, brand: 'red' }]);

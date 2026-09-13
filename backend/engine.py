@@ -160,10 +160,11 @@ class Engine:
                 i += 1
         return out
 
-    def analyze(self, fen, movetime=None, depth=None, multipv=1, on_update=None):
+    def analyze(self, fen, movetime=None, depth=None, multipv=1, on_update=None, skill=20):
         """Blocking analysis of one position. Returns the best lines, best first."""
         with self.lock:
             self.start()
+            self.set_option("Skill Level", max(0, min(20, int(skill))))
             self.set_option("MultiPV", max(1, int(multipv)))
             self._send("position fen " + fen)
             if on_update:

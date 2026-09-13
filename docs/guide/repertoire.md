@@ -49,3 +49,12 @@ the analysis board instead of drilling it.
 
 **Export PGN** writes the whole repertoire out as one PGN, one game per line, each with
 its starting FEN. It is a plain file; nothing about it is specific to this app.
+
+
+## View the whole repertoire
+
+Choose **View repertoire** to merge all saved lines with the same starting FEN into
+one analysis tree. Shared moves appear once, and different replies become branches.
+Different starting positions open separate tabs because they cannot share one legal
+root. The merged view is an unsaved study: save it as PGN if you want it in the game
+library. Editing it does not rewrite the original drill lines.

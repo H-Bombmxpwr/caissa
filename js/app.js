@@ -267,6 +267,7 @@
     App.board.setHighlights({});
     App.board.setLastMove(null);
     App.board.setCheck(null);
+    App.board.setPosition(new Chess('8/8/8/8/8/8/8/8 w - - 0 1'), { animate: false });
 
     const mode = App.settings.blindfold[id] || lvl.defaultBlindfold || 'pieces';
     App._blindSel.value = mode;

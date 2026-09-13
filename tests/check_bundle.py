@@ -9,7 +9,7 @@ import tempfile
 
 ROOT=Path(__file__).resolve().parents[1]
 bundle=ROOT/'dist/Caissa'
-for name in ['data/opening-book.sqlite3','js/notation.js','js/sounds.js','js/library-tools.js','css/library-tools.css']:
+for name in ['data/opening-book.sqlite3','js/notation.js','js/sounds.js','js/library-tools.js','css/library-tools.css','js/computer.js','js/autocomplete.js','css/polish.css','js/workspace.js']:
     expected=(ROOT/name).read_bytes()
     actual=(bundle/'_internal'/name).read_bytes()
     assert hashlib.sha256(actual).digest()==hashlib.sha256(expected).digest(),name

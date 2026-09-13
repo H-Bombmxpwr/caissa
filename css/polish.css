@@ -1,0 +1,60 @@
+/* Shared spacing and hierarchy for the study workbench. */
+.desk-body{max-width:1920px;margin:auto;padding-bottom:48px}
+.page-heading{margin-bottom:28px}.page-heading p{max-width:72ch;line-height:1.65}
+.card{border-radius:12px;box-shadow:0 2px 8px #142d2110}
+.card-head{padding:15px 18px}.card-pad,.study-card{padding:22px}
+.section-stack{gap:20px}.btn{min-height:36px;border-radius:7px}.btn:focus-visible,button:focus-visible,summary:focus-visible{outline:3px solid var(--accent);outline-offset:3px}
+.dock-columns>.dock-main{grid-column:1}.dock-columns>.dock-splitter{grid-column:2}.dock-columns>.dock-side{grid-column:3}
+.dock-columns[data-columns=main],.dock-columns[data-columns=side]{grid-template-columns:minmax(0,1fr)}
+.dock-columns[data-columns=side]>.dock-side{grid-column:1}
+.dock>.panel{margin-top:0}
+.analysis-grid .panel{padding:0}
+.analysis-grid .panel[data-panel=notation] .panel-body{height:430px}
+.field{gap:7px}.field>span{font-size:12px;font-weight:600;letter-spacing:.02em}
+input:not([type=checkbox]):not([type=color]),select,textarea{border-radius:7px}
+.section-tabs{display:flex;gap:6px;flex-wrap:wrap;border-bottom:1px solid var(--border);padding-bottom:12px;margin-bottom:24px}
+.section-tabs .active{background:var(--accent);color:white;border-color:var(--accent)}
+.settings-pane{display:grid;gap:22px}.settings-pane .settings-grid{align-items:start}
+.settings-pane .card-pad>.field{display:flex;flex-direction:column;align-items:stretch;margin-bottom:22px}
+.settings-pane .card-pad>.field:has(input[type=checkbox]){flex-direction:row;align-items:center}
+.settings-pane .swatches{gap:8px}.settings-pane .piece-picker{gap:8px}
+.settings-pane .settings-grid>.card:last-child{position:sticky;top:20px}
+.desk-body[data-view=tactics] .cards-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+.desk-body[data-view=tactics]:after{content:'';display:block;width:88px;height:88px;background:url('../assets/caissa-128.png') center/contain no-repeat;margin:40px auto;opacity:.65}
+.desk-body[data-view=masters]>.card{margin-bottom:22px}
+.desk-body[data-view=masters]>.card .card-pad{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 24px}
+.desk-body[data-view=masters]>.card .card-pad>.btn{justify-self:start;align-self:end}
+.desk-body[data-view=masters] .field{display:flex;flex-direction:column;align-items:stretch;flex:1}
+.desk-body[data-view=masters]>.card .card-pad>p,.desk-body[data-view=masters]>.card .card-pad>div:last-child{grid-column:1/-1}
+.suggestions{position:fixed;z-index:10020;max-height:290px;overflow:auto;background:var(--bg-2);border:1px solid var(--border);border-radius:9px;box-shadow:0 10px 28px #0003;padding:5px}
+.suggestions [role=option]{padding:10px 12px;cursor:pointer;border-radius:5px;display:flex;flex-direction:column;gap:3px}
+.suggestions [role=option]:hover,.suggestions [aria-selected=true]{background:var(--accent);color:white}
+.suggestions small{font-size:11px;opacity:.8}
+.live-switch{display:flex;gap:9px;align-items:center;position:relative;cursor:pointer;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg-2)}
+.live-switch input{position:absolute;opacity:0;width:34px!important;min-width:34px!important;height:20px!important;z-index:1;cursor:pointer}
+.switch-track{width:34px;height:20px;border-radius:20px;background:#828982;position:relative;flex:none}
+.switch-track:after{content:'';position:absolute;width:14px;height:14px;left:3px;top:3px;border-radius:50%;background:white;transition:transform .15s}
+.live-switch:has(input:checked){border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 18%,transparent)}
+.live-switch input:checked+.switch-track{background:var(--accent)}.live-switch input:checked+.switch-track:after{transform:translateX(14px)}
+.live-switch:has(input:focus-visible){outline:3px solid var(--accent);outline-offset:2px}
+.engine-usage{border-top:1px solid var(--border);margin-top:12px}.engine-usage summary{padding:12px 16px;cursor:pointer;font-size:12px;color:var(--text-dim)}
+.engine-usage .engine-stats{padding:12px}.engine-usage p{padding:0 16px 12px}
+.branch-picker{display:flex;flex-wrap:wrap;gap:5px;padding:10px 12px;border-top:1px solid var(--border);flex:none;background:var(--bg-2)}
+.branch-picker[hidden]{display:none}.branch-picker button{border:1px solid var(--border);border-radius:6px;padding:7px 10px;background:transparent;color:var(--text)}
+.branch-picker button.active{background:var(--accent);color:white;border-color:var(--accent)}
+.context-tabs{padding:10px;gap:5px;background:var(--bg-2);position:sticky;top:0;z-index:2}
+.context-tabs button{border-radius:6px;padding:8px 12px}.context-body{padding:20px}.context-body h3{margin:18px 0 10px}
+.context-body .book-move{padding:10px 0;gap:12px}.example-filters{padding:14px;background:var(--bg-2);border-radius:8px;margin:14px 0}
+.history-game{display:grid;grid-template-columns:85px 1fr;align-items:center;gap:5px 12px;padding:12px 0;border-bottom:1px solid var(--border)}
+.history-game>span{font-size:12px;color:var(--text-dim)}.history-game .btn{text-align:left;justify-content:start}.history-game small{grid-column:2;color:var(--text-dim)}
+.collection-leaf{border-radius:7px;margin:6px 0;padding:11px!important;border-left:3px solid #b28a43}
+.collection-leaf.indexed{border-left-color:var(--accent);background:color-mix(in srgb,var(--accent) 7%,transparent)}
+.index-badge{font-size:10px;font-weight:700;letter-spacing:.03em;border:1px solid var(--border);padding:4px 7px;border-radius:20px;white-space:nowrap}
+.indexed .index-badge{color:var(--accent)}.needs-index .index-badge{color:#936d29}
+.import-history{margin:26px 0 0}.import-history .context-item{flex-wrap:wrap}
+.computer-grid{display:grid;grid-template-columns:minmax(280px,580px) minmax(260px,1fr);gap:24px;align-items:start}
+.computer-grid .board-holder{width:100%;margin-bottom:20px}.computer-status{font-weight:600;padding:14px 0;border-top:1px solid var(--border);margin-top:18px}
+.computer-moves{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:14px 0;max-height:280px;overflow:auto}.computer-moves span{padding:6px 8px;background:var(--bg-2);border-radius:4px}
+@media(max-width:1000px){.computer-grid{grid-template-columns:1fr}.settings-pane .settings-grid>.card:last-child{position:static}}
+@media(max-width:1400px){.dock-columns>.dock-main,.dock-columns>.dock-side{grid-column:1}}
+@media(max-width:650px){.desk-body[data-view=tactics] .cards-grid,.desk-body[data-view=masters]>.card .card-pad{grid-template-columns:1fr}.collection-leaf{flex-wrap:wrap}.card-pad,.study-card{padding:16px}}
