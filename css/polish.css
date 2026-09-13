@@ -52,9 +52,9 @@ input:not([type=checkbox]):not([type=color]),select,textarea{border-radius:7px}
 .index-badge{font-size:10px;font-weight:700;letter-spacing:.03em;border:1px solid var(--border);padding:4px 7px;border-radius:20px;white-space:nowrap}
 .indexed .index-badge{color:var(--accent)}.needs-index .index-badge{color:#936d29}
 .import-history{margin:26px 0 0}.import-history .context-item{flex-wrap:wrap}
-.computer-grid{display:grid;grid-template-columns:minmax(280px,580px) minmax(260px,1fr);gap:24px;align-items:start}
+.computer-grid{display:grid;grid-template-columns:minmax(280px,var(--board-size,580px)) minmax(260px,1fr);gap:24px;align-items:start}
 .computer-grid .board-holder{width:100%;margin-bottom:20px}.computer-status{font-weight:600;padding:14px 0;border-top:1px solid var(--border);margin-top:18px}
 .computer-moves{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:14px 0;max-height:280px;overflow:auto}.computer-moves span{padding:6px 8px;background:var(--bg-2);border-radius:4px}
-@media(max-width:1000px){.computer-grid{grid-template-columns:1fr}.settings-pane .settings-grid>.card:last-child{position:static}}
+@media(max-width:1000px){.computer-grid{grid-template-columns:1fr}.computer-grid .board-holder{width:min(100%,var(--board-size,580px))}.settings-pane .settings-grid>.card:last-child{position:static}}
 @media(max-width:1400px){.dock-columns>.dock-main,.dock-columns>.dock-side{grid-column:1}}
 @media(max-width:650px){.desk-body[data-view=tactics] .cards-grid,.desk-body[data-view=masters]>.card .card-pad{grid-template-columns:1fr}.collection-leaf{flex-wrap:wrap}.card-pad,.study-card{padding:16px}}

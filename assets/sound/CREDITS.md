@@ -8,6 +8,13 @@ repository's own AGPLv3+.
 | Set | Author | Licence |
 | --- | --- | --- |
 | `standard` — Lichess standard | the lila authors | AGPLv3+ |
+| `piano` — Lichess piano | Enigmahack | AGPLv3+ |
+| `sfx` — Lichess sfx | Enigmahack | AGPLv3+ |
+| `futuristic` — Lichess futuristic | Enigmahack | AGPLv3+ |
+| `nes` — Lichess NES | Enigmahack | AGPLv3+ |
+| `lisp` — Lichess lisp | EdinburghCollective | CC BY-NC-SA 4.0 |
+| `robot` — Lichess robot | the lila authors | AGPLv3+ |
+| `woodland` — Lichess woodland | the lila authors | AGPLv3+ |
 
 ## chess.com
 

@@ -87,12 +87,24 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt pyinstaller
 
-      - name: Fetch the engine and the bundled data
-        run: |
-          python tools/fetch_stockfish.py
-          python tools/fetch_openings.py
-          python tools/fetch_sounds.py
-          python tools/fetch_pieces.py
+      # One script per step: four downloads under one name report only "exit code 1",
+      # which says nothing about which of them failed.
+      - name: Fetch the engine
+        run: python tools/fetch_stockfish.py
+
+      - name: Build the opening data
+        run: python tools/fetch_openings.py
+
+      # The sounds and the piece art are committed, so these two only refresh what the
+      # checkout already has. A flaky download of an asset that is already present must
+      # not sink a release, so they are allowed to fail and are still reported.
+      - name: Refresh the bundled sounds
+        continue-on-error: true
+        run: python tools/fetch_sounds.py
+
+      - name: Refresh the piece art
+        continue-on-error: true
+        run: python tools/fetch_pieces.py
 
       - name: Build
         run: python -m PyInstaller --noconfirm caissa.spec

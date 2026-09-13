@@ -4,7 +4,7 @@ window.ComputerPlay=(function(){
   let game=new Chess(),side='w',level=5,started=false,result='*',revision=0,request=0;
   const positions=[];
   function mount(content,ui){
-    const {h,button,field,select,api,heading,analyze}=ui;
+    const {h,button,field,select,api,heading,analyze,resizeBoard}=ui;
     let closed=false,busy=false;
     const holder=h('div.board-holder'),b=new Board(holder,{viewOnly:false}),status=h('p.computer-status',{role:'status'}),moves=h('div.computer-moves');
     const difficulty=select(Array.from({length:11},(_,i)=>[String(i+1),'Level '+(i+1)+(i===10?' · These go to eleven':'')]),String(level));
@@ -42,6 +42,7 @@ window.ComputerPlay=(function(){
         button('Resign',()=>{if(!started||result!=='*')return;if(!confirm('Resign this game?'))return;++request;busy=false;result=side==='w'?'0-1':'1-0';revision++;render();}),
         button('Analyze game',()=>analyze(pgn())),
         button('Save to database',async()=>{if(!game.history.length)throw new Error('Play a move first.');const rev=revision;await api('games',{pgn:pgn(),collection:'Computer games'});App.toast(revision===rev?'Game saved to Computer games':'Game snapshot saved; save again to include newer moves.');},'primary')])])])]));
+    resizeBoard(holder,'computerBoardSize',()=>window.innerWidth>1000?300:0);
     b.setOrientation(side);render();think();return()=>{closed=true;++request;};
   }
   return {mount};

@@ -401,6 +401,29 @@
     return this._destsFrom(key).length > 0;
   };
 
+  /* Right-clicking while a piece is held aborts the move and snaps the piece home, the
+   * way lichess and chess.com do. A mouse only fires pointerdown for the first button
+   * held, so the extra press reaches us as a chorded pointermove or a mousedown. */
+  Board.prototype.cancelDrag = function () {
+    const drag = this.drag;
+    if (!drag) return false;
+    this.drag = null;
+    drag.el.classList.remove('dragging');
+    drag.el.style.left = '';
+    drag.el.style.top = '';
+    this._place(drag.el, drag.from, false);   // straight back, no glide
+    this.selected = null;
+    this._renderSquares();
+    return true;
+  };
+
+  Board.prototype.cancelDrawing = function () {
+    if (!this.drawing) return false;
+    this.drawing = null;
+    this._renderShapes();
+    return true;
+  };
+
   Board.prototype._bindInput = function () {
     const self = this;
     // Arrow drawing follows chessground, the library lichess itself draws with: a
@@ -414,6 +437,8 @@
     }
     this.wrap.addEventListener('contextmenu', e => e.preventDefault());
     this.wrap.addEventListener('pointerdown', function (e) {
+      /* a second press cancels whatever is in flight rather than starting something new */
+      if (self.cancelDrag() || self.cancelDrawing()) { e.preventDefault(); e.stopImmediatePropagation(); return; }
       /* drawing is about the position, not the moves, so it works on view-only boards */
       if (e.button !== 2 && !(e.button === 0 && e.shiftKey)) return;
       const from = self._keyAt(e);
@@ -477,8 +502,14 @@
 
     this.wrap.addEventListener('pointermove', function (e) {
       if (!self.drag) return;
+      if (e.buttons & 2) { self.cancelDrag(); return; }
       self.drag.moved = true;
       self._dragTo(e);
+    });
+    /* Belt and braces: browsers that do not report the chorded press as a pointermove
+       still fire a mousedown for every button. */
+    this.wrap.addEventListener('mousedown', function (e) {
+      if (e.button === 2) self.cancelDrag();
     });
 
     const release = function (e) {

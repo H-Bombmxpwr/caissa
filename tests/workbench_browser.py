@@ -78,6 +78,23 @@ with tempfile.TemporaryDirectory(prefix='caissa-browser-') as data:
             assert page.locator('.analysis-board .cg-shapes line').count()==1,'not stacked'
             page.get_by_role('button',name='Clear arrows',exact=True).click()
             assert page.locator('.analysis-board .cg-shapes line').count()==0
+            # Right-clicking while a piece is held abandons the move, as on lichess: the
+            # piece goes home, no arrow is painted in its place, and the tree is untouched.
+            def square(file,rank):
+                return x+w*('abcdefgh'.index(file)+.5)/8, y+w*(8-rank+.5)/8
+            standing=page.evaluate('Caissa.state.node.san')
+            page.mouse.move(*square('a',7))
+            page.mouse.down()
+            page.mouse.move(*square('a',5),steps=5)
+            assert page.locator('.analysis-board piece.dragging').count()==1,'piece follows the cursor'
+            page.mouse.down(button='right')
+            assert page.locator('.analysis-board piece.dragging').count()==0,'right click drops the piece'
+            page.mouse.up(button='right')
+            page.mouse.up()
+            assert page.evaluate('Caissa.state.node.san')==standing,'a cancelled drag plays no move'
+            assert page.locator('.analysis-board .cg-board square.selected').count()==0,'and leaves nothing selected'
+            assert page.locator('.analysis-board .cg-shapes line').count()==0,'and draws no arrow'
+            assert page.locator('.analysis-board piece.black.pawn').count()==8,'the pawn is still on the board'
             before=page.locator('.analysis-board .cg-wrap').bounding_box()['width']
             page.locator('.board-resize').hover()
             page.mouse.down()

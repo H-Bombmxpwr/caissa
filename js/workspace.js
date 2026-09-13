@@ -299,14 +299,22 @@
       ...data.batches.filter(b=>b.games||b.undone).map(b=>h('div.context-item',[h('span',{text:b.label+' · '+new Date(b.created_at*1000).toLocaleString()+' · '+b.games+' games'}),
         ...(b.games?[button('Undo import',async()=>{if(!confirm('Remove the '+b.games+' games added by this import?'))return;await api('import/undo',{batch_id:b.id});await importHistory();})]:[h('span',{text:' · Undone'})])])),button('Refresh import history',importHistory));
   }
-  function resizeBoard(holder,preference='boardSize'){
+  /* reserve() is the room the rest of the row needs, so the board can never be dragged
+     wide enough to squeeze its own side panels off the screen. */
+  function resizeBoard(holder,preference='boardSize',reserve){
     const handle=h('button.board-resize',{type:'button',text:'◢',title:'Drag to resize board','aria-label':'Resize board'});
     holder.append(handle);holder.style.position='relative';
-    const apply=width=>{const grid=holder.closest('.analysis-grid,.opening-grid');const reserve=window.innerWidth>1400?550:window.innerWidth>950?300:0;const max=Math.max(260,Math.min(1000,grid.getBoundingClientRect().width-reserve));const size=Math.max(260,Math.min(max,width));grid.style.setProperty('--board-size',size+'px');};
+    const room=reserve||(()=>window.innerWidth>1400?550:window.innerWidth>950?300:0);
+    const gridOf=()=>holder.closest('.analysis-grid,.opening-grid,.computer-grid');
+    /* Measure and store the grid column, not the holder: where the board sits inside a
+       padded card the two differ, and saving the inner width shrinks it on every visit. */
+    const column=()=>{const grid=gridOf();return (grid&&parseFloat(getComputedStyle(grid).gridTemplateColumns))||holder.getBoundingClientRect().width;};
+    let applied=0;
+    const apply=width=>{const grid=gridOf();if(!grid)return;const max=Math.max(260,Math.min(1000,grid.getBoundingClientRect().width-room()));applied=Math.max(260,Math.min(max,width));grid.style.setProperty('--board-size',applied+'px');};
     if(state.prefs[preference])apply(state.prefs[preference]);
-    handle.addEventListener('pointerdown',e=>{e.preventDefault();handle.setPointerCapture(e.pointerId);const x=e.clientX,width=holder.getBoundingClientRect().width;
+    handle.addEventListener('pointerdown',e=>{e.preventDefault();handle.setPointerCapture(e.pointerId);const x=e.clientX,width=column();
       const move=e=>apply(width+e.clientX-x);
-      const end=act(async()=>{handle.removeEventListener('pointermove',move);handle.removeEventListener('pointerup',end);handle.removeEventListener('pointercancel',end);state.prefs[preference]=holder.getBoundingClientRect().width;await savePrefs();});
+      const end=act(async()=>{handle.removeEventListener('pointermove',move);handle.removeEventListener('pointerup',end);handle.removeEventListener('pointercancel',end);state.prefs[preference]=applied||column();await savePrefs();});
       handle.addEventListener('pointermove',move);handle.addEventListener('pointerup',end);handle.addEventListener('pointercancel',end);
     });
   }
@@ -530,7 +538,7 @@
     if(App.cleanup){App.cleanup();App.cleanup=null;App.peek.end();}
     content.dataset.view=view;location.hash='workspace/'+view;content.replaceChildren(h('p.muted',{text:'Opening your workspace…'}));
     try {await refreshMeta();if(ticket!==state.route)return;content.replaceChildren();
-      await ({computer:()=>{state.analysisCleanup=ComputerPlay.mount(content,{h,button,field,select,api,heading,promote:choose=>modal('Promote pawn',(body,close)=>body.append(h('div.toolbar',['q','r','b','n'].map(p=>button(p.toUpperCase(),()=>{close();choose(p);}))))),analyze:pgn=>{stashBoard();state.boards.splice(++state.boardIndex,0,makeBoard());adoptBoard(state.boardIndex);state.parsed=PGN.parse(pgn);state.node=state.parsed.root;state.selected=null;state.dirty=true;stashBoard();return go('analysis');}});},database:database,analysis:analysis,repertoire:repertoires,masters:masters,imports:imports,studies:studies,tactics:tactics,settings:settings,books:()=>LibraryTools.booksView(content),openingbook:()=>LibraryTools.openingView(content)}[view]||database)();
+      await ({computer:()=>{state.analysisCleanup=ComputerPlay.mount(content,{h,button,field,select,api,heading,resizeBoard,promote:choose=>modal('Promote pawn',(body,close)=>body.append(h('div.toolbar',['q','r','b','n'].map(p=>button(p.toUpperCase(),()=>{close();choose(p);}))))),analyze:pgn=>{stashBoard();state.boards.splice(++state.boardIndex,0,makeBoard());adoptBoard(state.boardIndex);state.parsed=PGN.parse(pgn);state.node=state.parsed.root;state.selected=null;state.dirty=true;stashBoard();return go('analysis');}});},database:database,analysis:analysis,repertoire:repertoires,masters:masters,imports:imports,studies:studies,tactics:tactics,settings:settings,books:()=>LibraryTools.booksView(content),openingbook:()=>LibraryTools.openingView(content)}[view]||database)();
     }catch(err){if(ticket===state.route)content.replaceChildren(h('div.view-error',[h('h2',{text:'Could not open this view'}),h('p.error-message',{text:err.message}),button('Try again',()=>go(view))]));}
   }
   async function database() {

@@ -16,6 +16,20 @@ def check(page):
     page.get_by_role('button',name='Save to database',exact=True).click()
     page.wait_for_function('document.body.textContent.includes("Game saved to Computer games")')
     page.screenshot(path=str(shots/'computer.png'),full_page=True)
+    # The computer board resizes by its corner handle and the width is remembered.
+    wide=page.locator('.computer-grid .cg-wrap').bounding_box()['width']
+    grip=page.locator('.computer-grid .board-resize').bounding_box()
+    page.mouse.move(grip['x']+grip['width']/2,grip['y']+grip['height']/2)
+    page.mouse.down()
+    page.mouse.move(grip['x']-120,grip['y'],steps=5)
+    page.mouse.up()
+    narrow=page.locator('.computer-grid .cg-wrap').bounding_box()['width']
+    assert narrow<wide-60,(wide,narrow)
+    page.wait_for_function('Caissa.state.prefs.computerBoardSize>0')
+    page.evaluate('Caissa.go("database")')
+    page.evaluate('Caissa.go("computer")')
+    page.wait_for_selector('.computer-grid .cg-wrap')
+    assert abs(page.locator('.computer-grid .cg-wrap').bounding_box()['width']-narrow)<8,'width survives leaving the view'
     page.get_by_role('button',name='Analyze game',exact=True).click()
     page.wait_for_selector('.analysis-board')
     assert page.evaluate('Caissa.state.parsed.root.children[0].san')=='d4'
