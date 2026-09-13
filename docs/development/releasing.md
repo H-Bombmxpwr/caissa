@@ -29,6 +29,14 @@ anything, which is the way to test a change to it.
 | macOS (Apple silicon) | `Caissa-macos-arm64.zip` | `macos-latest` |
 | Linux x64 | `Caissa-linux-x64.tar.gz` | `ubuntu-latest` |
 
+> **The engine download is the part that breaks**
+>
+> Stockfish renames its release assets from time to time, and when it does the old name
+> keeps matching on one platform and stops matching on the others — which is exactly how
+> a release ends up shipping Windows only. `tests/test_fetch_stockfish.py` pins the
+> current and historical naming for all six platform/architecture combinations, and pins
+> both archive formats, so a rename fails a test instead of a release.
+
 ## What each platform needs
 
 - **Windows** — Edge WebView2, which ships with Windows 10 and 11. An unsigned build

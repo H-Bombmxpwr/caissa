@@ -24,6 +24,7 @@ against a temporary one.
 | `test_collection_links.py` | games shelved in several collections, and the routes that manage them |
 | `test_autoimport.py` | the lichess game watcher: settings, windows, failures and teardown |
 | `test_openingtree.py` | the explorer: player perspective, filters, trends and weakest-line collapsing |
+| `test_fetch_stockfish.py` | picking and unpacking the right engine build for each platform |
 
 ## The JavaScript rules engine
 

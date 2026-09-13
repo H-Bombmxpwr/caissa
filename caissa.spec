@@ -56,14 +56,6 @@ exe = EXE(
     icon=ICON,
 )
 
-# macOS expects an .app bundle; the others ship the collected folder as it is.
-if sys.platform == 'darwin':
-    app = BUNDLE(EXE(pyz, a.scripts, [], exclude_binaries=True, name='Caissa',
-                     debug=False, strip=False, upx=False, console=False, icon=ICON),
-                 a.binaries, a.datas, name='Caissa.app', icon=ICON,
-                 bundle_identifier='org.caissa.workbench',
-                 info_plist={'NSHighResolutionCapable': True, 'LSMinimumSystemVersion': '11.0'})
-
 coll = COLLECT(
     exe,
     a.binaries,
@@ -72,3 +64,18 @@ coll = COLLECT(
     upx=False,
     name='Caissa',
 )
+
+# macOS expects an .app bundle, and BUNDLE wraps the collected folder — not a second
+# EXE. The other platforms ship the folder as it is.
+if sys.platform == 'darwin':
+    app = BUNDLE(
+        coll,
+        name='Caissa.app',
+        icon=ICON,
+        bundle_identifier='org.caissa.workbench',
+        info_plist={
+            'NSHighResolutionCapable': True,
+            'LSMinimumSystemVersion': '11.0',
+            'CFBundleShortVersionString': '1.0.0',
+        },
+    )
