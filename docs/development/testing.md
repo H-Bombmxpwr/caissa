@@ -6,7 +6,7 @@ against a temporary one.
 ## The Python suite
 
 ```powershell
-.venv\Scripts\python -m unittest discover -s tests -t . -p "test_*.py"
+uv run python -m unittest discover -s tests -p "test_*.py"
 ```
 
 | File | Covers |
@@ -39,14 +39,15 @@ round-trips, and a legality check of every stored opening, endgame and study.
 
 These drive a real Edge through Playwright:
 
+Playwright arrives with `uv sync`; the browser itself is the Edge you already have.
+
 ```powershell
-.venv\Scripts\python -m pip install playwright
-.venv\Scripts\python tests\workbench_browser.py
-.venv\Scripts\python tests\sounds_browser.py
-.venv\Scripts\python tests\autoimport_browser.py
-.venv\Scripts\python tests\explorer_browser.py
-.venv\Scripts\python tests\deploy_browser.py
-.venv\Scripts\python tests\analysis_quality_browser.py
+uv run python tests\workbench_browser.py
+uv run python tests\sounds_browser.py
+uv run python tests\autoimport_browser.py
+uv run python tests\explorer_browser.py
+uv run python tests\deploy_browser.py
+uv run python tests\analysis_quality_browser.py
 ```
 
 `workbench_browser.py` checks board rendering against the rules engine, navigation,
@@ -93,7 +94,7 @@ msedge --headless=new --virtual-time-budget=30000 --dump-dom `
 ## The built executable
 
 ```powershell
-.venv\Scripts\python tests\check_bundle.py
+uv run python tests\check_bundle.py
 ```
 
 Starts `dist/Caissa/Caissa.exe` against a temporary library, checks it comes up with an

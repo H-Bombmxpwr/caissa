@@ -1,0 +1,55 @@
+# Dependencies are managed with uv (https://docs.astral.sh/uv/).
+#
+#     uv sync                    the runtime, plus every development group below
+#     uv sync --no-dev           the two runtime packages and nothing else
+#     uv run desktop.py          launch without activating anything
+#
+# uv.lock pins the exact resolution and is committed: it is what makes a checkout on
+# another machine install the same versions this one was tested against.
+
+[project]
+name = "caissa"
+version = "1.0.1"
+description = "A desktop chess workbench — a lighter ChessBase."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "GPL-3.0-or-later"
+authors = [{ name = "Hunter" }]
+
+# Everything the application itself needs. pywebview draws the desktop window (Edge
+# WebView2 on Windows); psutil measures the Stockfish process's CPU and memory.
+dependencies = [
+    "pywebview>=5.0",
+    "psutil>=5.9",
+]
+
+[project.optional-dependencies]
+# Reading lichess' .zst database dumps. Genuinely optional: the importers work without
+# it and say so by name when a .zst arrives, which is why this is an extra rather than
+# a plain dependency.
+zst = ["zstandard>=0.22"]
+
+[dependency-groups]
+test = ["playwright>=1.40"]
+# chess builds the shipped opening book; see tools/build_opening_book.py.
+build = ["pyinstaller>=6.0", "chess>=1.11"]
+docs = [
+    "sphinx>=8",
+    "myst-parser>=4",
+    "furo>=2024.8",
+    "sphinx-copybutton>=0.5",
+    "sphinx-design>=0.6",
+    "sphinxcontrib-mermaid>=1.0",
+]
+# Installed by a bare `uv sync`, so one command gives a checkout everything it needs to
+# run the suites, build the executable and build the documentation.
+dev = [
+    { include-group = "test" },
+    { include-group = "build" },
+    { include-group = "docs" },
+]
+
+[tool.uv]
+# Caissa is an application, not a library: it is run from the checkout, never built as
+# a wheel or imported by anything else. This keeps uv from trying to package it.
+package = false

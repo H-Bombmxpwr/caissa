@@ -51,14 +51,17 @@ for the machine you are on; the files themselves are on
 pick one by hand. Or run from source:
 
 ```bash
-py tools/fetch_stockfish.py          # the engine, ~80 MB, not stored in git
-py -m venv .venv
-.venv/Scripts/python -m pip install -r requirements.txt
-.venv/Scripts/python desktop.py
+uv sync                                  # creates .venv from uv.lock
+uv run python tools/fetch_stockfish.py   # the engine, ~80 MB, not stored in git
+uv run desktop.py
 ```
 
-Optional extras: `py tools/fetch_sounds.py` for the bundled move sounds, and
-`py tools/fetch_pieces.py` for the alternative piece sets.
+Dependencies are managed with [uv](https://docs.astral.sh/uv/): `uv sync` builds the
+environment from the committed `uv.lock`, and `uv run` uses it without activating
+anything. Add `--no-dev` for just the two packages the application needs.
+
+Optional extras: `uv run python tools/fetch_sounds.py` for the bundled move sounds, and
+`uv run python tools/fetch_pieces.py` for the alternative piece sets.
 
 Your library lives outside the application folder — `%APPDATA%\Caissa\library` on
 Windows — so replacing or reinstalling the app never touches your games. Full
@@ -86,14 +89,14 @@ The guide, the HTTP API reference and the generated Python API live at
 ## Contributing
 
 ```bash
-.venv/Scripts/python -m unittest discover -s tests -t . -p "test_*.py"   # backend, no network
-powershell -File tests/run.ps1                                          # JS rules engine, perft
-.venv/Scripts/python tests/workbench_browser.py                         # UI regressions, needs Edge
+uv run python -m unittest discover -s tests -p "test_*.py"   # backend, no network
+powershell -File tests/run.ps1                                    # JS rules engine, perft
+uv run python tests/workbench_browser.py                          # UI regressions, needs Edge
 ```
 
 Every suite and what it covers is listed in
 [Testing](https://h-bombmxpwr.github.io/caissa/development/testing.html). Build the
-executable with `py tools/build_exe.py` — see
+executable with `uv run python tools/build_exe.py` — see
 [Building](https://h-bombmxpwr.github.io/caissa/development/building.html).
 
 ## Licence

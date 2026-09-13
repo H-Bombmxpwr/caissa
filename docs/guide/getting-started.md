@@ -8,13 +8,19 @@ Fetch the engine first. It is about 80 MB and is deliberately not stored in git:
 py tools\fetch_stockfish.py
 ```
 
-Then create the environment and start the app:
+Then install the dependencies and start the app. Caissa uses
+[uv](https://docs.astral.sh/uv/); `uv sync` creates `.venv` and installs the exact
+versions recorded in `uv.lock`, so you never create or activate an environment yourself:
 
 ```powershell
-py -m venv .venv
-.venv\Scripts\python -m pip install -r requirements.txt
-.venv\Scripts\python desktop.py
+uv sync
+uv run desktop.py
 ```
+
+`uv sync --no-dev` installs only the two packages the application needs, without the
+test, build and documentation tooling. If you would rather not install uv,
+`py -m venv .venv` followed by `.venv\Scripts\python -m pip install pywebview psutil`
+gets you the same runtime by hand.
 
 `desktop.py` opens a native window (Edge WebView2 through pywebview). Other ways in:
 

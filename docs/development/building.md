@@ -1,9 +1,9 @@
 # Building the executable
 
 ```powershell
-py tools\build_exe.py
-py tools\build_exe.py --clean     # from scratch
-py tools\package_windows.py      # verified portable ZIP and SHA-256 checksum
+uv run python tools\build_exe.py
+uv run python tools\build_exe.py --clean     # from scratch
+uv run python tools\package_windows.py      # verified portable ZIP and SHA-256 checksum
 ```
 
 The result is `dist/Caissa/Caissa.exe` with an `_internal` folder beside it. The build
@@ -30,7 +30,7 @@ using the [release workflow](releasing.md).
 ## Checking it
 
 ```powershell
-.venv\Scripts\python tests\check_bundle.py
+uv run python tests\check_bundle.py
 ```
 
 ## Where the library goes

@@ -16,9 +16,26 @@ import sys
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-PYTHON = os.path.join(ROOT, ".venv", "Scripts", "python.exe")
-if not os.path.exists(PYTHON):
-    PYTHON = sys.executable
+
+
+def _project_python():
+    """The interpreter to run the helper scripts with.
+
+    Running under `uv run` already puts us inside the project environment, so prefer
+    the current interpreter. Otherwise look for the environment uv creates, on both
+    layouts: Scripts/python.exe on Windows, bin/python everywhere else.
+    """
+    if os.path.dirname(os.path.abspath(sys.executable)).startswith(
+            os.path.join(ROOT, ".venv")):
+        return sys.executable
+    for parts in ((".venv", "Scripts", "python.exe"), (".venv", "bin", "python")):
+        candidate = os.path.join(ROOT, *parts)
+        if os.path.exists(candidate):
+            return candidate
+    return sys.executable
+
+
+PYTHON = _project_python()
 OUT = os.path.join(ROOT, "dist", "Caissa", "Caissa.exe")
 
 
