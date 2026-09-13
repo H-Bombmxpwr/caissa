@@ -79,3 +79,23 @@ if sys.platform == 'darwin':
             'CFBundleShortVersionString': '1.0.0',
         },
     )
+
+# Windows: a build that arrives as a downloaded .zip carries the mark of the web on
+# every file Explorer extracts, which puts them in the internet zone. .NET Framework
+# then refuses to load pywebview's bundled Python.Runtime.dll from that zone, so the
+# window never opens and the app dies during startup with
+#     Failed to resolve Python.Runtime.Loader.Initialize
+# The assemblies being refused are the ones shipped inside this very bundle, so opting
+# them back into full trust is the whole fix. The file has to sit next to the .exe,
+# which is not where COLLECT puts datas, so it is written here once the folder exists.
+if sys.platform == 'win32':
+    with open(os.path.join(DISTPATH, 'Caissa', 'Caissa.exe.config'), 'w',
+              encoding='utf-8') as handle:
+        handle.write(
+            '<?xml version="1.0" encoding="utf-8"?>\n'
+            '<configuration>\n'
+            '  <runtime>\n'
+            '    <loadFromRemoteSources enabled="true" />\n'
+            '  </runtime>\n'
+            '</configuration>\n'
+        )
