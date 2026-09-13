@@ -10,13 +10,14 @@ Your games, on your disk, as ordinary PGN. Analysed by a bundled Stockfish,
 explored move by move, drilled as a repertoire, and studied blindfold.
 
 [![Documentation](https://img.shields.io/badge/Documentation-read%20the%20guide-315e48?style=for-the-badge)](https://h-bombmxpwr.github.io/caissa/)
-[![Download](https://img.shields.io/badge/Download-Windows%20·%20macOS%20·%20Linux-2d6a4f?style=for-the-badge)](https://github.com/H-Bombmxpwr/caissa/releases/latest)
+[![Download](https://img.shields.io/badge/Download-Windows%20·%20macOS%20·%20Linux-2d6a4f?style=for-the-badge)](https://caissa.hxr.life/)
 
 [![Licence](https://img.shields.io/badge/licence-GPLv3-blue)](#licence)
 [![Docs build](https://github.com/H-Bombmxpwr/caissa/actions/workflows/docs.yml/badge.svg)](https://github.com/H-Bombmxpwr/caissa/actions/workflows/docs.yml)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/)
 [![Works offline](https://img.shields.io/badge/works-offline-success)](https://h-bombmxpwr.github.io/caissa/guide/getting-started.html)
 
+[Download](https://caissa.hxr.life/) ·
 [Getting started](https://h-bombmxpwr.github.io/caissa/guide/getting-started.html) ·
 [Importing](https://h-bombmxpwr.github.io/caissa/guide/importing.html) ·
 [Opening explorer](https://h-bombmxpwr.github.io/caissa/guide/explorer.html) ·
@@ -44,8 +45,10 @@ endgame tablebase lookup, a Wikipedia summary.
 
 ## Install
 
-Download the build for your platform from
-**[Releases](https://github.com/H-Bombmxpwr/caissa/releases/latest)**, or run from source:
+Download it from **[caissa.hxr.life](https://caissa.hxr.life/)**, which offers the build
+for the machine you are on; the files themselves are on
+[Releases](https://github.com/H-Bombmxpwr/caissa/releases/latest) if you would rather
+pick one by hand. Or run from source:
 
 ```bash
 py tools/fetch_stockfish.py          # the engine, ~80 MB, not stored in git

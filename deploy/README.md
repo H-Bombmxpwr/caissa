@@ -1,5 +1,7 @@
 # The download page
 
+Live at <https://caissa.hxr.life/>.
+
 This folder is the whole of what gets deployed. It is a static page that links to the
 builds on GitHub Releases, plus a standard-library server to hand it out — no engine, no
 database, no dependencies.

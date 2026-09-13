@@ -66,6 +66,8 @@ visitor that their build is not out yet rather than offering a link that fails.
 
 ## The download page
 
+The page is live at **[caissa.hxr.life](https://caissa.hxr.life/)**.
+
 `deploy/` is a self-contained folder — that is the whole point of it. It holds the page,
 the logo, and a forty-line standard-library server, and nothing else:
 
