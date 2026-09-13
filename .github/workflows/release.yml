@@ -26,6 +26,10 @@ jobs:
   build:
     name: ${{ matrix.label }}
     runs-on: ${{ matrix.os }}
+    # Windows is the supported platform and must build. macOS and Linux are marked
+    # experimental: they are built on every release and their failure is reported, but
+    # it does not hold back a release of the platform that does work.
+    continue-on-error: ${{ matrix.experimental == true }}
     strategy:
       fail-fast: false
       matrix:
@@ -36,9 +40,11 @@ jobs:
           - os: macos-latest
             label: macOS (Apple silicon)
             asset: Caissa-macos-arm64.zip
+            experimental: true
           - os: ubuntu-latest
             label: Linux x64
             asset: Caissa-linux-x64.tar.gz
+            experimental: true
 
     steps:
       - uses: actions/checkout@v4
@@ -48,9 +54,8 @@ jobs:
           python-version: '3.12'
           cache: pip
 
-      # pywebview needs a native web view. Windows has Edge WebView2 and macOS has
-      # WKWebView already; Linux needs WebKitGTK and the GObject bindings.
-      # pywebview needs a native web view and its Python bindings. The system
+      # pywebview needs a native web view and its Python bindings. Windows has Edge
+      # WebView2 and macOS has WKWebView already; Linux needs WebKitGTK. The system
       # python3-gi package installs into the system interpreter, not the one
       # actions/setup-python provides, so the bindings are installed with pip too —
       # which needs the girepository headers to build against.
@@ -128,21 +133,47 @@ jobs:
           path: downloads
           merge-multiple: true
 
+      - name: Write the release notes from what actually built
+        id: notes
+        shell: bash
+        run: |
+          cd downloads
+          ls -la
+          {
+            echo 'Download the build for your platform, unpack it, and run **Caissa**.'
+            echo
+            for f in *; do
+              size=$(du -h "$f" | cut -f1)
+              case "$f" in
+                *windows*) echo "* **Windows** — \`$f\` ($size). SmartScreen will warn about an"
+                           echo "  unsigned application: choose *More info → Run anyway*." ;;
+                *macos*)   echo "* **macOS** — \`$f\` ($size). Not notarised, so the first launch"
+                           echo "  needs *right-click → Open* rather than a double-click." ;;
+                *linux*)   echo "* **Linux** — \`$f\` ($size). Needs WebKitGTK:"
+                           echo '  `sudo apt install gir1.2-webkit2-4.1 python3-gi`.' ;;
+              esac
+            done
+            echo
+            for want in windows macos linux; do
+              if ! ls | grep -qi "$want"; then
+                case "$want" in
+                  windows) echo '> **Windows is not in this release.** Build from source: see the README.' ;;
+                  macos)   echo '> **macOS is not in this release yet.** The build is still being brought up;'
+                           echo '> run from source in the meantime — see the README.' ;;
+                  linux)   echo '> **Linux is not in this release yet.** The build is still being brought up;'
+                           echo '> run from source in the meantime — see the README.' ;;
+                esac
+                echo
+              fi
+            done
+            echo 'Your library is kept outside the application folder, so replacing this build'
+            echo 'never touches your games. See the [documentation](https://h-bombmxpwr.github.io/caissa/).'
+          } > "$RUNNER_TEMP/notes.md"
+          cat "$RUNNER_TEMP/notes.md"
+
       - name: Attach the builds to the release
         uses: softprops/action-gh-release@v2
         with:
           files: downloads/*
+          body_path: ${{ runner.temp }}/notes.md
           generate_release_notes: true
-          body: |
-            Download the build for your platform below, unzip it, and run **Caissa**.
-
-            * **Windows** — `Caissa-windows-x64.zip`. Windows SmartScreen will warn about
-              an unsigned application: choose *More info → Run anyway*.
-            * **macOS** — `Caissa-macos-arm64.zip`. The app is not notarised, so the first
-              launch needs *right-click → Open* rather than a double-click.
-            * **Linux** — `Caissa-linux-x64.tar.gz`. Needs WebKitGTK:
-              `sudo apt install gir1.2-webkit2-4.1 python3-gi`.
-
-            Your library is kept outside the application folder, so replacing this build
-            never touches your games. See the
-            [documentation](https://h-bombmxpwr.github.io/caissa/).

@@ -23,11 +23,20 @@ packages, and uploads. The `publish` job then creates the release with all three
 attached. Running the workflow by hand instead builds the artifacts without publishing
 anything, which is the way to test a change to it.
 
-| Platform | Asset | Built on |
-| --- | --- | --- |
-| Windows x64 | `Caissa-windows-x64.zip` | `windows-latest` |
-| macOS (Apple silicon) | `Caissa-macos-arm64.zip` | `macos-latest` |
-| Linux x64 | `Caissa-linux-x64.tar.gz` | `ubuntu-latest` |
+| Platform | Asset | Built on | Blocks the release? |
+| --- | --- | --- | --- |
+| Windows x64 | `Caissa-windows-x64.zip` | `windows-latest` | yes |
+| macOS (Apple silicon) | `Caissa-macos-arm64.zip` | `macos-latest` | no — experimental |
+| Linux x64 | `Caissa-linux-x64.tar.gz` | `ubuntu-latest` | no — experimental |
+
+Windows is the supported platform and must build. macOS and Linux are marked
+`experimental` in the matrix, so they are attempted on every release and their failure
+is reported, but they do not hold back a release of the platform that does work. Take
+the marking off once each has built successfully.
+
+The release notes are written from what actually built, so a Windows-only release says
+so instead of promising three downloads, and the download page tells a macOS or Linux
+visitor that their build is not out yet rather than offering a link that fails.
 
 > **The engine download is the part that breaks**
 >

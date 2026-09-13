@@ -157,11 +157,23 @@
         return a.name.toLowerCase().indexOf(pick) !== -1;
       })[0];
       if (!match) {
-        // A release exists but not for this platform, or the platform is unknown.
-        button.href = release.html_url;
-        label.textContent = 'Downloads for ' + release.tag_name;
-        note.textContent = assets.length ? 'Choose the build for your system.'
+        // A release exists, but not for this platform. Windows is built first; macOS
+        // and Linux are still being brought up, so say that rather than shrugging.
+        var have = ['windows', 'macos', 'linux'].filter(function (os) {
+          return assets.some(function (a) { return a.name.toLowerCase().indexOf(os) !== -1; });
+        }).map(function (os) { return named[os]; });
+        if (pick) {
+          button.href = 'https://github.com/' + REPO + '#install';
+          label.textContent = 'Build from source';
+          note.textContent = 'No ' + named[pick] + ' build yet'
+                           + (have.length ? ' — ' + have.join(' and ') + ' only so far. ' : '. ')
+                           + 'Running from source takes three commands.';
+        } else {
+          button.href = release.html_url;
+          label.textContent = 'Downloads for ' + release.tag_name;
+          note.textContent = have.length ? 'Available for ' + have.join(' and ') + '.'
                                          : 'This release has no attached builds yet.';
+        }
         return;
       }
       button.href = match.browser_download_url;

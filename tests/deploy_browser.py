@@ -95,12 +95,31 @@ try:
         assert 'No builds have been published' in page.locator('#note').inner_text()
         page.close()
 
-        # 3. A release with no asset for this platform: offer the release page, not a guess.
-        page = open_page(AGENTS['linux'][0],
-                         lambda r: r.fulfill(json=release(['Caissa-windows-x64.zip'])))
+        # 3. A Windows-only release, which is how this starts: a Linux or macOS visitor
+        #    is told their build is not out yet and sent to the source, not to a guess.
+        for key in ('linux', 'macos'):
+            page = open_page(AGENTS[key][0],
+                             lambda r: r.fulfill(json=release(['Caissa-windows-x64.zip'])))
+            page.wait_for_function(
+                '''()=>document.getElementById('download-label').textContent==='Build from source' ''')
+            assert page.locator('#download').get_attribute('href').endswith('#install')
+            note = page.locator('#note').inner_text()
+            assert AGENTS[key][1] in note and 'Windows only so far' in note, note
+            page.close()
+
+        # An unrecognised platform still gets the release page rather than nothing.
+        # Chromium derives client hints from the real OS, so the identity is replaced
+        # before the page loads rather than through the user-agent string.
+        page = browser.new_page()
+        page.on('pageerror', lambda e: (errors.append(str(e)), print('Browser error:', e, flush=True)))
+        page.add_init_script('''Object.defineProperty(navigator,'userAgentData',{get:()=>undefined});
+            Object.defineProperty(navigator,'userAgent',{get:()=>'SomeUnknownOS/1.0'});''')
+        page.route(API, lambda r: r.fulfill(json=release(all_assets)))
+        page.goto(url)
         page.wait_for_function(
             '''()=>document.getElementById('download-label').textContent.includes('v2.1.0')''')
         assert 'releases/tag/v2.1.0' in page.locator('#download').get_attribute('href')
+        assert 'Windows and macOS and Linux' in page.locator('#note').inner_text()
         page.close()
 
         # 4. Offline or rate limited: the button keeps its releases link and still works.
