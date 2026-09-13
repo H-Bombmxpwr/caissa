@@ -17,6 +17,7 @@ import os
 import platform
 import stat
 import sys
+import urllib.error
 import urllib.request
 import tarfile
 import zipfile
@@ -27,10 +28,41 @@ DEST = os.path.join(ROOT, "vendor", "stockfish")
 UA = {"User-Agent": "Caissa-build/1.0"}
 
 
+def api_headers():
+    """Headers for the one call this script makes to GitHub's API.
+
+    Unauthenticated callers get 60 requests an hour per IP address, and hosted CI
+    runners share their outbound addresses with every other job on the fleet — so a
+    release build can fail with "rate limit exceeded" having changed nothing about
+    itself. A token raises the ceiling to 5000 an hour and counts it against the token
+    rather than the address. Any token works: the Stockfish repository is public and
+    this only ever reads.
+
+    Only the API call carries it. The asset download that follows redirects to a CDN
+    that rejects a request arriving with someone else's Authorization header, which is
+    why UA is passed there instead.
+    """
+    headers = dict(UA)
+    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+    if token:
+        headers["Authorization"] = "Bearer " + token
+    return headers
+
+
 def latest_release():
-    req = urllib.request.Request(RELEASES, headers=UA)
-    with urllib.request.urlopen(req, timeout=60) as res:
-        return json.loads(res.read().decode("utf-8"))
+    req = urllib.request.Request(RELEASES, headers=api_headers())
+    try:
+        with urllib.request.urlopen(req, timeout=60) as res:
+            return json.loads(res.read().decode("utf-8"))
+    except urllib.error.HTTPError as err:
+        # 403 is what a rate-limited caller gets; say so, because the bare traceback
+        # points at urllib and reads like a bug in this script.
+        if err.code in (403, 429):
+            raise SystemExit(
+                "GitHub's API refused the request (%s %s). Unauthenticated callers are "
+                "limited to 60 requests an hour per IP address, which shared CI runners "
+                "routinely exhaust. Set GITHUB_TOKEN to raise that limit." % (err.code, err.reason))
+        raise
 
 
 # Stockfish has renamed its assets more than once — the Linux build was "ubuntu-…"

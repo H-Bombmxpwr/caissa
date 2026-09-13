@@ -89,7 +89,13 @@ jobs:
 
       # One script per step: four downloads under one name report only "exit code 1",
       # which says nothing about which of them failed.
+      # The token is only here to raise GitHub's API rate limit. Unauthenticated
+      # callers get 60 requests an hour per IP, and hosted runners share addresses, so
+      # this step fails intermittently without it — it is what sank the v1.0.3 macOS
+      # and Linux builds. Any token works; the Stockfish repository is public.
       - name: Fetch the engine
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: uv run --no-sync python tools/fetch_stockfish.py
 
       - name: Build the opening data
