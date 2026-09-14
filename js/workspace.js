@@ -937,7 +937,48 @@
       sync();
     });}
   function pinDialog(fen,refresh){modal('Keep this idea',(body,close)=>{const title=h('input',{placeholder:'Why this position matters'}),url=h('input',{placeholder:'https://… (optional)'}),note=h('textarea',{rows:4,placeholder:'Your notes, available offline'});body.append(field('Title',title),field('Link',url),field('Note',note),h('div.dialog-actions',[button('Cancel',close),button('Save to position',async()=>{await api('study/pins',{fen,title:title.value,url:url.value,note:note.value});close();refresh();},'primary')]));});}
-  async function addToRepertoire(){const path=PGN.pathTo(state.node);if(!path.length)throw new Error('Choose a position after at least one move.');const list=await api('repertoires');modal('Keep this line in your repertoire',(body,close)=>{const choices=select([['','Create a repertoire'],...list.repertoires.map(r=>[String(r.id),r.name])],'');const title=h('input',{value:'My White repertoire'}),side=select([['w','White'],['b','Black']],'w');const newFields=h('div',[field('New repertoire name',title),field('Play as',side)]);choices.addEventListener('change',()=>{newFields.hidden=!!choices.value;});body.append(field('Repertoire',choices),newFields,h('p.muted',{text:PGN.lineToText(path)}),h('div.dialog-actions',[button('Cancel',close),button('Add line',async()=>{let rep={name:title.value,color:side.value,data:{lines:[]}};if(choices.value){rep=(await api('repertoires/'+choices.value)).repertoire;rep.data=JSON.parse(rep.data);}rep.data.lines=rep.data.lines||[];const sans=path.map(n=>n.san);if(!rep.data.lines.some(l=>l.moves.join(' ')===sans.join(' ')&&l.fen===state.parsed.startFen))rep.data.lines.push({moves:sans,fen:state.parsed.startFen,due:0,interval:0,successes:0});await api('repertoires'+(choices.value?'/'+choices.value:''),rep,choices.value?'PUT':'POST');close();App.toast('Line added to repertoire');},'primary')]));});}
+  async function addToRepertoire(){
+    const parsed=state.parsed;
+    if(!parsed.root.children.length)throw new Error('Add some moves before saving a repertoire.');
+    const main=PGN.mainline(parsed.root).map(n=>n.san),all=[];
+    const pending=[{node:parsed.root,moves:[]}];
+    while(pending.length){
+      const {node,moves}=pending.pop();
+      if(!node.children.length){if(moves.length)all.push(moves);continue;}
+      for(const child of [...node.children].reverse())pending.push({node:child,moves:[...moves,child.san]});
+    }
+    const list=await api('repertoires');
+    modal('Add to repertoire',(body,close)=>{
+      const choices=select([['','Create a repertoire'],...list.repertoires.map(r=>[String(r.id),r.name])],'');
+      const scope=select([['all','All variations ('+all.length+' lines)'],['main','Main line only']],'all');
+      const title=h('input',{value:'My White repertoire'}),side=select([['w','White'],['b','Black']],'w');
+      const newFields=h('div',[field('New repertoire name',title),field('Play as',side)]);
+      choices.addEventListener('change',()=>{newFields.hidden=!!choices.value;});
+      const preview=h('p.muted');
+      const describe=()=>{preview.textContent=scope.value==='all'
+        ?'Add every complete line from the starting position, including all nested variations. Lines already covered by this repertoire are skipped.'
+        :'Add the complete main line from the starting position to its end, regardless of the selected move. Existing lines are skipped.';};
+      scope.addEventListener('change',describe);describe();
+      body.append(field('Repertoire',choices),newFields,field('Include',scope),preview,h('div.dialog-actions',[
+        button('Cancel',close),button('Add lines',async()=>{
+          let rep={name:title.value.trim(),color:side.value,data:{lines:[]}};
+          if(choices.value){rep=(await api('repertoires/'+choices.value)).repertoire;rep.data=JSON.parse(rep.data);}
+          if(!rep.name)throw new Error('Enter a repertoire name.');
+          rep.data.lines=rep.data.lines||[];
+          const fen=parsed.startFen;
+          let added=0,skipped=0;
+          for(const moves of scope.value==='all'?all:[main]){
+            const covered=rep.data.lines.some(line=>(line.fen||Chess.DEFAULT_FEN)===fen
+              &&line.moves.length>=moves.length&&moves.every((move,index)=>line.moves[index]===move));
+            if(covered){skipped++;continue;}
+            rep.data.lines.push({moves,fen,due:0,interval:0,successes:0});added++;
+          }
+          if(added)await api('repertoires'+(choices.value?'/'+choices.value:''),rep,choices.value?'PUT':'POST');
+          close();App.toast(added+' lines added'+(skipped?' - '+skipped+' already covered, skipped':''));
+        },'primary')
+      ]));
+    });
+  }
   // Lichess exports an opening study as a PGN tree: one chapter per idea, with the
   // alternatives written as variations. The server walks that tree into flat lines;
   // this only has to ask which repertoire they belong to and how deep to read.
@@ -988,8 +1029,8 @@
     });
   }
   async function repertoires(){const data=await api('repertoires');content.append(heading('Prepare with purpose','Your repertoire','Keep your lines. Revisit the uncertain moves. Make the ideas yours.',[button('Import repertoire PGN',()=>importRepertoire(()=>go('repertoire'))),button('Build on the board',()=>go('analysis'),'primary')]));content.append(h('details.card.card-pad',{open:true},[h('summary',{text:'How to use your repertoire'}),h('ol',[
-      h('li',{text:'Open a game or play your preparation on the analysis board. Select the final move of the line you want to learn.'}),
-      h('li',{text:'Choose Add to repertoire. Pick an existing repertoire or name a new one, and choose whether you play White or Black.'}),
+      h('li',{text:'Open a game or build your preparation on the analysis board, including any alternative lines you want to learn.'}),
+      h('li',{text:'Choose Add to repertoire, then All variations or Main line only. Both start at the initial position and include complete lines. Choose an existing repertoire or create one; already-covered lines are skipped.'}),
       h('li',{text:'Return here and use Browse lines to study, or Drill due lines to practise. The opponent’s moves are played for you.'}),
       h('li',{text:'Finish the line and choose Save review. Successful reviews move farther apart; retries bring the line back tomorrow.'}),
       h('li',{text:'View repertoire merges shared moves into one study tree per starting position. Different starting positions open as separate labelled boards.'}),

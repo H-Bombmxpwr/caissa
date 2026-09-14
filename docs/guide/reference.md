@@ -107,7 +107,7 @@ the surviving parent. Choose **Save changes** to persist the edit.
   **Up / Down** to select sibling variations, and **Home / End** to reach the start
   or end of the current line. Typing fields retain their normal keyboard behavior.
 - White and Black share a score-sheet row even when a move has a comment. Turn
-  **One move per line** off for compact prose notation. Variations have labelled,
+  **Score sheet rows** off for compact prose notation. Variations have labelled,
   collapsible branches; deeper branches start collapsed. **Expand variations** and
   **Collapse variations** control the whole tree. Select an alternative and use
   **Make main line** to promote it without losing the previous continuation.
@@ -361,3 +361,15 @@ triangle to collapse a line. **Score sheet rows** puts the main line into number
 rows while alternatives stay compact. Each analysis tab keeps its own orientation
 after **Flip**, including when changing notation settings or promoting a move.
 The default orientation in Settings applies to new analysis boards.
+
+
+### Add the entire analysis tree to a repertoire
+
+**Add to repertoire** offers **All variations** (the default) and **Main line only**.
+All variations includes every root-to-end path, including nested branches. Main
+line only follows the first continuation at each move through the end of the
+game; it does not stop at your selected move. Both work from the initial position.
+Choose an existing repertoire or create a new one. Lines already present, or
+already covered by a longer saved line from the same starting position, are
+skipped. Existing review history is preserved, and the completion message reports
+added and skipped counts.
