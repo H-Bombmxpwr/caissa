@@ -9,7 +9,7 @@
 .dock-columns[data-columns=side]>.dock-side{grid-column:1}
 .dock>.panel{margin-top:0}
 .analysis-grid .panel{padding:0}
-.analysis-grid .panel[data-panel=notation] .panel-body{height:430px}
+.analysis-grid .panel[data-panel=notation] .panel-body{height:600px}
 .field{gap:7px}.field>span{font-size:12px;font-weight:600;letter-spacing:.02em}
 input:not([type=checkbox]):not([type=color]),select,textarea{border-radius:7px}
 .section-tabs{display:flex;gap:6px;flex-wrap:wrap;border-bottom:1px solid var(--border);padding-bottom:12px;margin-bottom:24px}

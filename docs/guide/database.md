@@ -105,6 +105,16 @@ already in your library, and not games another import added to the same collecti
 
 ## Indexing positions
 
+Indexing uses the same bottom-right progress card as imports. You can close the
+collection chooser or switch tabs while it runs. Progress is no longer shown
+as running text inside Study folders.
+
+The initial status counts games needing an index. Once that total is available,
+the card shows processed games and a percentage. Already indexed games are not
+included in the remaining work. Completion reports any games that could not be
+indexed; if no work remains, it says all games are already indexed. An import
+and indexing job can each have a card at the same time.
+
 Searching by position needs an index, and building one walks every game in a collection
 and records each position in it. Start it from **Study folders**, from the database's
 **Index positions** button, or from the prompt the analysis board shows when a

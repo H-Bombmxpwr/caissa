@@ -84,3 +84,22 @@
 .tree-move.chosen,.book-move.chosen{background:color-mix(in srgb,var(--accent) 14%,transparent);
   border-radius:6px;box-shadow:inset 3px 0 0 var(--accent)}
 .key-hint{margin-top:8px;font-size:11px}
+
+/* Compact game notation: the main line is bold, alternatives are bracketed paragraphs. */
+.move-tree .notation-lines>.move-cell .move-token button{font-weight:700}
+.move-tree details.variation{position:relative;margin:5px 0 5px 8px;padding:0 0 0 15px;border:0;border-left:1px solid var(--border);background:transparent;font-size:.95em}
+.move-tree details.variation details.variation{margin-left:0;font-size:inherit}
+.move-tree details.variation>summary{cursor:pointer;font-size:inherit;color:var(--text-dim);padding:0;line-height:1.8}
+.move-tree details.variation[open]>summary{position:absolute;left:0;top:0;width:14px}
+.move-tree details.variation[open]>summary .branch-preview{display:none}
+.move-tree .variation-line{display:block;padding:0;line-height:1.9}
+.move-tree .variation-line::before{content:'[';color:var(--text-dim)}
+.move-tree .variation-line::after{content:']';color:var(--text-dim)}
+.move-tree .variation-line .move-cell{display:inline;white-space:normal}
+.move-tree .variation-line .move-token{display:inline-flex;align-items:baseline}
+.move-tree .variation-line button{font-weight:400}
+.move-tree .variation-line .move-note{display:inline;margin:0 5px;font-size:12px}
+
+.color-lines .move-tree details.variation{border-left-color:#4682b4}
+.color-lines .move-tree details.variation details.variation{border-left-color:#c05a55}
+.color-lines .move-tree details.variation details.variation details.variation{border-left-color:#b99732}

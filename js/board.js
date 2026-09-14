@@ -105,6 +105,46 @@
     this._renderSquares();
     this.setBlindfold(this.opts.blindfold);
     this._bindInput();
+    this._bindAccessibleInput();
+  };
+
+  Board.prototype._describeSquare = function (key) {
+    const p=this.pieces[key];
+    const hidden=this.opts.blindfold!=='off'&&!this.peeking;
+    return key+(hidden?'':p?' '+COLOR_CLASS[p.color]+' '+PIECE_CLASS[p.type]:' empty');
+  };
+
+  Board.prototype._bindAccessibleInput = function () {
+    const board=this;
+    this.wrap.tabIndex=0;
+    this.wrap.setAttribute('role','group');
+    this.wrap.setAttribute('aria-label','Chessboard. Arrow keys explore squares. Enter selects a piece or destination. Escape cancels.');
+    this.accessSquare='a1';
+    const controls=el('div','board-access');
+    const status=el('span');status.setAttribute('role','status');
+    const read=el('button','btn');read.type='button';read.textContent='Read position';
+    const speech=el('input');speech.type='checkbox';speech.setAttribute('aria-label','Speak board navigation');
+    const label=el('label');label.append(speech,document.createTextNode(' Speak'));
+    const announce=text=>{status.textContent=text;if(speech.checked&&global.speechSynthesis){global.speechSynthesis.cancel();global.speechSynthesis.speak(new SpeechSynthesisUtterance(text));}};
+    read.addEventListener('click',()=>{
+      if(board.opts.blindfold!=='off'&&!board.peeking){announce('Position hidden. Use Peek to reveal it.');return;}
+      announce((board.positionFen?(board.positionFen.split(' ')[1]==='w'?'White':'Black')+' to move. ':'')+Object.keys(board.pieces).sort().map(k=>board._describeSquare(k)).join('. '));
+    });
+    this.wrap.addEventListener('keydown',event=>{
+      const directions={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]};
+      if(directions[event.key]){
+        event.preventDefault();event.stopPropagation();
+        const [x,y]=keyToCoords(board.accessSquare,board.opts.orientation),[dx,dy]=directions[event.key];
+        board.accessSquare=coordsToKey(Math.max(0,Math.min(7,x+dx)),Math.max(0,Math.min(7,y+dy)),board.opts.orientation);
+        announce(board._describeSquare(board.accessSquare));
+      }else if(event.key==='Enter'){
+        event.preventDefault();event.stopPropagation();
+        if(board.opts.viewOnly){announce(board._describeSquare(board.accessSquare));return;}
+        if(board.selected&&board._destsFrom(board.selected).includes(board.accessSquare))board._tryMove(board.selected,board.accessSquare);
+        else if(board._canMoveFrom(board.accessSquare)){board.selected=board.accessSquare;board._renderSquares();announce('Selected '+board._describeSquare(board.accessSquare));}
+      }else if(event.key==='Escape'){board.selected=null;board._renderSquares();announce('Selection cleared');}
+    });
+    controls.append(read,label,status);this.container.append(controls);
   };
 
   Board.prototype._renderCoords = function () {

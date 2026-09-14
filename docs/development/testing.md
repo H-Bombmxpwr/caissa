@@ -19,6 +19,8 @@ uv run python -m unittest discover -s tests -p "test_*.py"
 | `test_library_tools.py` | books, the opening book, position library |
 | `test_facts_matching.py` | Wikipedia matching, including what it refuses to claim |
 | `test_analysis_quality.py` | annotation judgments |
+| `test_progress.py` | cumulative streamed-import counts, unknown totals, and reset for the next finite import |
+| `test_scouting.py` | player reports, evaluation and clock extraction, opening transpositions, cache invalidation and retests |
 | `test_repertoire_and_kinds.py` | repertoire import, collection kinds, the lichess account, engine and sensor statistics |
 | `test_chessbase.py` | ChessBase encodings, tags, filters and sorts |
 | `test_collection_links.py` | games shelved in several collections, and the routes that manage them |
@@ -54,6 +56,14 @@ uv run python tests\analysis_quality_browser.py
 shapes, panel layout and persistence, the live engine and its telemetry grid, the
 five-colour line palette, tablebase UI, annotation round-trips, import undo, filtered
 deletion, and the two smoke pages.
+
+It also runs `progress_browser_checks.py`: simulated import and indexing jobs
+verify unknown-total states, measured percentages, simultaneous corner cards,
+continued updates across tab changes, completion, errors, and dismissal.
+
+`uv run python tests/scouting_browser.py` checks Player lab reports, printable
+prep sheets, Stockfish practice, keyboard board access and the experimental
+visualization rating against a temporary library.
 
 `autoimport_browser.py` drives the auto-import card with lichess stubbed out: the card
 appears only once an account is connected, settings persist without a save button, a

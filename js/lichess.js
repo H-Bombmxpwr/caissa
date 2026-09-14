@@ -5,6 +5,38 @@
 
   const CACHE_KEY = 'blindfold-lichess-cache-v1';
 
+  // Share only public account identity with forms; the token stays on the server.
+  let identity=null,identityRequest=null,identityVersion=0;
+  const accountFields=new Map();
+  function setIdentity(value){
+    identityVersion++;identity=value;
+    for(const [input,refresh] of accountFields){if(input.isConnected)refresh();else accountFields.delete(input);}
+    global.dispatchEvent(new CustomEvent('caissa-account-changed',{detail:value}));
+    return value;
+  }
+  async function account(){
+    if(identity)return identity;
+    if(!identityRequest){const version=identityVersion;
+      identityRequest=fetch('/api/lichess/account').then(r=>{if(!r.ok)throw new Error('Account unavailable');return r.json();})
+        .then(data=>version===identityVersion?setIdentity(data):identity)
+        .catch(()=>({connected:false})).finally(()=>{identityRequest=null;});
+    }
+    return identityRequest;
+  }
+  function fillAccount(input,enabled=()=>true){
+    let automatic='',edited=false;
+    input.addEventListener('input',()=>{edited=true;});
+    function refresh(){
+      const name=enabled()&&identity?.connected?identity.username||'':'';
+      if(!name){if(automatic&&input.value===automatic)input.value='';automatic='';return;}
+      if(!edited||!input.value||input.value===automatic){input.value=name;automatic=name;}
+    }
+    for(const existing of accountFields.keys())if(!existing.isConnected)accountFields.delete(existing);
+    accountFields.set(input,refresh);refresh();account().then(refresh);
+    return refresh;
+  }
+  global.CaissaAccount={get:account,set:setIdentity,fill:fillAccount};
+
   function cacheRead() {
     try { return JSON.parse(localStorage.getItem(CACHE_KEY)) || {}; } catch (e) { return {}; }
   }

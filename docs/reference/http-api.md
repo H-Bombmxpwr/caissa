@@ -8,7 +8,22 @@ Requests and responses are JSON, except the handful of endpoints that return a f
 Errors come back as `{"error": "…"}` with a 4xx or 5xx status and a message written to be
 shown to a person.
 
-## Computer opponent
+## Player scouting
+
+- `GET /api/scouting?player=Name`: exact-name report. Optional `color` (`w`/`b`),
+  `collection` (ID), `speed`, `since`, `until` (ISO dates), and `min_games` (2–100).
+- `GET /api/scouting/human?fen=...&min_elo=1400&max_elo=1800`: observed moves from
+  the local position index, filtered by mover rating.
+- `GET /api/scouting/drills?player=Name`: practice queue and progress; omits answers.
+- `POST /api/scouting/drills` with `player`, `game_id`, `ply` (zero-based position
+  before the mistake): create a Stockfish best-move exercise from a recorded loss.
+- `POST /api/scouting/review/{id}` with `move` (SAN or UCI): check a due exercise,
+  return `correct`, `solution`, and `due` (Unix seconds), and persist progress.
+
+Reports exclude unsupported or illegal games and list them in `skipped`. Missing
+evaluation and clock coverage is explicit. See [Player lab](../guide/player-lab.md).
+
+## Computer play
 
 `POST /api/engine/play` accepts `{"fen":"…","level":5}`. Level must be 1–11.
 The response uses the analysis payload (`fen`, `bestmove`, `lines`, `engine`).
@@ -99,6 +114,26 @@ Import responses report `linked` alongside `added`, `duplicates` and `skipped`.
 | `POST` | `/api/import/source` | `{path, collection}` — a file, folder, archive or URL |
 | `POST` | `/api/import/lichess` | `{user, max, token, collection}` |
 | `POST` | `/api/import/chesscom` | `{user, max, collection}` |
+
+## Background progress payloads
+
+`GET /api/import/status` returns `running`, `label`, `done`, `total`, `added`,
+`duplicates`, `skipped`, `error`, and `batch_id`. `done` counts processed games,
+including duplicates and skips, rather than newly added games alone. For
+streamed or multi-batch sources it accumulates across batches. `total: 0`
+means the total is unknown; clients must not interpret it as a completed job
+or calculate a percentage from it. Final result counts are available when
+`running` becomes false.
+
+`GET /api/study/index` returns `running`, `collection`, `done`, `total`, and
+`errors`, with `error` when the indexing job fails. Its total counts games
+still requiring an index, not every game in the collection. A running job
+may initially have `total: 0` while that count is being computed. Wait for
+`running: false` before treating the index as complete, even if `done == total`.
+
+The workspace polls these endpoints independently of the active tab. Known
+totals use native progress bars; unknown totals use a count and activity text.
+Successful notifications remain for eight seconds; errors require dismissal.
 
 ## The engine
 

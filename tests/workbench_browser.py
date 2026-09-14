@@ -12,6 +12,7 @@ sys.path.insert(0,str(ROOT))
 sys.path.insert(0,str(ROOT/'tests'))
 from playwright.sync_api import sync_playwright
 from browser_util import wait_until, wait_for_index
+from progress_browser_checks import check_progress
 
 
 with tempfile.TemporaryDirectory(prefix='caissa-browser-') as data:
@@ -30,6 +31,7 @@ with tempfile.TemporaryDirectory(prefix='caissa-browser-') as data:
             page.on('dialog',lambda d:d.accept())
             page.goto(url)
             page.wait_for_function('window.Caissa && document.querySelector(".games")')
+            check_progress(page)
             # The golden rule: a1 dark, h1 light, and the board agreeing with Game.squareColor.
             mismatch=page.evaluate("""()=>{const bad=[];
               for(const f of 'abcdefgh')for(let r=1;r<=8;r++){const key=f+r;

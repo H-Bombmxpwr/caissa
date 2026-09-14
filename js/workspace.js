@@ -61,7 +61,7 @@
     });
   }
   const kindLabel=k=>(KINDS.find(([id])=>id===k)||[,'Games'])[1];
-  const modules = [['database','▤','Database'],['analysis','♙','Analysis board'],['repertoire','♧','Repertoire'],
+  const modules = [['database','▤','Database'],['scouting','◎','Player lab'],['analysis','♙','Analysis board'],['repertoire','♧','Repertoire'],
     ['masters','♜','Master games'],['imports','⇣','Online & imports'],['studies','▱','Study folders'],
     ['books','▥','Books'],['openingbook','♜','Opening explorer'],['computer','♟','Play computer'],['training','◉','Blindfold training'],['tactics','♞','Tactics'],['settings','⚙','Settings']];
   let content, nav, crumb, board, preview, poll, liveTimer;
@@ -74,12 +74,18 @@
     return rawApi(path,body,method);
   }
   async function rawApi(path, body, method) {
+    const verb=method||(body?'POST':'GET');
+    const task=verb==='POST'?(path==='study/index'?'index':(path==='games'||(path.startsWith('import/')&&path!=='import/undo')||path==='lichess/studies')?'import':null):null;
+    if(task)JobProgress.begin(task,body?.collection);
+    try{
     const response = await fetch('/api/' + path, {method:method || (body ? 'POST' : 'GET'),
       headers:body ? {'Content-Type':'application/json'} : {}, body:body ? JSON.stringify(body) : undefined});
     const data = await response.json();
     if(data.batch_id&&state.view==='imports')await importHistory();
     if (!response.ok) throw new Error(data.error || 'Request failed');
+    if(task)JobProgress.end(task,data);
     return data;
+    }catch(err){if(task)JobProgress.end(task,null,err);throw err;}
   }
   function act(fn) { return async function (event) {try {await fn(event);} catch(err) {App.toast(err.message,5000);}}; }
   function button(text, fn, cls) {return h('button.btn' + (cls ? '.' + cls : ''), {type:'button',text,onclick:act(fn)});}
@@ -89,31 +95,7 @@
   /* ---------- imports in flight ---------- */
   // An import finishes on the server whether or not the view that started it is still on
   // screen, so the progress and the refresh that follows it live outside any one view.
-  let importBanner=null,importPoll=null,importSeen=false;
-  function importProgress(status){
-    if(!importBanner){importBanner=h('div.import-banner',{role:'status'},[h('strong'),h('div.progress-track',[h('span')]),h('small')]);document.body.append(importBanner);}
-    const [label,track,note]=importBanner.children;
-    label.textContent='Importing into '+(status.label||'your library')+'…';
-    const percent=status.total?Math.round(status.done/status.total*100):0;
-    track.classList.toggle('indeterminate',!status.total);
-    track.firstChild.style.width=status.total?Math.max(percent,2)+'%':'';
-    note.textContent=status.total?status.done.toLocaleString()+' of '+status.total.toLocaleString()+' games · '+percent+'%':'Fetching games…';
-  }
-  function watchImport(){
-    if(importPoll)return;
-    importPoll=setInterval(act(async()=>{
-      const status=await api('import/status');
-      if(status.running){importSeen=true;importProgress(status);return;}
-      clearInterval(importPoll);importPoll=null;
-      if(importBanner){importBanner.remove();importBanner=null;}
-      if(!importSeen)return;
-      importSeen=false;
-      if(status.error){App.toast('Import failed: '+status.error,6000);return;}
-      App.toast('Imported '+status.added+' games · '+status.duplicates+' duplicates'+(status.skipped?' · '+status.skipped+' skipped':''),6000);
-      await refreshMeta();
-      if(state.view==='database'||state.view==='imports')await go(state.view);
-    }),700);
-  }
+  function watchImport(){JobProgress.watch('import');}
   // Opening suggestions come from the library's own games, and carry the ECO span each
   // name covers so the range fields can fill themselves in.
   function openingPicker(onPick,initial){
@@ -449,7 +431,7 @@
     ['wood','slate','outline'].forEach(v=>document.body.classList.toggle('piece-'+v,p.pieces===v));
     document.body.classList.toggle('theme-coordinates-off',p.coordinates===false);
     const duration=p.animate===false?0:Math.max(80,Math.min(600,Number(p.animationMs)||200));document.documentElement.style.setProperty('--anim',duration+'ms');
-    for(const b of [board,preview,App.board])if(b){b.setOrientation(p.orientation||'w');b.opts.animationMs=duration;b.container.querySelector('.cg-wrap').style.setProperty('--anim',b.opts.animationMs+'ms');}
+    for(const b of [board,preview,App.board])if(b){b.setOrientation(b===board?(activeBoard().orientation||p.orientation||'w'):(p.orientation||'w'));b.opts.animationMs=duration;b.container.querySelector('.cg-wrap').style.setProperty('--anim',b.opts.animationMs+'ms');}
   }
   async function savePrefs() {ChessSounds.configure(state.prefs);applyPrefs();await api('settings/appearance',{value:JSON.stringify(state.prefs)},'PUT');}
   function serialize(parsed) {harvestCommands(parsed);
@@ -494,14 +476,14 @@
     for(const id of ['books','openingbook'])if(!placed.has(id)&&!layout.hidden.includes(id))layout.hidden.push(id);
     return layout;
   }
-  function makeBoard(){return {id:++boardSeq,parsed:null,node:null,selected:null,dirty:false,layout:normalizeLayout(state.prefs.analysisLayout)};}
+  function makeBoard(){return {id:++boardSeq,parsed:null,node:null,selected:null,dirty:false,orientation:state.prefs.orientation||'w',layout:normalizeLayout(state.prefs.analysisLayout)};}
   function activeBoard(){if(!state.boards.length){state.boards.push(makeBoard());state.boardIndex=0;}
     state.boardIndex=Math.max(0,Math.min(state.boardIndex,state.boards.length-1));return state.boards[state.boardIndex];}
   function stashBoard(){const b=activeBoard();b.parsed=state.parsed;b.node=state.node;b.selected=state.selected;b.dirty=state.dirty;}
   function adoptBoard(index){state.boardIndex=index;const b=activeBoard();
     state.selected=b.selected;state.dirty=b.dirty;
     if(b.parsed){state.parsed=b.parsed;state.node=b.node||b.parsed.root;}else newGame();}
-  function boardTitle(b){const white=b.parsed?.headers?.White,black=b.parsed?.headers?.Black;
+  function boardTitle(b){if(b.label)return b.label;const white=b.parsed?.headers?.White,black=b.parsed?.headers?.Black;
     return white&&white!=='White'?white+' — '+black:'New study';}
   async function closeBoard(index){
     if(index===state.boardIndex)stashBoard();
@@ -538,7 +520,7 @@
     if(App.cleanup){App.cleanup();App.cleanup=null;App.peek.end();}
     content.dataset.view=view;location.hash='workspace/'+view;content.replaceChildren(h('p.muted',{text:'Opening your workspace…'}));
     try {await refreshMeta();if(ticket!==state.route)return;content.replaceChildren();
-      await ({computer:()=>{state.analysisCleanup=ComputerPlay.mount(content,{h,button,field,select,api,heading,resizeBoard,promote:choose=>modal('Promote pawn',(body,close)=>body.append(h('div.toolbar',['q','r','b','n'].map(p=>button(p.toUpperCase(),()=>{close();choose(p);}))))),analyze:pgn=>{stashBoard();state.boards.splice(++state.boardIndex,0,makeBoard());adoptBoard(state.boardIndex);state.parsed=PGN.parse(pgn);state.node=state.parsed.root;state.selected=null;state.dirty=true;stashBoard();return go('analysis');}});},database:database,analysis:analysis,repertoire:repertoires,masters:masters,imports:imports,studies:studies,tactics:tactics,settings:settings,books:()=>LibraryTools.booksView(content),openingbook:()=>LibraryTools.openingView(content)}[view]||database)();
+      await ({computer:()=>{state.analysisCleanup=ComputerPlay.mount(content,{h,button,field,select,api,heading,resizeBoard,promote:choose=>modal('Promote pawn',(body,close)=>body.append(h('div.toolbar',['q','r','b','n'].map(p=>button(p.toUpperCase(),()=>{close();choose(p);}))))),analyze:pgn=>{stashBoard();state.boards.splice(++state.boardIndex,0,makeBoard());adoptBoard(state.boardIndex);state.parsed=PGN.parse(pgn);state.node=state.parsed.root;state.selected=null;state.dirty=true;stashBoard();return go('analysis');}});},scouting:()=>ScoutingView(content,{h,button,field,select,api,heading,openGame}),database:database,analysis:analysis,repertoire:repertoires,masters:masters,imports:imports,studies:studies,tactics:tactics,settings:settings,books:()=>LibraryTools.booksView(content),openingbook:()=>LibraryTools.openingView(content)}[view]||database)();
     }catch(err){if(ticket===state.route)content.replaceChildren(h('div.view-error',[h('h2',{text:'Could not open this view'}),h('p.error-message',{text:err.message}),button('Try again',()=>go(view))]));}
   }
   async function database() {
@@ -625,10 +607,10 @@
     const colorLines=h('input',{type:'checkbox',checked:!!state.prefs.colorLines,onchange:act(async()=>{state.prefs.colorLines=colorLines.checked;await savePrefs();})});
     const liveBox=h('input',{type:'checkbox',onchange:()=>{live=liveBox.checked;if(live)evaluate();else {clearTimeout(liveTimer);clearTimeout(livePoll);++evalRequest;liveId=null;api('engine/live',null,'DELETE').catch(()=>{});}}});
     const pv=select(['1','2','3','4','5'],'3');
-    const rowsBox=h('input',{type:'checkbox',checked:state.prefs.moveRows!==false,onchange:act(async()=>{state.prefs.moveRows=rowsBox.checked;renderMoves();await savePrefs();})});
+    const rowsBox=h('input',{type:'checkbox',checked:state.prefs.moveRows===true,onchange:act(async()=>{state.prefs.moveRows=rowsBox.checked;renderMoves();await savePrefs();})});
     const contextTabs=h('div.context-tabs');['Library','Study','History','Facts'].forEach(t=>contextTabs.append(h('button',{text:t,onclick:()=>{state.context=t;renderContext();}})));
     const branches=h('div.branch-picker',{'aria-label':'Available continuations'});let branchIndex=0;
-    const controls=h('div.board-navigation',[button('⏮',()=>jump(parsed.root)),button('←',()=>jump(state.node.parent||state.node)),button('→',()=>jump(state.node.children[branchIndex]||state.node)),button('⏭',()=>{let n=state.node;while(n.children.length)n=n.children[0];jump(n);}),button('Flip',()=>board.toggleOrientation())]);
+    const controls=h('div.board-navigation',[button('⏮',()=>jump(parsed.root)),button('←',()=>jump(state.node.parent||state.node)),button('→',()=>jump(state.node.children[branchIndex]||state.node)),button('⏭',()=>{let n=state.node;while(n.children.length)n=n.children[0];jump(n);}),button('Flip',()=>{board.toggleOrientation();activeBoard().orientation=board.opts.orientation;})]);
     controls.querySelectorAll('button').forEach((b,i)=>b.setAttribute('aria-label',['First position','Previous move','Next move','Last move','Flip board'][i]));
     const fen=h('div.fen');const sanInput=h('input',{placeholder:'Enter a move, e.g. Nf3','aria-label':'Move in SAN'});
     const moveForm=h('form.toolbar',{onsubmit:act(e=>{e.preventDefault();play(sanInput.value);sanInput.value='';})},[sanInput,h('button.btn',{text:'Play move',type:'submit'})]);
@@ -643,7 +625,7 @@
       built[id]={id,title,head,box,handle,node:h('section.card.panel',{'data-panel':id},[head,box,handle])};
     }
     panel('notation','Notation',h('div',[moves,branches,h('div.editor',[field('Position comment',comment),nag,h('div.toolbar',[
-      button('Make main line',()=>{const n=state.node;if(!n.parent)return;const list=n.parent.children;list.splice(list.indexOf(n),1);list.unshift(n);markDirty();renderMoves();}),button('Expand variations',()=>moves.querySelectorAll('details.variation').forEach(d=>d.open=true)),button('Collapse variations',()=>moves.querySelectorAll('details.variation').forEach(d=>d.open=false)),button('Remove branch',()=>{const n=state.node;if(!n.parent)return;if(!confirm('Remove this move and everything following it in this branch?'))return;n.parent.children=n.parent.children.filter(c=>c!==n);state.node=n.parent;markDirty();render();})])])]),[h('label.toolbar',[rowsBox,'One move per line'])]);
+      button('Make main line',()=>{const n=state.node;if(!n.parent)return;const list=n.parent.children;list.splice(list.indexOf(n),1);list.unshift(n);markDirty();renderMoves();}),button('Expand variations',()=>moves.querySelectorAll('details.variation').forEach(d=>d.open=true)),button('Collapse variations',()=>moves.querySelectorAll('details.variation').forEach(d=>d.open=false)),button('Remove branch',()=>{const n=state.node;if(!n.parent)return;if(!confirm('Remove this move and everything following it in this branch?'))return;n.parent.children=n.parent.children.filter(c=>c!==n);state.node=n.parent;markDirty();render();})])])]),[h('label.toolbar',[rowsBox,'Score sheet rows'])]);
     panel('engine','Stockfish · local analysis',h('div',[h('div.filters',[h('label.live-switch',[liveBox,h('span.switch-track',{'aria-hidden':'true'}),h('strong',{text:'Live analysis'})]),field('Lines',pv),button('Analyze',evaluate),h('label.toolbar',[arrows,'Best move arrows']),h('label.toolbar',[colorLines,'Color variations'])]),engineBody,h('details.engine-usage',[h('summary',{text:'Engine & system usage'}),stats,resources])]),[button('Annotate game',annotate)]);
     const tagsBody=h('div.tags-list');
     panel('tags','Game tags',h('div.card-pad',[tagsBody,h('div.toolbar',[button('Edit tags',editTags),button('Delete game',deleteGame,'danger')])]));
@@ -751,7 +733,7 @@
     // number with the variations broken out between the rows. ctx carries the row
     // a line is currently filling; clearing it starts the next move on a fresh row.
     function renderBranches(){branches.replaceChildren(...state.node.children.map((n,i)=>h('button'+(i===branchIndex?'.active':''),{type:'button',text:(i===0?'Main · ':'Variation · ')+n.san,'aria-pressed':String(i===branchIndex),onclick:()=>jump(n)})));branches.hidden=!state.node.children.length;}
-    function renderMoves(){renderBranches();const rows=state.prefs.moveRows!==false,scroll=moves.scrollTop;moves.classList.toggle('by-move',rows);
+    function renderMoves(){renderBranches();const rows=state.prefs.moveRows===true,scroll=moves.scrollTop;moves.classList.toggle('by-move',rows);
       moves.replaceChildren(Notation.render({h,root:parsed.root,current:state.node,jump,rows,contextMenu:moveMenu,nags:n=>n.nags.map(v=>NAG_SYMBOLS[v]||v).join(''),evalLabel}));
       moves.append(h('div.game-ending',[h('b',{text:parsed.headers.Result||'*'}),h('span.muted',{text:parsed.headers.Termination||''})]));
       if(!parsed.root.children.length)moves.append(h('p.muted',{text:'Move a piece or enter SAN to begin. Alternative moves become saved variations.'}));moves.scrollTop=scroll;}
@@ -870,20 +852,9 @@
     function indexButton(){
       const collection=state.selected&&(state.selected.collection_id||state.selected.collection);
       if(!collection)return h('p.muted',{text:'Open a saved game, then index its collection from Study folders.'});
-      const status=h('p.status-message');
-      const start=button('Index this collection now',async()=>{
-        await api('study/index',{collection});
-        status.textContent='Indexing started\u2026';
-        clearInterval(poll);
-        poll=setInterval(act(async()=>{
-          const state_=await api('study/index');
-          status.textContent=state_.running?`Indexing ${state_.collection}: ${state_.done} / ${state_.total} games`
-            :`Indexed ${state_.done} games. Reopen this tab to see the history.`;
-          if(!state_.running){clearInterval(poll);renderContext();}
-        }),700);
-      },'primary');
-      return h('div',[start,status]);
+      return button('Index this collection now',()=>api('study/index',{collection}),'primary');
     }
+
     async function renderContext(){const id=++contextRequest,position=state.node.fenAfter;contextTabs.querySelectorAll('button').forEach(b=>b.classList.toggle('active',b.textContent===state.context));if(state.context==='Facts')return renderFacts(id);contextBody.replaceChildren(h('p.muted',{text:'Finding connections…'}));try{const data=await api('study/position?'+new URLSearchParams({fen:position}));if(id!==contextRequest||state.view!=='analysis')return;contextBody.replaceChildren();
       if(state.context==='Library')contextBody.append(LibraryTools.positionLibrary(position,data,play));
       if(!data.indexed_games&&(state.context==='History'||state.context==='Library')){
@@ -918,7 +889,9 @@
       if(e.key==='Home')next=parsed.root;if(e.key==='End'){next=state.node;while(next.children[0])next=next.children[0];}
       if(e.key==='ArrowUp'||e.key==='ArrowDown'){if(state.node.children.length>1){e.preventDefault();branchIndex=(branchIndex+(e.key==='ArrowDown'?1:-1)+state.node.children.length)%state.node.children.length;renderBranches();return;}const siblings=state.node.parent?.children||[];next=siblings[Math.max(0,Math.min(siblings.length-1,siblings.indexOf(state.node)+(e.key==='ArrowDown'?1:-1)))]||state.node;}
       if(next){e.preventDefault();jump(next);}};
-    document.addEventListener('keydown',key);const oldGoCleanup=()=>{closed=true;++evalRequest;++tbRequest;clearTimeout(livePoll);document.removeEventListener('keydown',key);api('engine/live',null,'DELETE').catch(()=>{});};state.analysisCleanup=oldGoCleanup;
+    const taskCompleted=event=>{if(event.detail.kind==='index'&&!closed)renderContext();};
+    window.addEventListener('caissa-task-complete',taskCompleted);
+    document.addEventListener('keydown',key);const oldGoCleanup=()=>{closed=true;++evalRequest;++tbRequest;clearTimeout(livePoll);window.removeEventListener('caissa-task-complete',taskCompleted);document.removeEventListener('keydown',key);api('engine/live',null,'DELETE').catch(()=>{});};state.analysisCleanup=oldGoCleanup;
   }
   async function saveGame(){if(state.selected){await api('games/'+state.selected.id,{pgn:serialize(state.parsed)},'PUT');state.dirty=false;App.toast('Annotations saved to PGN');return go('analysis');}
     // A datalist only suggests once the box is empty, so every collection is listed outright.
@@ -964,7 +937,7 @@
       sync();
     });}
   function pinDialog(fen,refresh){modal('Keep this idea',(body,close)=>{const title=h('input',{placeholder:'Why this position matters'}),url=h('input',{placeholder:'https://… (optional)'}),note=h('textarea',{rows:4,placeholder:'Your notes, available offline'});body.append(field('Title',title),field('Link',url),field('Note',note),h('div.dialog-actions',[button('Cancel',close),button('Save to position',async()=>{await api('study/pins',{fen,title:title.value,url:url.value,note:note.value});close();refresh();},'primary')]));});}
-  async function addToRepertoire(){const path=PGN.pathTo(state.node);if(!path.length)throw new Error('Choose a position after at least one move.');const list=await api('repertoires');modal('Keep this line in your repertoire',(body,close)=>{const choices=select([['','Create a repertoire'],...list.repertoires.map(r=>[String(r.id),r.name])],'');const title=h('input',{value:'My White repertoire'}),side=select([['w','White'],['b','Black']],'w');body.append(field('Repertoire',choices),field('New repertoire name',title),field('Play as',side),h('p.muted',{text:PGN.lineToText(path)}),h('div.dialog-actions',[button('Cancel',close),button('Add line',async()=>{let rep={name:title.value,color:side.value,data:{lines:[]}};if(choices.value){rep=(await api('repertoires/'+choices.value)).repertoire;rep.data=JSON.parse(rep.data);}rep.data.lines=rep.data.lines||[];const sans=path.map(n=>n.san);if(!rep.data.lines.some(l=>l.moves.join(' ')===sans.join(' ')&&l.fen===state.parsed.startFen))rep.data.lines.push({moves:sans,fen:state.parsed.startFen,due:0,interval:0,successes:0});await api('repertoires'+(choices.value?'/'+choices.value:''),rep,choices.value?'PUT':'POST');close();App.toast('Line added to repertoire');},'primary')]));});}
+  async function addToRepertoire(){const path=PGN.pathTo(state.node);if(!path.length)throw new Error('Choose a position after at least one move.');const list=await api('repertoires');modal('Keep this line in your repertoire',(body,close)=>{const choices=select([['','Create a repertoire'],...list.repertoires.map(r=>[String(r.id),r.name])],'');const title=h('input',{value:'My White repertoire'}),side=select([['w','White'],['b','Black']],'w');const newFields=h('div',[field('New repertoire name',title),field('Play as',side)]);choices.addEventListener('change',()=>{newFields.hidden=!!choices.value;});body.append(field('Repertoire',choices),newFields,h('p.muted',{text:PGN.lineToText(path)}),h('div.dialog-actions',[button('Cancel',close),button('Add line',async()=>{let rep={name:title.value,color:side.value,data:{lines:[]}};if(choices.value){rep=(await api('repertoires/'+choices.value)).repertoire;rep.data=JSON.parse(rep.data);}rep.data.lines=rep.data.lines||[];const sans=path.map(n=>n.san);if(!rep.data.lines.some(l=>l.moves.join(' ')===sans.join(' ')&&l.fen===state.parsed.startFen))rep.data.lines.push({moves:sans,fen:state.parsed.startFen,due:0,interval:0,successes:0});await api('repertoires'+(choices.value?'/'+choices.value:''),rep,choices.value?'PUT':'POST');close();App.toast('Line added to repertoire');},'primary')]));});}
   // Lichess exports an opening study as a PGN tree: one chapter per idea, with the
   // alternatives written as variations. The server walks that tree into flat lines;
   // this only has to ask which repertoire they belong to and how deep to read.
@@ -1019,8 +992,9 @@
       h('li',{text:'Choose Add to repertoire. Pick an existing repertoire or name a new one, and choose whether you play White or Black.'}),
       h('li',{text:'Return here and use Browse lines to study, or Drill due lines to practise. The opponent’s moves are played for you.'}),
       h('li',{text:'Finish the line and choose Save review. Successful reviews move farther apart; retries bring the line back tomorrow.'}),
-      h('li',{text:'Add alternate lines from analysis as needed. Export PGN to keep a portable copy of the repertoire.'})])]));
-    const grid=h('div.cards-grid');content.append(grid);if(!data.repertoires.length)grid.append(empty('Start with one good line','Open a game or build a line on the analysis board, then choose Add to repertoire.',[button('Open analysis board',()=>go('analysis'),'primary')]));for(const meta of data.repertoires){const rep=(await api('repertoires/'+meta.id)).repertoire;const data=JSON.parse(rep.data),lines=data.lines||[],due=lines.filter(l=>(l.due||0)<=Date.now());grid.append(h('section.card.study-card',[h('div.eyebrow',{text:meta.color==='w'?'White repertoire':'Black repertoire'}),h('h3',{text:meta.name}),h('p.muted',{text:lines.length+' lines · '+due.length+' due for review'}),h('div.toolbar',[button('Drill due lines',()=>{if(!due.length)throw new Error('All lines reviewed. Come back when they are due.');drillLine(due[0].moves,due[0].fen,rep,due[0]);},'primary'),button('View repertoire',()=>viewRepertoire(rep)),button('Browse lines',()=>browseRepertoire(rep)),button('Export PGN',()=>{const pgn=lines.map(l=>'[Event "'+meta.name.replace(/"/g,'')+'"]\n[SetUp "1"]\n[FEN "'+l.fen+'"]\n[Result "*"]\n\n'+l.moves.map((m,i)=>(i%2===0?(Math.floor(i/2)+1)+'. ':'')+m).join(' ')+' *').join('\n\n');download(pgn,'repertoire.pgn');})])]));}}
+      h('li',{text:'View repertoire merges shared moves into one study tree per starting position. Different starting positions open as separate labelled boards.'}),
+      h('li',{text:'Use Rename to change a repertoire name. Browse lines lets you select and delete saved lines. Export PGN keeps a portable copy.'})])]));
+    const grid=h('div.cards-grid');content.append(grid);if(!data.repertoires.length)grid.append(empty('Start with one good line','Open a game or build a line on the analysis board, then choose Add to repertoire.',[button('Open analysis board',()=>go('analysis'),'primary')]));for(const meta of data.repertoires){const rep=(await api('repertoires/'+meta.id)).repertoire;const data=JSON.parse(rep.data),lines=data.lines||[],due=lines.filter(l=>(l.due||0)<=Date.now());grid.append(h('section.card.study-card',[h('div.eyebrow',{text:meta.color==='w'?'White repertoire':'Black repertoire'}),h('h3',{text:meta.name}),h('p.muted',{text:lines.length+' lines · '+due.length+' due for review'}),h('div.toolbar',[button('Drill due lines',()=>{if(!due.length)throw new Error('All lines reviewed. Come back when they are due.');drillLine(due[0].moves,due[0].fen,rep,due[0]);},'primary'),button('View repertoire',()=>viewRepertoire(rep)),button('Browse lines',()=>browseRepertoire(rep)),button('Rename',()=>renameRepertoire(rep)),button('Export PGN',()=>{const pgn=lines.map(l=>'[Event "'+meta.name.replace(/"/g,'')+'"]\n[SetUp "1"]\n[FEN "'+l.fen+'"]\n[Result "*"]\n\n'+l.moves.map((m,i)=>(i%2===0?(Math.floor(i/2)+1)+'. ':'')+m).join(' ')+' *').join('\n\n');download(pgn,'repertoire.pgn');})])]));}}
   function viewRepertoire(rep){
     const groups=new Map();
     for(const line of JSON.parse(rep.data).lines||[]){const fen=line.fen||new Chess().fen();if(!groups.has(fen))groups.set(fen,[]);groups.get(fen).push(line);}
@@ -1028,13 +1002,27 @@
     stashBoard();
     for(const [fen,lines] of groups){
       state.boards.splice(++state.boardIndex,0,makeBoard());adoptBoard(state.boardIndex);
+      activeBoard().label=rep.name+(groups.size>1?' - starting position '+([...groups.keys()].indexOf(fen)+1):'');
       const parsed=PGN.parse('[Event "'+rep.name.replace(/"/g,'')+'"]\n[White "White"]\n[Black "Black"]\n[SetUp "1"]\n[FEN "'+fen+'"]\n[Result "*"]\n\n*');
       for(const line of lines){let node=parsed.root;const game=new Chess(fen);for(const san of line.moves){const move=game.move(san);if(!move)break;let next=node.children.find(n=>n.san===move.san);if(!next){next={san:move.san,move,parent:node,children:[],fenAfter:game.fen(),ply:node.ply+1,nags:[],comment:null};node.children.push(next);}node=next;}}
       state.parsed=parsed;state.node=parsed.root;state.selected=null;state.dirty=true;stashBoard();
     }
     return go('analysis');
   }
-  function browseRepertoire(rep){const data=JSON.parse(rep.data);modal(rep.name,(body,close)=>{for(const l of data.lines||[])body.append(h('div.context-item',[h('p',{text:l.moves.join(' ')}),button('Study line',()=>{if(state.dirty&&!confirm('Discard unsaved analysis?'))return;state.selected=null;state.parsed=PGN.parse('[Event "Repertoire study"]\n[White "White"]\n[Black "Black"]\n[SetUp "1"]\n[FEN "'+l.fen+'"]\n[Result "*"]\n\n'+l.moves.join(' ')+' *');state.node=state.parsed.root;state.dirty=false;close();go('analysis');}),button('Drill',()=>{close();drillLine(l.moves,l.fen,rep,l);})]));body.append(button('Close',close));});}
+  function renameRepertoire(rep){
+    modal('Rename repertoire',(body,close)=>{
+      const name=h('input',{value:rep.name});
+      body.append(field('Repertoire name',name),h('div.dialog-actions',[
+        button('Cancel',close),button('Save name',async()=>{
+          if(!name.value.trim())throw new Error('Enter a repertoire name.');
+          const latest=(await api('repertoires/'+rep.id)).repertoire;
+          await api('repertoires/'+rep.id,{name:name.value.trim(),color:latest.color,data:JSON.parse(latest.data)},'PUT');
+          close();await go('repertoire');App.toast('Repertoire renamed');
+        },'primary')
+      ]));name.focus();name.select();
+    });
+  }
+  function browseRepertoire(rep){const data=JSON.parse(rep.data);modal(rep.name,(body,close)=>{const selected=new Set();const remove=button('Delete selected lines',async()=>{if(!selected.size)throw new Error('Select the lines to delete first.');const latest=(await api('repertoires/'+rep.id)).repertoire;if(latest.data!==rep.data)throw new Error('This repertoire changed. Close and reopen Browse lines before deleting.');const updated=JSON.parse(latest.data);updated.lines=updated.lines.filter((_,index)=>!selected.has(index));await api('repertoires/'+rep.id,{name:latest.name,color:latest.color,data:updated},'PUT');close();await go('repertoire');App.toast(selected.size+' lines deleted');},'danger');remove.disabled=true;body.append(h('p.muted',{text:'Select complete saved lines to remove. Shared moves in other lines and imported source games are kept.'}));if(!(data.lines||[]).length)body.append(h('p',{text:'No saved lines. Add a line from analysis or import a repertoire PGN.'}));for(const [index,l] of (data.lines||[]).entries())body.append(h('div.context-item',[h('label.toolbar',[h('input',{type:'checkbox','aria-label':'Select line '+(index+1),onchange:e=>{if(e.target.checked)selected.add(index);else selected.delete(index);remove.disabled=!selected.size;remove.textContent=selected.size?'Delete '+selected.size+' selected lines':'Delete selected lines';}}),'Line '+(index+1)]),h('p',{text:l.moves.join(' ')}),button('Study line',()=>{if(state.dirty&&!confirm('Discard unsaved analysis?'))return;state.selected=null;state.parsed=PGN.parse('[Event "Repertoire study"]\n[White "White"]\n[Black "Black"]\n[SetUp "1"]\n[FEN "'+l.fen+'"]\n[Result "*"]\n\n'+l.moves.join(' ')+' *');state.node=state.parsed.root;state.dirty=false;close();go('analysis');}),button('Drill',()=>{close();drillLine(l.moves,l.fen,rep,l);})]));body.append(h('div.dialog-actions',[button('Close',close),remove]));});}
   function drillLine(nodes,fen,rep,line){const sans=nodes.map(n=>typeof n==='string'?n:n.san);if(!sans.length)throw new Error('This line has no moves yet.');modal('Recall the line',(body,close)=>{const holder=h('div.board-holder',{style:{width:'min(350px,100%)',margin:'15px auto'}}),prompt=h('div.drill-prompt'),feedback=h('div.status-message'),input=h('input',{placeholder:'Your next move','aria-label':'Recall move'}),blind=h('input',{type:'checkbox',checked:true,onchange:()=>b.setBlindfold(blind.checked?'pieces':'off')});let index=0,mistakes=0,g=new Chess(fen),completed=false;const b=new Board(holder,{viewOnly:true,blindfold:'pieces'});b.setPosition(g);const peek=button('Peek',()=>{});peek.addEventListener('pointerdown',()=>{b.setPeeking(true);App.stat('repertoire-peeks',{count:1});});['pointerup','pointerleave','pointercancel'].forEach(e=>peek.addEventListener(e,()=>b.setPeeking(false)));
     const form=h('form.toolbar',{onsubmit:act(e=>{e.preventDefault();if(completed)return;const test=new Chess(g.fen()),move=test.move(input.value);if(!move||move.san!==sans[index]){mistakes++;feedback.textContent='Try again. Recall the line you saved.';return;}g=test;index++;input.value='';feedback.textContent='Correct.';advance();})},[input,h('button.btn.primary',{type:'submit',text:'Check move'})]);
     const finish=button('Save review',async()=>{if(!completed)throw new Error('Finish the line first.');if(rep&&line){const data=JSON.parse(rep.data),item=data.lines.find(l=>l.fen===line.fen&&l.moves.join(' ')===line.moves.join(' '));item.successes=(item.successes||0)+(mistakes===0?1:0);item.interval=mistakes?1:Math.max(1,Math.round((item.interval||.4)*2.5));item.due=Date.now()+item.interval*86400000;await api('repertoires/'+rep.id,{name:rep.name,color:rep.color,data},'PUT');}App.stat('repertoire',{reviews:1,mistakes});close();if(state.view==='repertoire')go('repertoire');},'primary');finish.disabled=true;
@@ -1042,8 +1030,8 @@
     body.append(h('label.toolbar',[blind,'Blindfold mode']),holder,prompt,form,feedback,h('div.dialog-actions',[peek,button('Close',close),finish]));advance();});}
   async function studies(){content.append(heading('A place for your ideas','Study folders','Organize preparation into real folders, with portable PGNs behind every collection.',[button('Create collection',collectionDialog),button('＋ Study folder',()=>folderDialog(),'primary')]));content.append(h('p.muted',{text:state.studyRoot}));const grid=h('div.cards-grid');content.append(grid);if(!state.folders.length)grid.append(empty('Build your study space','Create a folder such as Tournament preparation, then add White repertoire, Black repertoire, Model games, and Endgames beneath it.',[button('Create study structure',async()=>{const root=await api('study/folders',{name:'Chess study'});for(const name of ['White repertoire','Black repertoire','Annotated games','Model games','Endgames','Tactics'])await api('study/folders',{name,parent_id:root.id});await go('studies');},'primary')]));
     grid.className='study-overview';grid.append(LibraryTools.studyTree(state,{browse:c=>{state.filters={collection:String(c.id),kind:c.kind||'games'};state.offset=0;go('database');},assign:assignDialog,create:folderDialog,remove:deleteFolderDialog,repertoire:()=>go('repertoire')}));
-    const collections=h('div.card-pad');for(const c of state.collections)collections.append(h('div.context-item',[h('b',{text:c.name+' · '+c.games+' games'}),h('div.toolbar',[button('Browse',()=>{state.filters={collection:String(c.id),kind:c.kind||'games'};state.offset=0;go('database');}),button('Index positions',async()=>{await api('study/index',{collection:c.id});App.toast('Position indexing started');watchIndex();}),h('a.btn',{href:'/api/collections/'+c.id+'/pgn',download:c.name+'.pgn',text:'Export PGN'}),button('Delete',()=>collectionDeleteDialog(c),'danger')])]));const status=h('p.status-message');collections.append(status);content.append(h('div',{style:{marginTop:'24px'}},[h('details.card',[h('summary.card-pad',{text:'All collections · export, delete and position indexing'}),collections])]));
-    function watchIndex(){clearInterval(poll);poll=setInterval(act(async()=>{const s=await api('study/index');status.textContent=s.running?`Indexing ${s.collection}: ${s.done} / ${s.total} games`:`Indexed ${s.done} games; ${s.errors} could not be indexed.`;if(s.error)status.textContent=s.error;if(!s.running){clearInterval(poll);App.toast(s.error||'Indexing finished: '+s.done+' processed, '+s.errors+' errors.',6000);await go('studies');}}),700);}if((await api('study/index')).running)watchIndex();}
+    const collections=h('div.card-pad');for(const c of state.collections)collections.append(h('div.context-item',[h('b',{text:c.name+' · '+c.games+' games'}),h('div.toolbar',[button('Browse',()=>{state.filters={collection:String(c.id),kind:c.kind||'games'};state.offset=0;go('database');}),button('Index positions',async()=>{await api('study/index',{collection:c.id});}),h('a.btn',{href:'/api/collections/'+c.id+'/pgn',download:c.name+'.pgn',text:'Export PGN'}),button('Delete',()=>collectionDeleteDialog(c),'danger')])]));content.append(h('div',{style:{marginTop:'24px'}},[h('details.card',[h('summary.card-pad',{text:'All collections · export, delete and position indexing'}),collections])]));}
+
   function folderDialog(parent){modal('Create a study folder',(body,close)=>{const category=select(LibraryTools.categories,'Games to study');body.append(field('Study category',category));const name=h('input',{placeholder:'e.g. Autumn tournament preparation'}),parents=select([['','Top level'],...state.folders.map(f=>[String(f.id),f.path])],parent?String(parent):'');body.append(field('Folder name',name),field('Inside',parents),h('div.dialog-actions',[button('Cancel',close),button('Create folder',async()=>{await api('study/folders',{name:name.value,category:category.value,parent_id:parents.value?Number(parents.value):null});close();go('studies');},'primary')]));});}
   function deleteFolderDialog(folder){
     const nested=state.folders.filter(f=>f.path===folder.path||f.path.startsWith(folder.path+'/'));
@@ -1087,6 +1075,8 @@
     const everything=h('input',{type:'checkbox'});
     const maxField=field('Maximum games',max);
     everything.addEventListener('change',()=>{maxField.hidden=everything.checked;});
+    const fillOnlineUser=CaissaAccount.fill(user,()=>source.value==='lichess');
+    source.addEventListener('change',fillOnlineUser);
     let onlineNamedByHand=false;online_collection.addEventListener('input',()=>{onlineNamedByHand=true;});
     source.addEventListener('change',()=>{if(!onlineNamedByHand)online_collection.value=source.value==='lichess'?'lichess imports':'chess.com imports';});
     const online=card('Your online games',h('div.card-pad',[field('Service',source),field('Collection name',online_collection),field('Username',user),
@@ -1195,7 +1185,7 @@
       h('p.muted',{text:'Connect your lichess account to import your own games and your private or unlisted studies. The token is stored in your local library and is never sent anywhere but lichess.'}),
       detail,field('Personal access token',token),actions,status,watcher]);
     async function refresh(){
-      const data=await api('lichess/account');
+      const data=await api('lichess/account');CaissaAccount.set(data);
       actions.replaceChildren();
       if(data.connected){
         const scopes=(data.scopes||[]).join(', ')||'no scopes reported';
@@ -1205,7 +1195,7 @@
         token.value='';token.placeholder='Stored — paste a new token to replace it';
         actions.append(button('Import my studies',()=>lichessStudies()),
           button('Import my games',()=>go('imports')),
-          button('Forget this token',async()=>{await api('lichess/account',null,'DELETE');await refresh();App.toast('The lichess token was removed from your library.');},'danger'));
+          button('Forget this token',async()=>{CaissaAccount.set(await api('lichess/account',null,'DELETE'));await refresh();App.toast('The lichess token was removed from your library.');},'danger'));
         watcher.replaceChildren(autoImportControls());
       }else{
         watcher.replaceChildren();
@@ -1215,6 +1205,7 @@
           if(!token.value.trim())throw new Error('Paste the token from lichess first.');
           status.textContent='Checking the token with lichess…';
           const saved=await api('lichess/account',{token:token.value.trim()},'PUT');
+          CaissaAccount.set(saved);
           App.toast('Connected to lichess as '+saved.username);
           await refresh();
         },'primary'));
@@ -1336,6 +1327,8 @@
         fetch('/api/settings/appearance',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:JSON.stringify(state.prefs)}),keepalive:true}).catch(()=>{});}
       if(state.dirty||state.boards.some(b=>b.dirty)){e.preventDefault();e.returnValue='';}});
     watchImport();
+    JobProgress.watch('index');
+    window.addEventListener('caissa-task-complete',()=>refreshMeta().catch(()=>{}));
     await go(initial.startsWith('#workspace/')?initial.split('/')[1]:'database');
   });
 })();

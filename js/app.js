@@ -71,6 +71,24 @@
         cur[k] = (typeof patch[k] === 'number' && typeof cur[k] === 'number') ? cur[k] + patch[k] : patch[k];
       });
       App.store.stats[key] = cur;
+      const level=/^l([1-7])$/.exec(key);
+      if(level){
+        let attempts=0,success=0;
+        if(patch.asked){attempts=patch.asked;success=patch.right||0;}
+        else if(patch.moves){attempts=patch.moves;success=patch.right||0;}
+        else if(patch.attempts){attempts=patch.attempts;success=patch.solved||0;}
+        else if(key==='l5'&&(patch.tours||patch.errors)){attempts=1;success=patch.tours?1:0;}
+        else if(key==='l6'&&(patch.solved||patch.gaveUp)){attempts=1;success=patch.clean||0;}
+        if(attempts){
+          const rating=App.store.visualization||(App.store.visualization={value:1000,attempts:0});
+          const difficulty=600+Number(level[1])*150;
+          const expected=1/(1+Math.pow(10,(difficulty-rating.value)/400));
+          rating.value=Math.round(Math.max(100,Math.min(3000,rating.value+24*(success/attempts-expected))));
+          rating.attempts+=attempts;
+          const badge=document.getElementById('visualization-rating');
+          if(badge)badge.textContent='Visualization practice rating: '+rating.value+' · '+rating.attempts+' attempts (experimental)';
+        }
+      }
       saveStore(App.store);
     }
     return cur;
@@ -276,6 +294,7 @@
     App.panel.innerHTML = '';
     const header = h('div', [
       h('h2', { text: lvl.num + '. ' + lvl.title }),
+      h('p.hint', {id:'visualization-rating',role:'status',text:'Visualization practice rating: '+(App.store.visualization?.value||1000)+' · '+(App.store.visualization?.attempts||0)+' attempts (experimental)',title:'Local progress estimate with fixed exercise difficulty. Not a calibrated chess rating.'}),
       h('p.hint', { html: lvl.blurb })
     ]);
     const body = h('div');

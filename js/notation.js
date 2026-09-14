@@ -6,6 +6,8 @@
     function cell(node,prefix){
       const score=evalLabel(node.eval),drawings=node.shapes||[];
       const move=h('button'+(node===current?'.current':''),{type:'button',text:prefix+node.san+nags(node),onclick:()=>jump(node),'aria-current':node===current?'step':'false'});
+      const fields=node.parent.fenAfter.split(' ');
+      move.setAttribute('aria-label','Move '+fields[5]+', '+(fields[1]==='w'?'White':'Black')+', '+node.san+(nags(node)?', '+nags(node):''));
       move.addEventListener('contextmenu',event=>{event.preventDefault();contextMenu(node);});
       const item=h('span.move-cell',[h('span.move-token',[move,score?h('small.move-eval',{text:score,title:'Stored evaluation, White perspective'}):null])]);
       if(drawings.length)item.append(h('span.move-drawings',drawings.map(s=>h('span',{text:s.square?'○ '+s.square:'↗ '+s.from+'–'+s.to,style:{color:'var(--shape-'+s.brand+')'},title:s.brand+' '+(s.square?'circle':'arrow')}))));
@@ -16,14 +18,15 @@
       let node=start,row=null,number=null,previousWhite=false;
       while(node){
         const fields=node.parent.fenAfter.split(' '),white=fields[1]==='w',num=fields[5];
-        if(rows){
+        if(rows&&depth===0){
           if(white||!row||num!==number){row=h('div.move-row',[h('span.move-no',{text:num+'.'})]);number=num;target.append(row);if(!white)row.append(h('span.move-skip',{text:'…'}));}
           row.append(cell(node,''));
         }else target.append(cell(node,white?num+'. ':previousWhite?'':num+'… '));
         previousWhite=white;
         if(node===node.parent.children[0])for(const alt of node.parent.children.slice(1)){
-          const details=h('details.variation',{open:path.has(alt)||(folded.has(alt)?!folded.get(alt):depth===0)}),branch=h('div.variation-line');
-          details.append(h('summary',{text:'Alternative '+num+(white?'. ':'… ')+alt.san}),branch);
+          const details=h('details.variation',{open:path.has(alt)||(folded.has(alt)?!folded.get(alt):true)}),branch=h('div.variation-line');
+          details.append(h('summary',{title:'Alternative to '+num+(white?'. ':'... ')+node.san,'aria-label':'Toggle variation '+num+(white?'. ':'... ')+alt.san},[h('span.branch-preview',{text:num+(white?'. ':'... ')+alt.san+' ...'})]),branch);
+          branch.setAttribute('aria-label','Instead of '+num+(white?'. ':'... ')+node.san);
           details.firstChild.addEventListener('contextmenu',event=>{event.preventDefault();contextMenu(alt);});
           details.addEventListener('toggle',()=>folded.set(alt,!details.open));
           line(alt,branch,depth+1);target.append(details);row=null;previousWhite=false;

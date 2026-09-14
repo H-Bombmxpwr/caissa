@@ -4,10 +4,14 @@
 
 # Caissa
 
-**A desktop chess workbench — a lighter ChessBase.**
+**A desktop chess workbench that studies your games and the player behind them.**
 
 Your games, on your disk, as ordinary PGN. Analysed by a bundled Stockfish,
 explored move by move, drilled as a repertoire, and studied blindfold.
+
+Open **Player lab** for evidence-backed player reports, opponent preparation,
+clock patterns, and scheduled practice from saved mistakes. See the
+[Player lab guide](docs/guide/player-lab.md) for data requirements and limitations.
 
 [![Documentation](https://img.shields.io/badge/Documentation-read%20the%20guide-315e48?style=for-the-badge)](https://h-bombmxpwr.github.io/caissa/)
 [![Download](https://img.shields.io/badge/Download-Windows%20·%20macOS%20·%20Linux-2d6a4f?style=for-the-badge)](https://caissa.hxr.life/)

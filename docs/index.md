@@ -27,6 +27,8 @@ want your lichess studies? [Your lichess account](guide/lichess.md)
 
 ## Guide
 
+- [Player lab](guide/player-lab.md) — player reports, opponent preparation and retests
+
 - [Getting started](guide/getting-started.md) — install, run, and where your library lives
 - [The game database](guide/database.md) — collections, searching, sorting, deleting
 - [Importing games](guide/importing.md) — PGN, archives, online accounts, ChessBase
@@ -59,6 +61,7 @@ want your lichess studies? [Your lichess account](guide/lichess.md)
 
 guide/getting-started
 guide/database
+guide/player-lab
 guide/importing
 guide/explorer
 guide/analysis

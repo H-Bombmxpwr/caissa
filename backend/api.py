@@ -22,6 +22,7 @@ from . import literature
 from . import openingtree
 from . import repertoire as repertoire_pgn
 from .books import Books
+from .scouting import Scouting
 
 EXTRA_FILTERS = ('annotator','site','round','termination','annotated','date_from','date_to','source','category',
                  'white_min_elo','white_max_elo','black_min_elo','black_max_elo','kind',
@@ -43,6 +44,7 @@ class Api:
     def __init__(self, data_dir):
         self.library = Library(data_dir)
         self.study = Study(self.library)
+        self.scouting = Scouting(self.library)
         self.books = Books(self.library)
         self.crawler = lichess.MastersCrawler(self.library)
         self.engine = Engine()
@@ -87,6 +89,8 @@ class Api:
                 # navigated away from can still report one is to publish progress here.
                 self.import_status = {'running': True, 'label': label, 'done': 0, 'total': 0,
                                       'added': 0, 'duplicates': 0, 'skipped': 0, 'error': None, 'batch_id': batch}
+                self._progress_offset = self._progress_last = 0
+                self._progress_streaming = (head == 'import' and (rest[1:] != ['lichess'] or bool((body or {}).get('all')))) or head == 'lichess'
                 self.library.on_progress = self._import_progress
                 try:
                     status, payload = handler(method, rest[1:], query, body)
@@ -104,6 +108,23 @@ class Api:
             return handler(method, rest[1:], query, body)
         except (ValueError, KeyError) as err:
             raise ApiError(str(err)) from err
+
+    def _route_scouting(self, method, rest, query, body):
+        if method == 'GET' and rest == ['human']:
+            return 200, self.scouting.human_moves(query)
+        if method == 'GET' and not rest:
+            return 200, self.scouting.report(query)
+        if rest == ['drills']:
+            if method == 'GET':
+                return 200, {'drills': self.scouting.drills(query.get('player', ''))}
+            if method == 'POST':
+                try:
+                    return 200, self.scouting.create_drill(body or {}, self.engine)
+                except EngineError as err:
+                    raise ApiError(str(err), 503) from err
+        if method == 'POST' and len(rest) == 2 and rest[0] == 'review':
+            return 200, self.scouting.review(rest[1], body or {})
+        raise ApiError('unsupported scouting request', 405)
 
     def _route_openings(self, method, rest, query, body):
         """Opening names actually present in the library, with the ECO span each covers.
@@ -129,8 +150,11 @@ class Api:
         return 200, {'openings': rows}
 
     def _import_progress(self, done, total):
-        self.import_status['done'] = done
-        self.import_status['total'] = total
+        if done < getattr(self, '_progress_last', 0):
+            self._progress_offset += self._progress_last
+        self._progress_last = done
+        self.import_status['done'] = getattr(self, '_progress_offset', 0) + done
+        self.import_status['total'] = 0 if getattr(self, '_progress_streaming', False) else total
 
     def _route_study(self, method, rest, query, body):
         action = rest[0] if rest else 'position'
@@ -472,7 +496,7 @@ class Api:
                     # and written in batches rather than held in memory.
                     return 200, lichess.import_all_user_games(
                         self.library, user, collection, token=token,
-                        progress=self._import_progress, **selection)
+                        **selection)
                 pgn = lichess.user_games(
                     user,
                     max_games=max(1, int(body.get("max", 100))),

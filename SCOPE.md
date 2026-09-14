@@ -1,6 +1,17 @@
 # Caissa — Scope
 
-_Last updated: 2026-09-12_
+_Last updated: 2026-09-13_
+
+## Player analysis
+
+Player lab now provides local player-pattern reports, opponent prep with online
+imports, saved-evaluation and clock aggregation, rating-filtered observed moves,
+and Stockfish best-move practice with persistent retests. Keyboard board exploration,
+optional spoken readout, accessible notation labels, and an experimental training
+rating complement these features. See [Player lab](docs/guide/player-lab.md).
+
+Maia inference, validated tactical motifs, population comparisons, theory departures,
+rating calibration, and proof of improvement in subsequent games remain future work.
 
 ## What this is
 

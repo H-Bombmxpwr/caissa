@@ -180,7 +180,12 @@ search the whole position index, not just the initially displayed examples.
   name. **Clear all fields** empties the lot. The same picker drives **Master games**. **Delete matching games** previews the
   count and examples, then deletes exactly those unchanged entries after confirmation.
   Deleted entries leave their original PGN text on disk; collection exports omit them.
-- Imports report progress in a corner of the window and keep running if you move to
+- Imports and position indexing share progress cards in the bottom-right corner.
+  Known totals show games processed, a percentage, and a filling bar. Downloads
+  with unknown totals show a cumulative count and fetching status until a total
+  is available; they do not animate a pretend percentage. Finished jobs briefly
+  show a full bar, while errors remain until dismissed.
+- Imports keep running if you move to
   another view; when one finishes, the library counts and the open view refresh themselves.
 - Pasted and loaded PGN needs a collection name — choosing a file fills it in from the file
   name. Online games go to their own collection (`lichess imports`, `chess.com imports`)
@@ -336,3 +341,23 @@ and cached, so the readings never slow the search.
   gets the specific line — *King's Indian Defense: Sämisch Variation*, not *E86* or
   *Indian defences* — and still lands correctly when it transposes. **Name openings** on
   the database page backfills games imported before this existed.
+
+
+### Rename repertoires and remove lines
+
+On the Repertoire page, choose **Rename** on a repertoire card and save its new
+name. Choose **Browse lines**, select the saved lines to remove, and click
+**Delete selected lines** (the button shows the selected count). Closing the
+dialog without deleting makes no changes. Deleting a line preserves other lines,
+their review history, and the original imported PGNs. An empty repertoire can
+receive new lines from analysis or a PGN import.
+
+
+### Read variations and flip boards
+
+Notation uses a bold main line and bracketed alternative lines. A nested bracket
+belongs to the surrounding variation. Click any move to visit it, or use the
+triangle to collapse a line. **Score sheet rows** puts the main line into numbered
+rows while alternatives stay compact. Each analysis tab keeps its own orientation
+after **Flip**, including when changing notation settings or promoting a move.
+The default orientation in Settings applies to new analysis boards.

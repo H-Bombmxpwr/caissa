@@ -79,6 +79,23 @@ https://theweekinchess.com/...zip  downloaded and streamed
 optional here but makes rate limits kinder, and if you have connected your account in
 Settings the stored token is used automatically.
 
+### Following an import
+
+Imports appear in a progress card in the bottom-right corner. You can switch
+tabs while they run. When the total is known, the card shows a filling bar,
+games processed, and a percentage. Fetching an online export may take time
+before a game count is available.
+
+For streamed downloads whose total is unknown, the card shows a cumulative
+processed-game count and explains that games are still arriving. It does not
+show a bouncing bar or estimate a percentage. Counts continue across batches
+instead of restarting with each batch.
+
+Completion shows a full bar and the numbers added, duplicated, and skipped.
+The card disappears after eight seconds, or you can dismiss it immediately.
+Errors remain visible until dismissed. Dismissing a notification does not undo
+an import; use import history for that.
+
 ## lichess studies
 
 **lichess studies** imports whole studies, including private and unlisted ones once your

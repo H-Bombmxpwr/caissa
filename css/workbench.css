@@ -54,13 +54,19 @@
 .panel-grip{position:absolute;left:0;right:0;bottom:0;height:9px;border:0;padding:0;background:none;cursor:ns-resize;touch-action:none}
 .panel-grip:hover{background:linear-gradient(var(--accent),var(--accent)) center/60px 3px no-repeat}
 /* Import progress, pinned to the window so it outlives the view that started it. */
-.import-banner{position:fixed;right:22px;bottom:22px;z-index:40;width:288px;padding:14px 16px;border:1px solid var(--border);border-radius:9px;background:var(--bg-2);box-shadow:0 14px 40px #132d2933}
-.import-banner strong{display:block;font-size:12px;color:var(--text-strong);margin-bottom:9px}
-.import-banner small{display:block;margin-top:7px;font-size:11px;color:var(--text-dim)}
-.import-banner .progress-track span{transition:width 200ms linear}
-.import-banner .progress-track.indeterminate span{width:38%;animation:caissa-drift 1.2s ease-in-out infinite}
-@keyframes caissa-drift{0%{margin-left:0}50%{margin-left:62%}100%{margin-left:0}}
-@media(prefers-reduced-motion:reduce){.import-banner .progress-track.indeterminate span{animation:none;width:100%}}
+.job-progress{position:fixed;right:22px;bottom:22px;z-index:100;width:min(340px,calc(100vw - 32px));display:grid;gap:10px}
+.job-progress-card{padding:14px 16px;border:1px solid var(--border);border-radius:9px;background:var(--bg-2);box-shadow:0 14px 40px #132d2933}
+.job-progress-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:9px}
+.job-progress-heading strong{font-size:12px;color:var(--text-strong);overflow-wrap:anywhere}
+.job-progress-heading button{border:0;background:none;color:var(--text-dim);font-size:20px;cursor:pointer}
+.job-progress-card small{display:block;margin-top:7px;font-size:12px;color:var(--text-dim);line-height:1.5}
+.job-progress-card progress{display:block;appearance:none;width:100%;height:8px;border:0;border-radius:6px;overflow:hidden;background:var(--border);accent-color:var(--accent)}
+.job-progress-card progress[hidden]{display:none}
+.job-progress-card progress::-webkit-progress-bar{background:var(--border)}
+.job-progress-card progress::-webkit-progress-value{background:var(--accent);transition:width .2s linear}
+.job-progress-card progress::-moz-progress-bar{background:var(--accent)}
+.job-progress-card[data-state=error]{border-color:#a44c42}
+@media print{.job-progress{display:none}}
 /* Engine evaluations carried in the PGN, shown against the move they belong to. */
 .move-cell{display:flex;align-items:baseline;gap:5px;min-width:0}
 .move-cell>button{min-width:0;overflow:hidden;text-overflow:ellipsis}
@@ -131,3 +137,4 @@ html{background:transparent}
 .multi-collection .collection-more{color:var(--accent,#315e48);font-weight:600}
 .autoimport{margin-top:4px}
 .autoimport .eyebrow{margin-bottom:10px}
+

@@ -24,6 +24,7 @@
         type: 'text', placeholder: 'lichess username', autocomplete: 'off',
         value: App.settings.lichessUser || ''
       });
+      window.CaissaAccount?.fill(userInput);
       const maxSel = h('select', [
         h('option', { value: '20', text: 'last 20' }),
         h('option', { value: '50', text: 'last 50' }),

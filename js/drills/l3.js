@@ -95,6 +95,7 @@
         type: 'text', placeholder: 'lichess username', autocomplete: 'off',
         value: App.settings.lichessUser || ''
       });
+      window.CaissaAccount?.fill(userInput);
       const maxSel = h('select', [
         h('option', { value: '30', text: '30 games' }),
         h('option', { value: '50', text: '50 games' }),

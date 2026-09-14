@@ -44,8 +44,7 @@
   function indexControls(){
     const {h,api,button,select,field}=get();
     const choice=select([['','Choose collection']],'');const status=h('p.muted',{role:'status'});
-    const refresh=async()=>{const data=await api('study/index');status.textContent=data.running?`Indexing ${data.collection}: ${data.done}/${data.total}`:data.error||`${data.done} games processed; ${data.errors} errors. Refresh the book or position view when finished.`;};
-    const root=h('div.card-pad',[field('Collection to index',choice),h('div.toolbar',[button('Index positions',async()=>{if(!choice.value)throw new Error('Choose a collection');await api('study/index',{collection:Number(choice.value)});await refresh();}),button('Check indexing progress',refresh)]),status]);
+    const root=h('div.card-pad',[field('Collection to index',choice),button('Index positions',async()=>{if(!choice.value)throw new Error('Choose a collection');await api('study/index',{collection:Number(choice.value)});}),status]);
     api('collections').then(d=>choice.append(...d.collections.map(c=>h('option',{value:c.id,text:c.name+' ('+c.games+')'})))).catch(e=>status.textContent=e.message);
     return root;
   }
