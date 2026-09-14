@@ -22,14 +22,17 @@
     chosen.addEventListener('change',()=>{page.value=books.find(b=>String(b.id)===chosen.value)?.page||1;show();});
     async function refresh(id){const data=await api('books');books=data.books;const previous=String(id||chosen.value||'');chosen.replaceChildren(h('option',{value:'',text:'Choose a book'}),...books.map(b=>h('option',{value:b.id,text:b.title+(b.author?' — '+b.author:'')})));chosen.value=books.some(b=>String(b.id)===previous)?previous:'';page.value=books.find(b=>String(b.id)===chosen.value)?.page||1;show();}
     refresh(new URLSearchParams(location.search).get('book')).catch(e=>status.textContent=e.message);
-    return {root,refresh};
+    return {root,refresh,open:async id=>{await refresh(id);root.scrollIntoView({behavior:'smooth',block:'nearest'});}};
   }
   async function booksView(content){
     const {h,api,button,field,heading}=get();
     const reader=pdfReader();
-    if(new URLSearchParams(location.search).get('reader')==='1'){
-      document.body.classList.add('reader-window');content.append(reader.root);return;
-    }
+    // The separate reading window is the same page with the chrome stripped off. The
+    // class has to be cleared as well as set, or the first visit traps every later one
+    // in a window with no sidebar and no bookshelf.
+    const readerOnly=new URLSearchParams(location.search).get('reader')==='1';
+    document.body.classList.toggle('reader-window',readerOnly);
+    if(readerOnly){content.append(reader.root);return;}
     content.append(heading('Your chess bookshelf','Books','Keep PDFs with your library. Read here, beside analysis, or on another monitor.'));
     const file=h('input',{type:'file',accept:'application/pdf,.pdf'}),title=h('input',{placeholder:'Book title'}),author=h('input',{placeholder:'Author (optional)'}),status=h('p',{role:'status'});
     file.addEventListener('change',()=>{if(file.files[0])title.value=file.files[0].name.replace(/\.pdf$/i,'');});
@@ -37,9 +40,24 @@
       const selected=file.files[0];if(!selected)throw new Error('Choose a PDF');if(selected.size>128*1024*1024)throw new Error('Choose a PDF smaller than 128 MB');
       status.textContent='Copying PDF into your library…';
       try{const data=await new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result.split(',')[1]);r.onerror=()=>reject(new Error('Could not read PDF'));r.readAsDataURL(selected);});
-        const added=await api('books',{title:title.value,author:author.value,data});await reader.refresh(added.id);status.textContent='PDF saved with your library.';
+        const added=await api('books',{title:title.value,author:author.value,data});await reader.refresh(added.id);await refreshShelf();status.textContent='PDF saved with your library.';
       }catch(e){status.textContent=e.message;throw e;}
-    },'primary'),h('p.muted',{text:'PDF copies and saved page numbers travel with your library. In Analysis → Panels, enable Books to read beside your board.'}),status]),reader.root);
+    },'primary'),h('p.muted',{text:'PDF copies and saved page numbers travel with your library. In Analysis → Panels, enable Books to read beside your board.'}),status]));
+    // The shelf is the answer to "what do I own?". The reader below it answers "show me
+    // this one" — the dropdown alone never showed the library, only the current choice.
+    const shelf=h('div.bookshelf');
+    content.append(h('section.card.card-pad',[h('h2',{text:'On your shelf'}),shelf]),reader.root);
+    async function refreshShelf(){
+      const {books}=await api('books');
+      if(!books.length){shelf.replaceChildren(h('p.muted',{text:'No books yet. Add a PDF above and it appears here.'}));return;}
+      shelf.replaceChildren(...books.map(b=>h('div.book-row',[
+        h('div.book-meta',[h('strong',{text:b.title}),
+          h('span',{text:b.author||'Unknown author'}),
+          h('small',{text:'Page '+b.page+' · added '+new Date(b.added_at*1000).toLocaleDateString()})]),
+        h('div.toolbar',[button('Read here',()=>reader.open(b.id)),
+          button('Separate window',()=>separateBook(b.id))])])));
+    }
+    await refreshShelf().catch(e=>shelf.replaceChildren(h('p.error-message',{text:e.message})));
   }
   function indexControls(){
     const {h,api,button,select,field}=get();

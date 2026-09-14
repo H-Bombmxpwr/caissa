@@ -513,7 +513,7 @@
   async function go(view) {
     if(state.analysisCleanup){state.analysisCleanup();state.analysisCleanup=null;}
     clearInterval(poll);clearTimeout(liveTimer);const ticket=++state.route;state.view=view;
-    document.body.classList.toggle('training',view==='training');document.getElementById('trainer').hidden=view!=='training';
+    document.body.classList.toggle('training',view==='training');if(view!=='books')document.body.classList.remove('reader-window');document.getElementById('trainer').hidden=view!=='training';
     nav.querySelectorAll('button').forEach(b=>b.classList.toggle('active',b.dataset.view===view));
     crumb.textContent=(modules.find(m=>m[0]===view)||modules[0])[2];
     if(view==='training'){App.go(App.current?App.current.id:App.levels[0].id);return;}
