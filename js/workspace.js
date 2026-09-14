@@ -1031,11 +1031,11 @@
   async function repertoires(){const data=await api('repertoires');content.append(heading('Prepare with purpose','Your repertoire','Keep your lines. Revisit the uncertain moves. Make the ideas yours.',[button('Import repertoire PGN',()=>importRepertoire(()=>go('repertoire'))),button('Build on the board',()=>go('analysis'),'primary')]));content.append(h('details.card.card-pad',{open:true},[h('summary',{text:'How to use your repertoire'}),h('ol',[
       h('li',{text:'Open a game or build your preparation on the analysis board, including any alternative lines you want to learn.'}),
       h('li',{text:'Choose Add to repertoire, then All variations or Main line only. Both start at the initial position and include complete lines. Choose an existing repertoire or create one; already-covered lines are skipped.'}),
-      h('li',{text:'Return here and use Browse lines to study, or Drill due lines to practise. The opponent’s moves are played for you.'}),
-      h('li',{text:'Finish the line and choose Save review. Successful reviews move farther apart; retries bring the line back tomorrow.'}),
+      h('li',{text:'Return here and use Browse lines to study, or Drill due lines to practise on a full-size board. Drag pieces or click a square and its destination; the opponent’s moves are played for you. Drill all lines practises the whole repertoire instead of only what is due.'}),
+      h('li',{text:'When a session holds several lines, playing a different saved move switches you to that branch, and the board jumps back to each remaining branch in turn. Save review schedules every line you completed, so a part-finished session is still worth saving.'}),
       h('li',{text:'View repertoire merges shared moves into one study tree per starting position. Different starting positions open as separate labelled boards.'}),
-      h('li',{text:'Use Rename to change a repertoire name. Browse lines lets you select and delete saved lines. Export PGN keeps a portable copy.'})])]));
-    const grid=h('div.cards-grid');content.append(grid);if(!data.repertoires.length)grid.append(empty('Start with one good line','Open a game or build a line on the analysis board, then choose Add to repertoire.',[button('Open analysis board',()=>go('analysis'),'primary')]));for(const meta of data.repertoires){const rep=(await api('repertoires/'+meta.id)).repertoire;const data=JSON.parse(rep.data),lines=data.lines||[],due=lines.filter(l=>(l.due||0)<=Date.now());grid.append(h('section.card.study-card',[h('div.eyebrow',{text:meta.color==='w'?'White repertoire':'Black repertoire'}),h('h3',{text:meta.name}),h('p.muted',{text:lines.length+' lines · '+due.length+' due for review'}),h('div.toolbar',[button('Drill due lines',()=>{if(!due.length)throw new Error('All lines reviewed. Come back when they are due.');drillLine(due[0].moves,due[0].fen,rep,due[0]);},'primary'),button('View repertoire',()=>viewRepertoire(rep)),button('Browse lines',()=>browseRepertoire(rep)),button('Rename',()=>renameRepertoire(rep)),button('Export PGN',()=>{const pgn=lines.map(l=>'[Event "'+meta.name.replace(/"/g,'')+'"]\n[SetUp "1"]\n[FEN "'+l.fen+'"]\n[Result "*"]\n\n'+l.moves.map((m,i)=>(i%2===0?(Math.floor(i/2)+1)+'. ':'')+m).join(' ')+' *').join('\n\n');download(pgn,'repertoire.pgn');})])]));}}
+      h('li',{text:'Use Rename to change a repertoire name and Change side to swap the colour you drill, which also flips the board. Browse lines lets you select and delete saved lines. Export PGN keeps a portable copy.'})])]));
+    const grid=h('div.cards-grid');content.append(grid);if(!data.repertoires.length)grid.append(empty('Start with one good line','Open a game or build a line on the analysis board, then choose Add to repertoire.',[button('Open analysis board',()=>go('analysis'),'primary')]));for(const meta of data.repertoires){const rep=(await api('repertoires/'+meta.id)).repertoire;const data=JSON.parse(rep.data),lines=data.lines||[],due=lines.filter(l=>(l.due||0)<=Date.now());grid.append(h('section.card.study-card',[h('div.eyebrow',{text:meta.color==='w'?'White repertoire':'Black repertoire'}),h('h3',{text:meta.name}),h('p.muted',{text:lines.length+' lines · '+due.length+' due for review'}),h('div.toolbar',[button('Drill due lines',()=>{if(!due.length)throw new Error('All lines reviewed. Come back when they are due.');drillLine(due[0].moves,due[0].fen,rep,due[0],due);},'primary'),button('Drill all lines',()=>{if(!lines.length)throw new Error('Add some lines first.');drillLine(lines[0].moves,lines[0].fen,rep,lines[0],lines);}),button('View repertoire',()=>viewRepertoire(rep)),button('Browse lines',()=>browseRepertoire(rep)),button('Rename',()=>renameRepertoire(rep)),button('Change side',()=>renameRepertoire(rep,true)),button('Export PGN',()=>{const pgn=lines.map(l=>'[Event "'+meta.name.replace(/"/g,'')+'"]\n[SetUp "1"]\n[FEN "'+l.fen+'"]\n[Result "*"]\n\n'+l.moves.map((m,i)=>(i%2===0?(Math.floor(i/2)+1)+'. ':'')+m).join(' ')+' *').join('\n\n');download(pgn,'repertoire.pgn');})])]));}}
   function viewRepertoire(rep){
     const groups=new Map();
     for(const line of JSON.parse(rep.data).lines||[]){const fen=line.fen||new Chess().fen();if(!groups.has(fen))groups.set(fen,[]);groups.get(fen).push(line);}
@@ -1050,25 +1050,140 @@
     }
     return go('analysis');
   }
-  function renameRepertoire(rep){
-    modal('Rename repertoire',(body,close)=>{
-      const name=h('input',{value:rep.name});
-      body.append(field('Repertoire name',name),h('div.dialog-actions',[
-        button('Cancel',close),button('Save name',async()=>{
+  function renameRepertoire(rep,editSide=false){
+    modal(editSide?'Change repertoire side':'Rename repertoire',(body,close)=>{
+      const name=h('input',{value:rep.name}),color=select([['w','White'],['b','Black']],rep.color||'w');
+      body.append(field('Repertoire name',name),field('Repertoire color',color),h('div.dialog-actions',[
+        button('Cancel',close),button(editSide?'Save side':'Save name',async()=>{
           if(!name.value.trim())throw new Error('Enter a repertoire name.');
           const latest=(await api('repertoires/'+rep.id)).repertoire;
-          await api('repertoires/'+rep.id,{name:name.value.trim(),color:latest.color,data:JSON.parse(latest.data)},'PUT');
-          close();await go('repertoire');App.toast('Repertoire renamed');
+          const renamed=name.value.trim()!==rep.name,recoloured=color.value!==(rep.color||'w');
+          await api('repertoires/'+rep.id,{name:name.value.trim(),color:color.value,data:JSON.parse(latest.data)},'PUT');
+          close();await go('repertoire');
+          App.toast(renamed&&recoloured?'Repertoire renamed and side changed'
+            :recoloured?'Repertoire side changed to '+(color.value==='w'?'White':'Black')
+            :renamed?'Repertoire renamed':'Repertoire unchanged');
         },'primary')
       ]));name.focus();name.select();
     });
   }
   function browseRepertoire(rep){const data=JSON.parse(rep.data);modal(rep.name,(body,close)=>{const selected=new Set();const remove=button('Delete selected lines',async()=>{if(!selected.size)throw new Error('Select the lines to delete first.');const latest=(await api('repertoires/'+rep.id)).repertoire;if(latest.data!==rep.data)throw new Error('This repertoire changed. Close and reopen Browse lines before deleting.');const updated=JSON.parse(latest.data);updated.lines=updated.lines.filter((_,index)=>!selected.has(index));await api('repertoires/'+rep.id,{name:latest.name,color:latest.color,data:updated},'PUT');close();await go('repertoire');App.toast(selected.size+' lines deleted');},'danger');remove.disabled=true;body.append(h('p.muted',{text:'Select complete saved lines to remove. Shared moves in other lines and imported source games are kept.'}));if(!(data.lines||[]).length)body.append(h('p',{text:'No saved lines. Add a line from analysis or import a repertoire PGN.'}));for(const [index,l] of (data.lines||[]).entries())body.append(h('div.context-item',[h('label.toolbar',[h('input',{type:'checkbox','aria-label':'Select line '+(index+1),onchange:e=>{if(e.target.checked)selected.add(index);else selected.delete(index);remove.disabled=!selected.size;remove.textContent=selected.size?'Delete '+selected.size+' selected lines':'Delete selected lines';}}),'Line '+(index+1)]),h('p',{text:l.moves.join(' ')}),button('Study line',()=>{if(state.dirty&&!confirm('Discard unsaved analysis?'))return;state.selected=null;state.parsed=PGN.parse('[Event "Repertoire study"]\n[White "White"]\n[Black "Black"]\n[SetUp "1"]\n[FEN "'+l.fen+'"]\n[Result "*"]\n\n'+l.moves.join(' ')+' *');state.node=state.parsed.root;state.dirty=false;close();go('analysis');}),button('Drill',()=>{close();drillLine(l.moves,l.fen,rep,l);})]));body.append(h('div.dialog-actions',[button('Close',close),remove]));});}
-  function drillLine(nodes,fen,rep,line){const sans=nodes.map(n=>typeof n==='string'?n:n.san);if(!sans.length)throw new Error('This line has no moves yet.');modal('Recall the line',(body,close)=>{const holder=h('div.board-holder',{style:{width:'min(350px,100%)',margin:'15px auto'}}),prompt=h('div.drill-prompt'),feedback=h('div.status-message'),input=h('input',{placeholder:'Your next move','aria-label':'Recall move'}),blind=h('input',{type:'checkbox',checked:true,onchange:()=>b.setBlindfold(blind.checked?'pieces':'off')});let index=0,mistakes=0,g=new Chess(fen),completed=false;const b=new Board(holder,{viewOnly:true,blindfold:'pieces'});b.setPosition(g);const peek=button('Peek',()=>{});peek.addEventListener('pointerdown',()=>{b.setPeeking(true);App.stat('repertoire-peeks',{count:1});});['pointerup','pointerleave','pointercancel'].forEach(e=>peek.addEventListener(e,()=>b.setPeeking(false)));
-    const form=h('form.toolbar',{onsubmit:act(e=>{e.preventDefault();if(completed)return;const test=new Chess(g.fen()),move=test.move(input.value);if(!move||move.san!==sans[index]){mistakes++;feedback.textContent='Try again. Recall the line you saved.';return;}g=test;index++;input.value='';feedback.textContent='Correct.';advance();})},[input,h('button.btn.primary',{type:'submit',text:'Check move'})]);
-    const finish=button('Save review',async()=>{if(!completed)throw new Error('Finish the line first.');if(rep&&line){const data=JSON.parse(rep.data),item=data.lines.find(l=>l.fen===line.fen&&l.moves.join(' ')===line.moves.join(' '));item.successes=(item.successes||0)+(mistakes===0?1:0);item.interval=mistakes?1:Math.max(1,Math.round((item.interval||.4)*2.5));item.due=Date.now()+item.interval*86400000;await api('repertoires/'+rep.id,{name:rep.name,color:rep.color,data},'PUT');}App.stat('repertoire',{reviews:1,mistakes});close();if(state.view==='repertoire')go('repertoire');},'primary');finish.disabled=true;
-    function advance(){if(rep)while(index<sans.length&&g.turnColor()!==rep.color){g.move(sans[index++]);}b.setPosition(g);completed=index===sans.length;prompt.textContent=completed?'Line complete':`Move ${index+1} of ${sans.length} · ${g.turnColor()==='w'?'White':'Black'} to move`;finish.disabled=!completed;input.disabled=completed;if(completed){b.setBlindfold('off');feedback.textContent=mistakes+' retries. '+(mistakes?'Review again tomorrow.':'A little more of the board is yours.');}}
-    body.append(h('label.toolbar',[blind,'Blindfold mode']),holder,prompt,form,feedback,h('div.dialog-actions',[peek,button('Close',close),finish]));advance();});}
+  function drillLine(nodes,fen,rep,line,sessionLines){
+    let sans=nodes.map(n=>typeof n==='string'?n:n.san);
+    if(!sans.length)throw new Error('This line has no moves yet.');
+    const key=l=>(l.fen||Chess.DEFAULT_FEN)+'|'+l.moves.join(' ');
+    const seen=new Set(),queue=(sessionLines||[line||{moves:sans,fen}]).filter(l=>{const id=key(l);if(seen.has(id))return false;seen.add(id);return true;});
+    const total=queue.length,results=[];
+    let currentLine=queue.shift();sans=currentLine.moves;fen=currentLine.fen||Chess.DEFAULT_FEN;
+    modal('Practise '+(rep?.name||'this line'),(body,close)=>{
+      const dialog=body.closest('dialog');dialog.classList.add('repertoire-drill-dialog');
+      const holder=h('div.board-holder.repertoire-drill-board'),prompt=h('h3'),feedback=h('p',{role:'status'});
+      const history=h('div.drill-history',{'aria-label':'Moves played','aria-live':'polite'});
+      const progress=h('p.drill-progress',{'aria-live':'polite'});
+      const promotion=h('div.toolbar');
+      const owner=rep?.color||new Chess(fen).turnColor();
+      let index=0,mistakes=0,g=new Chess(fen),completed=false,waiting=false,saved=false,timer;
+      const b=new Board(holder,{orientation:owner,blindfold:'off',animationMs:state.prefs.animate===false?0:state.prefs.animationMs||200});
+      const blind=h('input',{type:'checkbox',checked:false,onchange:()=>{b.setBlindfold(blind.checked&&!completed?'pieces':'off');peek.hidden=!blind.checked;}});
+      const peek=button('Peek',()=>{});peek.hidden=true;
+      peek.addEventListener('pointerdown',()=>{b.setPeeking(true);App.stat('repertoire-peeks',{count:1});});
+      ['pointerup','pointerleave','pointercancel'].forEach(event=>peek.addEventListener(event,()=>b.setPeeking(false)));
+      dialog.addEventListener('close',()=>clearTimeout(timer));
+      function record(san){
+        const fields=g.fen().split(' '),move=g.move(san);
+        if(!move)throw new Error('This saved line contains an illegal move: '+san);
+        index++;history.append(h('span',{text:fields[5]+(fields[1]==='w'?'. ':'... ')+move.san+' '}));
+        b.setLastMove([move.from,move.to]);
+      }
+      function submit(move){
+        if(waiting||completed)return;
+        const test=new Chess(g.fen()),played=test.move(move);
+        promotion.replaceChildren();
+        if(played&&played.san!==sans[index]){
+          const alternative=queue.findIndex(l=>(l.fen||Chess.DEFAULT_FEN)===fen&&l.moves[index]===played.san&&sans.slice(0,index).every((m,i)=>l.moves[i]===m));
+          if(alternative>=0){const next=queue.splice(alternative,1,currentLine)[0];currentLine=next;sans=next.moves;}
+          else if((sessionLines||[]).some(l=>(l.fen||Chess.DEFAULT_FEN)===fen&&l.moves[index]===played.san&&sans.slice(0,index).every((m,i)=>l.moves[i]===m))){
+            feedback.textContent='That is a repertoire move already covered. Try a different continuation for this branch.';b.setPosition(g,{sound:false});return;
+          }
+        }
+        if(!played||played.san!==sans[index]){
+          mistakes++;feedback.textContent='That is not the saved move. Try again.';b.setPosition(g,{sound:false});return;
+        }
+        record(played.san);feedback.textContent='Correct.';waiting=true;
+        b.setPosition(g);b.setMovable({color:null});timer=setTimeout(advance,350);
+      }
+      function onMove(from,to){
+        if(g.get(from)?.type==='p'&&/[18]$/.test(to)){
+          b.setMovable({color:null});
+          promotion.replaceChildren(h('span',{text:'Promote to:'}),...['q','r','b','n'].map(piece=>button(
+            {q:'Queen',r:'Rook',b:'Bishop',n:'Knight'}[piece],()=>{submit({from,to,promotion:piece});if(!waiting)renderBoard();})));
+        }else submit({from,to});
+      }
+      function renderBoard(){
+        b.setPosition(g);b.setMovable({color:completed||waiting?null:owner,dests:g.destinationsMap(),onMove});
+      }
+      const finish=button('Save review',async()=>{
+        if(!results.length)throw new Error('Finish at least one line before saving a review.');
+        if(rep){
+          const latest=(await api('repertoires/'+rep.id)).repertoire,data=JSON.parse(latest.data);
+          for(const review of results){
+            const item=data.lines.find(l=>key(l)===key(review.line));
+            if(!item)continue;
+            item.successes=(item.successes||0)+(review.mistakes===0?1:0);
+            item.interval=review.mistakes?1:Math.max(1,Math.round((item.interval||.4)*2.5));item.due=Date.now()+item.interval*86400000;
+          }
+          await api('repertoires/'+rep.id,{name:latest.name,color:latest.color,data},'PUT');
+        }
+        App.stat('repertoire',{reviews:results.length,mistakes:results.reduce((sum,r)=>sum+r.mistakes,0)});
+        saved=true;close();App.toast(results.length+(results.length===1?' line':' lines')+' scheduled for review');
+        if(state.view==='repertoire')go('repertoire');
+      },'primary');finish.disabled=true;
+      function sharedPrefix(next){
+        if((next.fen||Chess.DEFAULT_FEN)!==fen)return 0;
+        let shared=0;while(shared<Math.min(sans.length,next.moves.length)&&sans[shared]===next.moves[shared])shared++;
+        return shared;
+      }
+      function nextBranch(){
+        let chosen=0;
+        for(let i=1;i<queue.length;i++)if(sharedPrefix(queue[i])>sharedPrefix(queue[chosen]))chosen=i;
+        const next=queue.splice(chosen,1)[0],shared=sharedPrefix(next);
+        currentLine=next;sans=next.moves;fen=next.fen||Chess.DEFAULT_FEN;
+        index=0;mistakes=0;completed=false;waiting=false;g=new Chess(fen);history.replaceChildren();b.setLastMove(null);
+        while(index<shared)record(sans[index]);
+        b.setPosition(g,{animate:false,sound:false});
+        feedback.textContent=shared?'Jumped back to the next branch after '+shared+' moves. Find the other continuation.':'Starting the next line from its initial position.';
+        b.setBlindfold(blind.checked?'pieces':'off');advance();
+      }
+      function advance(){
+        waiting=false;
+        while(index<sans.length&&g.turnColor()!==owner)record(sans[index]);
+        completed=index===sans.length;
+        if(completed){
+          results.push({line:currentLine,mistakes});
+          if(queue.length){
+            waiting=true;prompt.textContent='Branch complete';feedback.textContent='Correct — branch complete. Moving to the next variation…';
+            timer=setTimeout(nextBranch,1100);
+          }else{
+            prompt.textContent=total>1?'Repertoire session complete':'Line complete';
+            b.setBlindfold('off');feedback.textContent=results.reduce((sum,r)=>sum+r.mistakes,0)+' retries. Save this review to schedule your next practice.';
+          }
+        }else prompt.textContent=(owner==='w'?'White':'Black')+' to move';
+        progress.textContent=results.length+' / '+total+' lines completed';
+        renderBoard();finish.disabled=!results.length||waiting;
+        history.lastElementChild?.scrollIntoView({block:'nearest'});
+      }
+      const size=h('input',{type:'range',min:320,max:720,value:560,'aria-label':'Drill board size',oninput:e=>holder.style.width='min(100%, '+e.target.value+'px)'});
+      body.append(h('div.repertoire-drill-layout',[
+        h('div.drill-board-column',[holder,field('Board size',size)]),
+        h('div.drill-sidebar',[h('p',{text:'You play '+(owner==='w'?'White':'Black')+'. Drag pieces or click a piece and its destination. Opponent moves play automatically.'}),
+          progress,prompt,h('h4',{text:'Moves played'}),history,promotion,feedback,h('label.toolbar',[blind,'Blindfold mode (optional)']),peek,
+          h('div.dialog-actions',[button('Close',()=>{
+            if(results.length&&!saved&&!confirm(results.length+(results.length===1?' completed line has':' completed lines have')+' not been saved. Close anyway?'))return;
+            close();
+          }),finish])])
+      ]));advance();
+    });
+  }
   async function studies(){content.append(heading('A place for your ideas','Study folders','Organize preparation into real folders, with portable PGNs behind every collection.',[button('Create collection',collectionDialog),button('＋ Study folder',()=>folderDialog(),'primary')]));content.append(h('p.muted',{text:state.studyRoot}));const grid=h('div.cards-grid');content.append(grid);if(!state.folders.length)grid.append(empty('Build your study space','Create a folder such as Tournament preparation, then add White repertoire, Black repertoire, Model games, and Endgames beneath it.',[button('Create study structure',async()=>{const root=await api('study/folders',{name:'Chess study'});for(const name of ['White repertoire','Black repertoire','Annotated games','Model games','Endgames','Tactics'])await api('study/folders',{name,parent_id:root.id});await go('studies');},'primary')]));
     grid.className='study-overview';grid.append(LibraryTools.studyTree(state,{browse:c=>{state.filters={collection:String(c.id),kind:c.kind||'games'};state.offset=0;go('database');},assign:assignDialog,create:folderDialog,remove:deleteFolderDialog,repertoire:()=>go('repertoire')}));
     const collections=h('div.card-pad');for(const c of state.collections)collections.append(h('div.context-item',[h('b',{text:c.name+' · '+c.games+' games'}),h('div.toolbar',[button('Browse',()=>{state.filters={collection:String(c.id),kind:c.kind||'games'};state.offset=0;go('database');}),button('Index positions',async()=>{await api('study/index',{collection:c.id});}),h('a.btn',{href:'/api/collections/'+c.id+'/pgn',download:c.name+'.pgn',text:'Export PGN'}),button('Delete',()=>collectionDeleteDialog(c),'danger')])]));content.append(h('div',{style:{marginTop:'24px'}},[h('details.card',[h('summary.card-pad',{text:'All collections · export, delete and position indexing'}),collections])]));}

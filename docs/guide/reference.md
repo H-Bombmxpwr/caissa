@@ -346,7 +346,9 @@ and cached, so the readings never slow the search.
 ### Rename repertoires and remove lines
 
 On the Repertoire page, choose **Rename** on a repertoire card and save its new
-name. Choose **Browse lines**, select the saved lines to remove, and click
+name. **Change side** opens the same dialog, so the name and the colour can both
+be changed from either button; the confirmation says which of the two changed.
+Choose **Browse lines**, select the saved lines to remove, and click
 **Delete selected lines** (the button shows the selected count). Closing the
 dialog without deleting makes no changes. Deleting a line preserves other lines,
 their review history, and the original imported PGNs. An empty repertoire can
@@ -373,3 +375,30 @@ Choose an existing repertoire or create a new one. Lines already present, or
 already covered by a longer saved line from the same starting position, are
 skipped. Existing review history is preserved, and the completion message reports
 added and skipped counts.
+
+
+### Practise a repertoire on the board
+
+**Drill due lines** opens a large board. Drag pieces or click the source and
+destination squares; no move typing is required. **Board size** adjusts the
+board. The repertoire color determines your side and orientation, with opponent
+moves played automatically. Use **Change side** on its card to change that color.
+**Moves played** shows only the moves already reached. Blindfold mode is off by
+default and can be enabled for an optional memory exercise. Promotions ask which
+piece to promote to. Complete the line and choose **Save review** to update its
+practice schedule.
+
+
+### Drill a whole repertoire in one session
+
+**Drill due lines** practises every line that is due and **Drill all lines**
+practises all of them, as a single session rather than one line at a time.
+Playing a saved move that belongs to a different line of the session switches you
+onto that line instead of counting a mistake; a saved move that has already been
+covered says so and asks for a different continuation. When a line finishes, the
+board jumps back to the deepest position the remaining lines still share, so
+shared opening moves are not replayed, and the progress line counts the lines
+completed out of the session total. **Save review** schedules every completed
+line at once and becomes available as soon as one line is done, so a
+part-finished session can still be saved. Closing with unsaved completed lines
+asks for confirmation.

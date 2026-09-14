@@ -39,13 +39,42 @@ Private lichess studies work the same way once your account is connected — see
 
 ## Drilling
 
-**Drill due lines** plays the opponent's moves for you and asks for yours, blindfold by
-default, with a **Peek** button that counts how often you use it. When the line is done,
-**Save review** schedules it: a clean run moves the line further away, a retry brings it
-back tomorrow.
+**Drill due lines** opens a full-size board and practises everything that is due;
+**Drill all lines** practises the whole repertoire whether or not it is due. You play the
+repertoire's colour, the board is oriented to it, and the opponent's moves are played for
+you. Move by dragging a piece or by clicking its square and then its destination — there
+is nothing to type. Promotions ask which piece you want. **Board size** resizes the board,
+and **Moves played** lists only the moves you have actually reached, so it never shows you
+the move you are being asked for.
+
+Blindfold mode is off by default. Tick it to hide the pieces as a memory exercise; a
+**Peek** button then appears and counts how often you use it.
+
+A session that holds several lines drills them as one tree. Playing a saved move belonging
+to a different line switches you onto that line rather than marking you wrong, and when a
+line finishes the board jumps back to the last position the remaining lines still share,
+so shared opening moves are not replayed. The counter under the board tracks how many of
+the session's lines you have completed.
+
+**Save review** schedules every line you completed in the session: a clean run moves a
+line further away, a retry brings it back tomorrow. You do not have to finish the whole
+session first — save whenever at least one line is done. Closing with completed lines
+still unsaved asks for confirmation.
 
 **Browse lines** lists everything in the repertoire, with the option to study a line on
-the analysis board instead of drilling it.
+the analysis board instead of drilling it, or to drill that single line.
+
+## Renaming, changing side and removing lines
+
+**Rename** on a repertoire card edits its name, and **Change side** edits the colour you
+play — the same dialog, reached from either button, so either field can be changed from
+either one. Changing the side flips the drill board and switches which moves are asked of
+you.
+
+To remove lines, choose **Browse lines**, tick the lines to delete, and use **Delete
+selected lines**; the button carries the count. The remaining lines keep their review
+history, and the imported source PGNs are untouched. Closing the dialog without deleting
+changes nothing, and an emptied repertoire can be refilled from analysis or a PGN import.
 
 **Export PGN** writes the whole repertoire out as one PGN, one game per line, each with
 its starting FEN. It is a plain file; nothing about it is specific to this app.

@@ -111,3 +111,12 @@
 .color-lines .move-tree details.variation{border-left-color:#4682b4}
 .color-lines .move-tree details.variation details.variation{border-left-color:#c05a55}
 .color-lines .move-tree details.variation details.variation details.variation{border-left-color:#b99732}
+
+.repertoire-drill-dialog{width:min(1100px,96vw)}
+.repertoire-drill-layout{display:grid;grid-template-columns:minmax(0,720px) minmax(230px,1fr);gap:24px;margin-top:20px}
+.repertoire-drill-board{width:min(100%,560px);aspect-ratio:1;margin:0 auto}
+.drill-board-column{min-width:0}
+.drill-sidebar{min-width:0}
+.drill-history{min-height:70px;max-height:240px;overflow:auto;line-height:2;padding:12px;background:var(--bg-3);border-radius:5px}
+.drill-history span{display:inline-block;margin-right:8px}
+@media(max-width:760px){.repertoire-drill-layout{grid-template-columns:minmax(0,1fr)}.drill-history{max-height:140px}}
