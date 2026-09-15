@@ -32,6 +32,7 @@ want your lichess studies? [Your lichess account](guide/lichess.md)
 - [Getting started](guide/getting-started.md) — install, run, and where your library lives
 - [The game database](guide/database.md) — collections, searching, sorting, deleting
 - [Importing games](guide/importing.md) — PGN, archives, online accounts, ChessBase
+- [A reference base](guide/reference-base.md) — attaching a gigabase, and the setup this guide assumes
 - [The opening explorer](guide/explorer.md) — walking a collection's tree
 - [The analysis board](guide/analysis.md) — engine, telemetry, annotation, context
 - [Play the computer](guide/computer.md) — eleven Stockfish levels, takebacks and saved games
@@ -63,6 +64,7 @@ guide/getting-started
 guide/database
 guide/player-lab
 guide/importing
+guide/reference-base
 guide/explorer
 guide/analysis
 guide/computer

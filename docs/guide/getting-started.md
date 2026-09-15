@@ -48,9 +48,14 @@ delete the app, download it again, and your games and settings are still there.
 library/
   library.db          the SQLite index
   collections/        one folder per collection, each holding games.pgn
+  reference/          large PGNs attached in place, never copied
   studies/            study folders, with a study.json manifest each
   books/              PDFs you have added
 ```
+
+A good starting setup is your own games imported from Lichess, a large reference base
+attached in `reference/`, and small collections cut out of that base for the openings you
+actually study. [A reference base](reference-base.md) walks through it.
 
 > **Important**
 >

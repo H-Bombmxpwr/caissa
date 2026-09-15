@@ -33,7 +33,8 @@ EXTRA_FILTERS = ('annotator','site','round','termination','annotated','date_from
 
 # What POST /api/collections/link may filter on: the game fields a saved search is
 # built from, and nothing that would let a request reach outside the library.
-COLLECT_FILTERS = ('query', 'collection', 'player', 'white', 'black', 'eco', 'eco_to', 'result',
+COLLECT_FILTERS = ('query', 'collection', 'player', 'player_prefix', 'white_prefix',
+                   'black_prefix', 'event_prefix', 'white', 'black', 'eco', 'eco_to', 'result',
                    'outcome', 'opening', 'event', 'year', 'date_from', 'date_to', 'min_elo',
                    'max_elo', 'min_length', 'max_length', 'position', 'tag', 'kind')
 
@@ -118,7 +119,8 @@ class Api:
                 self.import_status = {'running': True, 'label': label, 'done': 0, 'total': 0,
                                       'added': 0, 'duplicates': 0, 'skipped': 0, 'error': None, 'batch_id': batch}
                 self._progress_offset = self._progress_last = 0
-                whole_account = bool((body or {}).get('all')) or str((body or {}).get('max', '')) in ('0', 'all')
+                whole_account = (bool((body or {}).get('all')) or rest[1:] == ['reference']
+                                 or str((body or {}).get('max', '')) in ('0', 'all'))
                 self._progress_streaming = (head == 'import' and (rest[1:] != ['lichess'] or whole_account)) or head == 'lichess'
                 self.library.on_progress = self._import_progress
                 try:
@@ -171,8 +173,11 @@ class Api:
             raise ApiError('unsupported openings request', 405)
         term = (query.get('q') or '').strip()
         sql = ["SELECT opening AS name,",
-               "MIN(CASE WHEN eco GLOB '[A-E][0-9][0-9]' THEN eco END) AS eco_from,",
-               "MAX(CASE WHEN eco GLOB '[A-E][0-9][0-9]' THEN eco END) AS eco_to,",
+               # A big base subdivides ECO (B90a, E04a). The span an opening covers is
+               # still the three-letter code, so the suffix is trimmed rather than
+               # treated as a different code — or as no code at all.
+               "MIN(CASE WHEN eco GLOB '[A-E][0-9][0-9]*' THEN substr(eco,1,3) END) AS eco_from,",
+               "MAX(CASE WHEN eco GLOB '[A-E][0-9][0-9]*' THEN substr(eco,1,3) END) AS eco_to,",
                "COUNT(*) AS games FROM games WHERE opening IS NOT NULL AND opening <> ''"]
         params = []
         if term:
@@ -239,7 +244,7 @@ class Api:
         }
 
     def _route_stats(self, method, rest, query, body):
-        return 200, self.library.stats()
+        return 200, self.library.stats(full=query.get('full') in ('1', 'true'))
 
     def _route_books(self, method, rest, query, body):
         if method=='GET' and not rest:
@@ -410,7 +415,7 @@ class Api:
             filters.pop('offset', None)
             if 'q' in filters:
                 filters['query'] = filters.pop('q')
-            allowed = {'query','collection','player','white','black','eco','eco_to','result','opening','min_elo','max_elo','outcome','year','sort','event','min_length','max_length','tag','added_from','added_to','position'}
+            allowed = {'query','collection','player','player_prefix','white_prefix','black_prefix','event_prefix','white','black','eco','eco_to','result','opening','min_elo','max_elo','outcome','year','sort','event','min_length','max_length','tag','added_from','added_to','position'}
             allowed.update(EXTRA_FILTERS)
             if set(filters) - allowed:
                 raise ApiError('Unknown filter')
@@ -450,6 +455,8 @@ class Api:
                 max_length=query.get('max_length'), tag=query.get('tag'),
                 added_from=query.get('added_from'), added_to=query.get('added_to'),
                 position=query.get('position'), eco_to=query.get('eco_to'),
+                player_prefix=query.get('player_prefix'), event_prefix=query.get('event_prefix'),
+                white_prefix=query.get('white_prefix'), black_prefix=query.get('black_prefix'),
                 **{key:query.get(key) for key in EXTRA_FILTERS},
             )
         # /api/games/<id>/collections — the shelves one game sits on.
@@ -521,6 +528,27 @@ class Api:
             raise ApiError("unsupported import request", 405)
         kind = rest[0]
         body = body or {}
+
+        if kind == 'reference':
+            # Attaching is a scan, not a download. The file is already here; the only
+            # thing produced is index rows pointing back into it.
+            if not self.import_lock.acquire(blocking=False):
+                raise ApiError('An import is already running', 409)
+            try:
+                attached = importers.attach_reference(
+                    self.library, str(body.get('path', '')).strip(),
+                    body.get('collection') or 'Reference base',
+                    progress=self._import_progress)
+                try:
+                    attached['folder'] = self.study.shelve(
+                        attached['collection_id'], body.get('folder') or 'Reference')
+                except (ValueError, KeyError, OSError) as err:
+                    attached['folder_error'] = str(err)   # the games are in; the shelf is not worth failing for
+                return 200, attached
+            except OSError as err:
+                raise ApiError('Could not read that PGN: ' + str(err), 503) from err
+            finally:
+                self.import_lock.release()
 
         if kind in ('source', 'chesscom'):
             if not self.import_lock.acquire(blocking=False):
@@ -699,6 +727,17 @@ class Api:
 
     def _route_masters(self, method, rest, query, body):
         action = rest[0] if rest else ""
+        if action == 'references' and method == 'GET':
+            return 200, {'references': self.library.references(),
+                         'attachable': self.library.attachable(),
+                         'folder': self.library.REFERENCE_DIR}
+        if action == 'detach' and method == 'POST':
+            body = body or {}
+            return 200, importers.detach_reference(self.library, body['collection'],
+                                                   force=bool(body.get('force')))
+        if action == 'dependents' and method == 'GET':
+            return 200, {'dependents': importers.reference_dependents(
+                self.library, int(query['collection']))}
         if action == 'players' and method == 'GET':
             names={name:{'name':name,'source':'Master player'} for name in
                 'Carlsen Kasparov Karpov Fischer Spassky Tal Botvinnik Smyslov Petrosian Alekhine Capablanca Lasker Steinitz Anand Kramnik Topalov Polgar Ding Gukesh Nakamura Caruana Aronian Giri So Nepomniachtchi Firouzja Erigaisi Abdusattorov Praggnanandhaa Keymer Short Adams Ivanchuk Shirov Morozevich Svidler Grischuk Gelfand Rubinstein Nimzowitsch Reti Tarrasch Bronstein Korchnoi Reshevsky Najdorf Larsen Euwe'.split()}
@@ -706,11 +745,15 @@ class Api:
             for player in json.loads(cached or '[]'):
                 names[player['name']]={'name':player['name'],'source':'PGN Mentor collection'}
             needle=query.get('q','').strip()
-            rows=self.library.connect().execute('''SELECT white AS name FROM games WHERE white LIKE ?
-                UNION SELECT black AS name FROM games WHERE black LIKE ? LIMIT 100''',('%'+needle+'%','%'+needle+'%'))
-            for row in rows:
-                name=row['name'].split(',')[0].strip()
-                if name and name!='?':names.setdefault(name,{'name':name,'source':'Your library'})
+            if needle:
+                for probe in {needle, needle[:1].upper()+needle[1:]}:
+                    rows=self.library.connect().execute('''SELECT DISTINCT name FROM
+                        (SELECT white AS name FROM games WHERE white>=? AND white<?
+                         UNION SELECT black AS name FROM games WHERE black>=? AND black<?)
+                        LIMIT 60''',(probe,probe+'\uffff',probe,probe+'\uffff'))
+                    for row in rows:
+                        name=row['name'].split(',')[0].strip()
+                        if name and name!='?':names.setdefault(name,{'name':name,'source':'Your library'})
             return 200,{'players':sorted([p for p in names.values() if needle.casefold() in p['name'].casefold()],key=lambda p:p['name'])[:100]}
         if action == 'catalog' and method == 'GET':
             from html.parser import HTMLParser

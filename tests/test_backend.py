@@ -162,7 +162,11 @@ class LibraryTests(unittest.TestCase):
         self.lib.add_games(TWO_GAMES)
         stats = self.lib.stats()
         self.assertEqual(stats["games"], 2)
-        self.assertTrue(any(p["name"] == "testplayer" and p["n"] == 2 for p in stats["top_players"]))
+        # The rankings cost two rows a game to compute, so they are opt-in and the
+        # page that does not show them does not pay for them.
+        self.assertNotIn("top_players", stats)
+        full = self.lib.stats(full=True)
+        self.assertTrue(any(p["name"] == "testplayer" and p["n"] == 2 for p in full["top_players"]))
 
 
 class ApiTests(unittest.TestCase):

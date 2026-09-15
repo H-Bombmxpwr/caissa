@@ -73,6 +73,13 @@ C:\Chess\twic1500g.zip             a local archive
 https://theweekinchess.com/...zip  downloaded and streamed
 ```
 
+## A base too big to import
+
+A multi-gigabyte PGN — Lumbras GigaBase, a ChessBase export — is not imported. It is
+**attached**: scanned once so the index knows where each game starts, then read where it
+lies. Put it in a `reference` folder inside your library and attach it from **Master
+games**. See [A reference base](reference-base.md).
+
 ## Your online games
 
 **Your online games** imports from lichess or chess.com by username. A lichess token is

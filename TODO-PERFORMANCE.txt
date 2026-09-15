@@ -1,0 +1,145 @@
+WHAT STILL NEEDS DOING
+Written 2026-09-15. The Lumbras base is fully attached; three searches are still slow.
+
+===============================================================================
+DONE — no action needed
+===============================================================================
+
+The base is attached and complete:
+  10,355,488 games   100% of the 8.63 GB PGN
+  Library total      10,363,012 games
+  library.db         7.04 GB  (654 bytes a game)
+  Nothing copied     the PGN is read where it lies, in reference\
+
+Fixed this session, measured on the real library:
+
+  App / terminal launch      50 s   ->  0.01 s
+  Database view opening      60 s   ->  0.5 s
+  Browsing the base          37 s   ->  0.3 s
+  Player search              35 s   ->  0.9 s
+  Master games view          11 s   ->  0.3 s
+  ECO B90-B90 search        0 hits  ->  correct
+
+265 tests pass. The 3 failures in test_analysis_quality.py and test_storage.py
+are pre-existing: no 'webview' module installed.
+
+===============================================================================
+STILL SLOW — three searches, one cause each
+===============================================================================
+
+Measured through the real HTTP stack on 10.36M games.
+
+1. SORT BY RATING over the whole library ............... 37 s
+   Database view -> Sort -> "Highest rated".
+
+   Cause: the sort key is an expression,
+     MAX(COALESCE(white_elo,0), COALESCE(black_elo,0)) DESC
+   and no index can serve an expression, so SQLite sorts ten million rows to
+   return thirty.
+
+   Fix: store the value. Add a column top_elo INTEGER, set it on insert and on
+   attach (it is just max of the two Elos), index it, and point SORTS['elo'] at
+   the column instead of the expression. Backfill once with the same
+   _backfill_once() marker the startup migrations now use, so it is paid once.
+   Cost: ~80 MB of index, one backfill pass.
+   Note: this is only slow UNFILTERED. Sorting a player's games by rating is
+   already fast, because the filter runs first.
+
+2. FREE-TEXT SEARCH BOX ............................... >40 s
+   Database view -> the "Search players, openings, events..." box.
+
+   Cause: each word becomes LIKE '%word%' across about eight columns. A leading
+   wildcard cannot use an index, so every row is read.
+
+   Fix: an FTS5 table over the columns that box searches (players, event, site,
+   opening, annotator, teams), kept in step with games by triggers. Query it for
+   candidate ids and join back. This is the same shape as the prefix fix already
+   made for the Masters search, but general.
+   Cost: FTS5 over 10M games is roughly 1.5-2 GB and half an hour to build.
+   Cheaper stopgap: make the box a prefix search like Master games, and say so
+   in its placeholder. Loses mid-string matching, costs nothing, takes minutes.
+
+3. OPENING NAME DROPDOWN .............................. 37 s
+   The "Opening name" box in Master games and in the database filter dialog.
+   /api/openings does GROUP BY opening over every row on each keystroke.
+
+   Fix: a summary table, the same reasoning as reference_bases. Something like
+     opening_summary(name TEXT PRIMARY KEY, eco_from, eco_to, games INTEGER)
+   rebuilt when the library changes rather than per keystroke. Staleness can be
+   a stored game count compared against the live one; rebuild takes one scan.
+   Cost: a few hundred KB, ~30 s to build, and the dropdown becomes instant.
+   Stopgap: the box is already debounced; disable it above ~1M games so it
+   stops hanging, rather than leaving it to hang.
+
+Suggested order: 3 (cheapest, most annoying), then 1, then 2.
+
+===============================================================================
+NOT WORTH DOING — measured, decided against
+===============================================================================
+
+POSITION-INDEXING THE BASE. Do not.
+  Our index stores one row per half-move: 68 rows a game at 113 bytes.
+  For 10.36M games that is ~700 million rows and ~79 GB, plus hours.
+  Index the collections you carve out instead — a thousand games is ~7 MB and
+  takes seconds, and that is what the explorer, the position context panel and
+  the Player Lab actually read.
+
+  ChessBase does not do this either. Its search booster (.cit/.cib) is a
+  per-game signature — material and structure — used to throw away most games
+  cheaply and then decode the survivors. A filter, not an index, which is why
+  it costs a few hundred bytes a game rather than 7 KB. If whole-base position
+  search is ever wanted, that is the design to copy, and it is a feature in its
+  own right rather than a tweak.
+
+  (File layout and booster behaviour above are from ChessBase's documented
+  structure and observable behaviour, not from reverse-engineering the format.)
+
+VACUUM after big deletes. Not needed; the space is reused. It also needs an
+exclusive lock, which a running app denies — it hung for 12 minutes here.
+
+===============================================================================
+THINGS THAT WILL BITE AGAIN IF FORGOTTEN
+===============================================================================
+
+- Deleting reference rows is slow ONLY because of foreign-key cascade checks.
+  Nothing references them, so PRAGMA foreign_keys=OFF turns 15 minutes into
+  49 seconds for 775k rows. Verify nothing references them first.
+
+- Timing the API from a script: use 127.0.0.1, never localhost. "localhost"
+  resolves to IPv6 first here and costs a flat 2 s per request. It looks
+  exactly like a server problem and is not one. This wasted a detour.
+
+- Leftover test servers. Four of mine on ports 8791-8794 were holding 2.3 GB
+  and were the main reason the long scans kept being killed for memory.
+  netstat -ano | grep LISTENING | grep :879
+
+- One-time migrations must record that they ran. The two backfills in
+  Library.__init__ re-derived "nothing to do" with a full table scan on every
+  launch — 50 seconds once the base was attached. They now write a
+  'backfill:<name>' marker into settings. Any future one-time job should do the
+  same. Tests that simulate an old library must clear the marker too, which is
+  what test_chessbase and test_library_tools now do.
+
+===============================================================================
+WHERE THINGS LIVE
+===============================================================================
+
+  Library        C:\Users\hunte\Documents\Chess Analysis
+  Base PGN       reference\LumbrasGigaBase_OTB_Complete.pgn
+  Collection     "Reference / Lumbras GigaBase", filed under study folder 8
+
+  The original .7z is still in Downloads and can be deleted.
+
+  Changed files this session:
+    backend/store.py        attach/detach, references, prefix search, ECO fix,
+                            startup markers, collection+date index
+    backend/importers.py    attach_reference with resume, detach with guard
+    backend/api.py          import/reference, masters/*, stats(full=)
+    backend/study.py        shelve()
+    js/workspace.js         Master games rebuilt; Masters / player / opening
+    js/library-tools.js     "Reference" study category
+    css/polish.css          reference strip, results, unfinished notice
+    docs/guide/reference-base.md            NEW
+    tests/test_reference_base.py            NEW, 20 tests
+    docs/{index,guide/*,reference/data-model}.md
+    tests/test_backend.py, test_chessbase.py, test_library_tools.py

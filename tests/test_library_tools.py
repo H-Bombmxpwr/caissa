@@ -78,6 +78,9 @@ class LibraryToolsTests(unittest.TestCase):
         self.call('POST','games',{'pgn':PGN})
         with self.api.library.connect() as db:
             db.execute('UPDATE games SET has_annotations=NULL,annotator=NULL')
+            # A library written before these columns existed has no record of the
+            # backfill either, so the simulation removes that too.
+            db.execute("DELETE FROM settings WHERE key LIKE 'backfill:%'")
         self.api.library.close()
         self.api=Api(self.temp.name)
         self.assertEqual(self.call('GET','games',query={'annotator':'Knaak'})['total'],1)

@@ -31,6 +31,10 @@ positions are stored under a transposition key.
 > A collection has nothing to say here until it has been indexed. Index it from the panel
 > at the bottom of the explorer, from **Study folders**, or from the database's **Index
 > positions** button. Re-index a collection after adding games to it.
+>
+> An attached [reference base](reference-base.md) is deliberately left unindexed — ten
+> million games would be hundreds of millions of positions. Cut the part you want to
+> study out of it in **Master games** and index that collection instead.
 
 ## What each move shows
 

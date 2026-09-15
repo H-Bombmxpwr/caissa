@@ -57,6 +57,11 @@ CREATE TABLE IF NOT EXISTS games (
 
 CREATE UNIQUE INDEX IF NOT EXISTS games_source_id ON games(source_id) WHERE source_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS games_collection ON games(collection_id);
+-- Browsing a collection means filtering by it and ordering by date. With only the
+-- single-column index SQLite gathers every match and sorts it to hand back thirty
+-- rows: thirty-seven seconds on a ten-million-game collection. Carrying the sort key
+-- in the index turns that into a range scan that stops after thirty.
+CREATE INDEX IF NOT EXISTS games_collection_date ON games(collection_id, date, id);
 CREATE INDEX IF NOT EXISTS games_white ON games(white);
 CREATE INDEX IF NOT EXISTS games_black ON games(black);
 CREATE INDEX IF NOT EXISTS games_eco ON games(eco);
@@ -74,6 +79,22 @@ CREATE TABLE IF NOT EXISTS game_collections (
   PRIMARY KEY (game_id, collection_id)
 );
 CREATE INDEX IF NOT EXISTS game_collections_collection ON game_collections(collection_id);
+-- Which collections are attached bases rather than imported games. Deriving this by
+-- scanning games for source='reference' costs a full table scan — eight seconds on ten
+-- million rows, every time the Master games view opens. It is two rows of fact; it gets
+-- a table. Counting each base's games then goes through games(collection_id).
+CREATE TABLE IF NOT EXISTS reference_bases (
+  collection_id INTEGER PRIMARY KEY REFERENCES collections(id) ON DELETE CASCADE,
+  path TEXT NOT NULL,
+  attached_at INTEGER NOT NULL,
+  -- 0 while the scan is running. A scan of ten million games can be interrupted — the
+  -- machine runs short of memory, the app is closed — and a base that holds some
+  -- unknown fraction of its file must say so rather than look finished.
+  complete INTEGER NOT NULL DEFAULT 0,
+  -- How far into the PGN the last committed batch reached, so an interrupted scan
+  -- carries on from there instead of starting the eight gigabytes again.
+  scanned_bytes INTEGER NOT NULL DEFAULT 0
+);
 
 CREATE TABLE IF NOT EXISTS repertoires (
   id INTEGER PRIMARY KEY,
@@ -124,6 +145,14 @@ class Library:
                   game_id INTEGER REFERENCES games(id) ON DELETE CASCADE,
                   PRIMARY KEY(batch, game_id));
             ''')
+            # A library that attached a base before the scan tracked completeness has
+            # the table without the column, and CREATE TABLE IF NOT EXISTS will not add
+            # it. Existing bases are taken as finished: they were, under the old rule.
+            registry = {r[1] for r in conn.execute('PRAGMA table_info(reference_bases)')}
+            if 'complete' not in registry:
+                conn.execute('ALTER TABLE reference_bases ADD COLUMN complete INTEGER NOT NULL DEFAULT 1')
+            if 'scanned_bytes' not in registry:
+                conn.execute('ALTER TABLE reference_bases ADD COLUMN scanned_bytes INTEGER NOT NULL DEFAULT 0')
             columns = {r[1] for r in conn.execute('PRAGMA table_info(games)')}
             # ChessBase metadata, added to existing libraries in place. Every one is
             # optional: a PGN that carries none of them stores empty strings.
@@ -136,25 +165,40 @@ class Library:
                                ('speed','TEXT'),('rated','INTEGER')]:
                 if name not in columns:
                     conn.execute('ALTER TABLE games ADD COLUMN '+name+' '+kind)
-            # A library imported before these columns existed is re-read once, so a
-            # ChessBase collection already on disk gains its teams, titles and FIDE
-            # ids without being imported again.
-            stale = conn.execute('''SELECT id FROM games
-                WHERE has_annotations IS NULL OR event_date IS NULL OR speed IS NULL''').fetchall()
-            for row in stale:
-                text = self.game_pgn(row['id'])
-                if text:
-                    self._update_extra_metadata(conn, row['id'], text)
             if 'signature' not in columns:
                 conn.execute('ALTER TABLE games ADD COLUMN signature TEXT')
             conn.execute('CREATE INDEX IF NOT EXISTS games_signature ON games(signature)')
             conn.execute('CREATE INDEX IF NOT EXISTS games_event_date ON games(event_date)')
             conn.execute('CREATE INDEX IF NOT EXISTS games_speed ON games(speed)')
-            # Older libraries receive signatures once, without changing their PGNs.
-            for row in conn.execute('SELECT id FROM games WHERE signature IS NULL').fetchall():
-                text = self.game_pgn(row['id'])
-                if text:
-                    conn.execute('UPDATE games SET signature=? WHERE id=?', (self.signature(text), row['id']))
+            # These two backfills exist for libraries written before the columns did.
+            # Neither column is indexed, so merely ASKING whether there is anything to
+            # do is a full table scan — fifty seconds on a ten-million-game library,
+            # paid on every single launch to be told "nothing". A one-time job is
+            # recorded as done when it is done, and never asked about again.
+            self._backfill_once(conn, 'chessbase_columns', '''SELECT id FROM games
+                WHERE has_annotations IS NULL OR event_date IS NULL OR speed IS NULL''',
+                lambda cx, ident, text: self._update_extra_metadata(cx, ident, text))
+            self._backfill_once(conn, 'game_signatures',
+                'SELECT id FROM games WHERE signature IS NULL',
+                lambda cx, ident, text: cx.execute('UPDATE games SET signature=? WHERE id=?',
+                                                   (self.signature(text), ident)))
+
+    def _backfill_once(self, conn, name, finder, apply):
+        """Run a one-time repair over old rows, and remember that it ran.
+
+        The marker is written whether or not anything needed repairing, because the
+        expensive part is the search, not the repair. Rows written from now on carry
+        these columns already, so there is nothing for a second run to find.
+        """
+        done = conn.execute('SELECT value FROM settings WHERE key=?',
+                            ('backfill:' + name,)).fetchone()
+        if done:
+            return
+        for row in conn.execute(finder).fetchall():
+            text = self.game_pgn(row['id'])
+            if text:
+                apply(conn, row['id'], text)
+        conn.execute('INSERT OR REPLACE INTO settings VALUES (?,?)', ('backfill:' + name, '1'))
 
     @staticmethod
     def _update_extra_metadata(conn, ident, text):
@@ -205,11 +249,16 @@ class Library:
         result = [dict(r) for r in rows]
         db = self.connect()
         if db.execute("SELECT 1 FROM sqlite_master WHERE name='positions'").fetchone():
+            # Driven from positions, which holds the games that ARE indexed, rather than
+            # from games, which holds every game there is. Asking "is this one indexed?"
+            # of ten million games is ten million probes; asking the index what it holds
+            # is one pass over the few thousand rows that exist.
             counts = dict(db.execute('''SELECT collection_id, COUNT(*) FROM (
-                SELECT g.collection_id, g.id FROM games g
-                WHERE EXISTS (SELECT 1 FROM positions p WHERE p.game_id=g.id)
-                UNION SELECT l.collection_id, l.game_id FROM game_collections l
-                WHERE EXISTS (SELECT 1 FROM positions p WHERE p.game_id=l.game_id)
+                SELECT g.collection_id AS collection_id, g.id AS game_id
+                FROM (SELECT DISTINCT game_id FROM positions) p JOIN games g ON g.id = p.game_id
+                UNION
+                SELECT l.collection_id, l.game_id FROM game_collections l
+                WHERE l.game_id IN (SELECT game_id FROM positions)
             ) GROUP BY collection_id'''))
             for item in result:
                 item['indexed_games'] = counts.get(item['id'], 0)
@@ -570,6 +619,7 @@ class Library:
                eco=None, result=None, opening=None, min_elo=None, year=None,
                sort="date", limit=100, offset=0, event=None, min_length=None, max_length=None, tag=None,
                added_from=None, added_to=None, position=None, eco_to=None, max_elo=None, outcome=None,
+               player_prefix=None, white_prefix=None, black_prefix=None, event_prefix=None,
                annotator=None, site=None, round=None, termination=None, annotated=None,
                date_from=None, date_to=None, source=None, category=None,
                white_min_elo=None, white_max_elo=None, black_min_elo=None, black_max_elo=None,
@@ -591,9 +641,22 @@ class Library:
             info = self.collection(collection)
             if not info:
                 return {"total": 0, "games": []}
-            where.append("(collection_id = ? OR id IN "
-                         "(SELECT game_id FROM game_collections WHERE collection_id = ?))")
-            params.extend([info["id"], info["id"]])
+            # A collection holds the games it owns plus any linked onto it. Asking for
+            # both with an OR costs the index: SQLite cannot walk one index for a query
+            # that reaches into two, so it gathers every match and sorts — thirty-seven
+            # seconds to show thirty rows of a ten-million-game collection. Most
+            # collections have no links at all, and for those the question is simply
+            # not asked.
+            linked = self.connect().execute(
+                'SELECT 1 FROM game_collections WHERE collection_id=? LIMIT 1',
+                (info['id'],)).fetchone()
+            if linked:
+                where.append("(collection_id = ? OR id IN "
+                             "(SELECT game_id FROM game_collections WHERE collection_id = ?))")
+                params.extend([info["id"], info["id"]])
+            else:
+                where.append("collection_id = ?")
+                params.append(info["id"])
         if query:
             for term in query.split():
                 like = "%" + term + "%"
@@ -608,6 +671,33 @@ class Library:
             variants = {name, name.replace(", ", ","), re.sub(r",\s*", ", ", name)}
             return ["%" + v + "%" for v in variants if v]
 
+        # "%Carlsen%" cannot use an index, so on a ten-million-game base it reads every
+        # row — about thirty-five seconds a search. A surname is a prefix, and a prefix
+        # is a range an index answers instantly, so the modules that ask for a surname
+        # ask for a prefix. `player` keeps its substring meaning for the database's own
+        # free-text box, where matching a forename mid-string is the point.
+        #
+        # The ranges go in as a subquery of ids rather than as an OR of comparisons: a
+        # query carrying two ranges leaves SQLite to pick one index, and it reliably
+        # picks ECO — which on a whole-alphabet range is every row. Resolving the names
+        # first through their own covering indexes, then probing by rowid, is the plan
+        # that stays fast when a search also narrows by opening and by year.
+        def prefixes(name):
+            name = name.strip()
+            forms = {name, name[:1].upper() + name[1:], name.replace(", ", ",")}
+            return [(f, f + "\uffff") for f in forms if f]
+
+        for columns, value in ((("white", "black"), player_prefix),
+                               (("white",), white_prefix), (("black",), black_prefix),
+                               (("event",), event_prefix)):
+            if not value:
+                continue
+            reads = []
+            for column in columns:
+                for low, high in prefixes(value):
+                    reads.append("SELECT id FROM games WHERE %s >= ? AND %s < ?" % (column, column))
+                    params.extend([low, high])
+            where.append("id IN (" + " UNION ".join(reads) + ")")
         if player:
             clause = " OR ".join(["white LIKE ? OR black LIKE ?"] * len(spellings(player)))
             where.append("(" + clause + ")")
@@ -704,8 +794,13 @@ class Library:
                 where.append('added_at '+operator+' ?')
                 params.append(int(stamp))
         if eco_to:
-            where.append('eco <= ?')
-            params.append(eco_to.upper())
+            # Big bases subdivide ECO: Lumbras writes B90a, B92d, E04a. An inclusive
+            # "eco <= 'B99'" sorts every one of those above the bound and drops the
+            # whole final bucket — and "B90 through B90" then matches nothing at all.
+            # Reaching past the last suffix keeps a three-letter range meaning what it
+            # says, whichever spelling the base uses.
+            where.append('eco < ?')
+            params.append(eco_to.upper() + '￿')
             if eco:
                 index = where.index('eco LIKE ?')
                 where[index] = 'eco >= ?'
@@ -735,6 +830,56 @@ class Library:
         for game in games:
             game["collections"] = memberships.get(game["id"], [])
         return {"total": total, "games": games}
+
+    REFERENCE_DIR = 'reference'
+
+    def references(self):
+        """The reference bases attached to this library, and their PGNs' health.
+
+        A base is attached, not imported: its rows carry a path into a file that lives
+        outside any collection folder. So the honest answer includes whether that file
+        is still where the rows say it is — a base whose PGN has moved is a collection
+        of games that cannot be opened, and the reader should be told which.
+        """
+        db = self.connect()
+        rows = db.execute(
+            """SELECT r.collection_id AS id, c.name, r.path, r.complete, r.scanned_bytes
+               FROM reference_bases r JOIN collections c ON c.id = r.collection_id
+               ORDER BY r.attached_at""").fetchall()
+        out = []
+        for row in rows:
+            full = os.path.join(self.dir, row['path'])
+            games = db.execute('SELECT COUNT(*) FROM games WHERE collection_id=?',
+                               (row['id'],)).fetchone()[0]
+            size = os.path.getsize(full) if os.path.isfile(full) else 0
+            out.append(dict(id=row['id'], name=row['name'], games=games,
+                            path=row['path'], missing=not os.path.isfile(full),
+                            complete=bool(row['complete']), bytes=size,
+                            scanned_bytes=row['scanned_bytes'],
+                            scanned_pct=round(100 * row['scanned_bytes'] / size, 1) if size else 0))
+        out.sort(key=lambda base: -base['games'])
+        return out
+
+    def attachable(self, minimum_bytes=50 * 1024 * 1024):
+        """Big PGNs in the library's reference folder that nothing has attached yet.
+
+        This is what lets the app notice a gigabase and offer to use it, instead of
+        making somebody find a file picker for something already sitting in place.
+        """
+        folder = os.path.join(self.dir, self.REFERENCE_DIR)
+        if not os.path.isdir(folder):
+            return []
+        taken = {r[0] for r in self.connect().execute('SELECT path FROM reference_bases')}
+        found = []
+        for name in sorted(os.listdir(folder)):
+            if not name.lower().endswith('.pgn'):
+                continue
+            full = os.path.join(folder, name)
+            relative = os.path.relpath(full, self.dir)
+            if relative in taken or os.path.getsize(full) < minimum_bytes:
+                continue
+            found.append(dict(name=name, path=relative, bytes=os.path.getsize(full)))
+        return found
 
     def begin_import(self, label):
         batch = uuid.uuid4().hex
@@ -818,30 +963,36 @@ class Library:
 
     # ---------- odds and ends ----------
 
-    def stats(self):
+    def stats(self, full=False):
+        """The library's headline numbers.
+
+        `full` adds three whole-table aggregates — commonest players, commonest
+        openings, counts by source. Ranking players means grouping white and black
+        together, which is two rows per game: seventeen million for a library with a
+        reference base attached, and a minute of work for a panel that does not exist.
+        The database page asks for the cheap answer; anything that actually wants the
+        rankings asks for them.
+        """
         conn = self.connect()
-        total = conn.execute("SELECT COUNT(*) FROM games").fetchone()[0]
-        by_source = {
+        out = {
+            "games": conn.execute("SELECT COUNT(*) FROM games").fetchone()[0],
+            "data_dir": self.dir,
+        }
+        if not full:
+            return out
+        out["collections"] = self.collections()
+        out["by_source"] = {
             r["source"] or "unknown": r["n"]
             for r in conn.execute("SELECT source, COUNT(*) AS n FROM games GROUP BY source").fetchall()
         }
-        players = conn.execute(
+        out["top_players"] = [dict(r) for r in conn.execute(
             """SELECT name, COUNT(*) AS n FROM (
                    SELECT white AS name FROM games UNION ALL SELECT black FROM games
-               ) GROUP BY name ORDER BY n DESC LIMIT 10"""
-        ).fetchall()
-        openings = conn.execute(
+               ) GROUP BY name ORDER BY n DESC LIMIT 10""")]
+        out["top_openings"] = [dict(r) for r in conn.execute(
             "SELECT opening, COUNT(*) AS n FROM games WHERE opening <> '' "
-            "GROUP BY opening ORDER BY n DESC LIMIT 15"
-        ).fetchall()
-        return {
-            "games": total,
-            "collections": self.collections(),
-            "by_source": by_source,
-            "top_players": [dict(r) for r in players],
-            "top_openings": [dict(r) for r in openings],
-            "data_dir": self.dir,
-        }
+            "GROUP BY opening ORDER BY n DESC LIMIT 15")]
+        return out
 
     def setting(self, key, value=None):
         conn = self.connect()

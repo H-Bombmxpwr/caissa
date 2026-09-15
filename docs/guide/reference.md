@@ -323,10 +323,12 @@ and cached, so the readings never slow the search.
 
 ## Finding master games and appearance
 
-- **Master games** searches the [PGN Mentor catalog](https://www.pgnmentor.com/files.html),
-  imports the selected player collection, then applies local filters. For Fischer's
-  King's Indian games, use Fischer and ECO E60–E99. This works even without opening
-  names in the PGN; it does not search an un-downloaded game's moves remotely.
+- **Master games** searches an attached [reference base](reference-base.md): player,
+  colour, outcome, opponent, tournament, rating floor, opening name, ECO range and years,
+  all narrowing the same query. Opening a result puts that game on the analysis board,
+  read straight out of the base. With no base attached, the module offers to attach one
+  and falls back to downloading collections. For Fischer's King's Indian games, use
+  Fischer and ECO E60–E99; this works even without opening names in the PGN.
 - **Settings → Appearance** covers dark mode, fourteen board palettes (four of them dark),
   nine piece sets and four piece treatments, orientation, coordinates and animation. The
   piece set and treatment pickers show real thumbnails of the artwork on a light/dark
@@ -345,15 +347,24 @@ and cached, so the readings never slow the search.
 
 ### Keep a master search as its own collection
 
-PGN Mentor ships one archive per player, so **Import & find matching games** always
-downloads that player's whole career and keeps it as `Masters / player`. The
-search you ran is then saved beside it as `Masters / player / what you searched
-for` — the opening name, or the ECO range when no opening is named, plus the years
-when a year range is set. That second collection holds links to the same games,
-not copies, so one player can carry several opening collections without the
-library storing anything twice, and the database opens on it after the import. A
-search that matches nothing in the archive makes no collection and says so.
-**Year from** and **Year through** filter by game date and are part of the name.
+**Save as a collection** shelves everything the current search matched. The suggested
+name is built from the search itself — the player, the opening name or ECO range, the
+tournament, the years — and **Index its positions**, ticked by default, indexes the new
+collection as soon as it is saved. That is the step that makes the opening explorer, the
+position context panel and the Player Lab able to read it.
+
+The collection holds links to the same games, not copies, so one player can carry several
+opening collections without the library storing anything twice, and the database opens on
+it afterwards. A search that matches nothing makes no collection and says so.
+
+The base itself is never position-indexed: ten million games would be hundreds of
+millions of positions. Indexing is spent on what you carve out of it.
+
+### Extended ECO codes
+
+Large bases subdivide ECO — Lumbras writes `B90a`, `B92d`, `E04a`. A range is read as
+covering every subdivision inside it, so `B90` through `B99` finds `B90a` as well as
+`B99`, and `B90` through `B90` finds the `B90` family rather than only the bare code.
 
 
 ### Rename a collection

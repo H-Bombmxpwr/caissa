@@ -187,6 +187,25 @@ class Study:
                 kept.append(target)
         return {'deleted': len(doomed), 'kept': kept}
 
+    def shelve(self, collection_id, folder_name, category='Reference'):
+        """File a collection under a study folder, making the folder if it is missing.
+
+        A base that only exists in a drop-down is a base you forget you have. Study
+        folders are where this library keeps the things it is working from, so an
+        attached base is filed there on arrival like anything else.
+        """
+        db = self.library.connect()
+        row = db.execute('SELECT id FROM folders WHERE lower(name)=lower(?) AND parent_id IS NULL',
+                         (folder_name,)).fetchone()
+        folder_id = row['id'] if row else self.create_folder({'name': folder_name})['id']
+        if not row:
+            try:
+                self.categorize_folder(folder_id, category)
+            except (ValueError, KeyError):
+                pass                              # an unknown category is not worth failing over
+        self.assign({'folder_id': folder_id, 'collection_id': collection_id})
+        return folder_id
+
     def assign(self, body):
         db = self.library.connect()
         folder_id, collection_id = int(body['folder_id']), int(body['collection_id'])

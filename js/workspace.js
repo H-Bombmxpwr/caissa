@@ -437,90 +437,10 @@
           for(const keep of ['collection','q','sort','kind'])if(f[keep]!==undefined)next[keep]=f[keep];
           state.filters=next;state.offset=0;close();return reload();},'primary')]));
   });}
-  async function mentorSearch(){
-    const names=h('datalist',{id:'master-player-names'});
-    const player=h('input',{placeholder:'Start typing a surname',value:'Fischer',list:'master-player-names',autocomplete:'off'});
-    content.append(names);let nameRequest=0,nameTimer;
-    async function suggest(){const id=++nameRequest;try{const data=await api('masters/players?'+new URLSearchParams({q:player.value}));if(id===nameRequest)names.replaceChildren(...data.players.map(p=>h('option',{value:p.name,label:p.source})));}catch(e){/* Typing still works offline. */}}
-    player.addEventListener('input',()=>{clearTimeout(nameTimer);nameTimer=setTimeout(suggest,180);});suggest();
-    const eco=h('input',{value:'E60',placeholder:'E60','aria-label':'ECO from'}),ecoEnd=h('input',{value:'E99',placeholder:'E99','aria-label':'ECO through'});
-    const picker=openingPicker(hit=>{if(hit.eco_from){eco.value=hit.eco_from;ecoEnd.value=hit.eco_to||hit.eco_from;}},'King’s Indian');
-    const colour=colourSelect(''),outcome=outcomeSelect(''),results=h('div');
-    const yearFrom=h('input',{type:'number',min:1475,max:2100,placeholder:'1960','aria-label':'Year from'});
-    const yearTo=h('input',{type:'number',min:1475,max:2100,placeholder:'1972','aria-label':'Year through'});
-    function years(){
-      const from=yearFrom.value.trim(),to=yearTo.value.trim();
-      return from||to?{from:from||'1475',to:to||String(new Date().getFullYear())}:null;
-    }
-    function filtersFor(collection){
-      const next={collection},span=years();
-      if(player.value.trim())next[colour.value||'player']=player.value.trim();
-      if(outcome.value)next.outcome=outcome.value;
-      if(eco.value.trim())next.eco=eco.value.trim().toUpperCase();
-      if(ecoEnd.value.trim())next.eco_to=ecoEnd.value.trim().toUpperCase();
-      if(!eco.value.trim()&&picker.input.value.trim())next.opening=picker.input.value.trim();
-      if(span){next.date_from=span.from+'-01-01';next.date_to=span.to+'-12-31';}
-      return next;
-    }
-    // PGN Mentor publishes one archive per player, so an import is always that player's
-    // whole career. The search is what makes a collection worth keeping, so it gets a
-    // shelf of its own named after it, and one player can have as many as you look up.
-    function shelfLabel(){
-      const from=eco.value.trim().toUpperCase(),to=ecoEnd.value.trim().toUpperCase();
-      const opening=picker.input.value.trim()||(from&&to&&from!==to?'ECO '+from+'–'+to:from||to||'');
-      const span=years(),period=span?(span.from===span.to?span.from:span.from+'–'+span.to):'';
-      return [opening,period].filter(Boolean).join(' ');
-    }
-    content.append(card('Search PGN Mentor player collections',h('div.card-pad',[
-      field('Player surname',player),
-      h('div.toolbar',[field('Colour',colour),field('Outcome',outcome)]),
-      field('Opening name',picker.input),picker.list,
-      h('div.toolbar',[field('ECO from',eco),field('ECO through',ecoEnd)]),
-      h('div.toolbar',[field('Year from',yearFrom),field('Year through',yearTo)]),
-      h('div.toolbar',[
-        button('Find collections',async()=>{
-          results.textContent='Searching PGN Mentor…';
-          const data=await api('masters/catalog?'+new URLSearchParams({q:player.value}));
-          results.replaceChildren(...data.players.map(p=>h('div.context-item',[h('b',{text:p.name}),
-            button('Import & find matching games',async()=>{
-              const archive='Masters / '+p.name,label=shelfLabel();
-              watchImport();
-              await api('import/source',{path:p.url,collection:archive});
-              let collection=archive;
-              let shelved=null;
-              if(label){
-                const shelf=await api('collections/link',{name:archive+' / '+label,filters:filtersFor(archive)});
-                if(shelf.matched){shelved=shelf;collection=shelf.collection;
-                  App.toast(shelf.matched+' of the archive’s games match · saved as '+shelf.collection,6000);}
-                else App.toast('Nothing in '+archive+' matches this search, so only the full archive was kept.',6000);
-              }
-              await refreshMeta();
-              // The shelf already holds exactly the matching games, so it is shown by id
-              // and the filter bar reflects it rather than re-applying the whole search.
-              state.filters=shelved?{collection:String(shelved.id)}:filtersFor(archive);
-              state.offset=0;await go('database');
-            })])));
-          if(!data.players.length)results.textContent='No player collections found. Try a surname.';
-        },'primary'),
-        button('Clear all fields',()=>{player.value='';picker.input.value='';eco.value='';ecoEnd.value='';colour.value='';outcome.value='';yearFrom.value='';yearTo.value='';results.replaceChildren();})]),
-      h('p.muted',{text:'PGN Mentor publishes one archive per player, so the download is always that player’s whole career, kept as Masters / player. Your search is then saved as a collection of its own — Masters / player / what you searched for — holding just the matching games. The games are shelved there, not copied, so one player can carry as many opening collections as you look up. Picking an opening fills the ECO range from the games you already have, which finds the same openings in PGNs that carry no opening name.'}),
-      results])));
-    const lookup=h('input',{placeholder:'Kasparov Topalov, Wijk aan Zee, Najdorf…','aria-label':'Find a game in your library'});
-    const found=h('div');
-    content.append(card('Find a game you already have',h('div.card-pad',[
-      field('Player, event or opening',lookup),
-      button('Search my library',async()=>{
-        const term=lookup.value.trim();
-        if(!term)throw new Error('Type a player, event or opening to look for.');
-        found.textContent='Searching your library…';
-        const data=await api('games?'+new URLSearchParams({q:term,limit:12,offset:0}));
-        if(!data.total){found.textContent='Nothing in your library matches that yet. Import the collection first.';return;}
-        found.replaceChildren(h('p.muted',{text:data.total.toLocaleString()+' matching games · opening one puts it on a new analysis tab'}),
-          ...data.games.map(g=>h('div.context-item',[button(g.white+' — '+g.black,()=>openGame(g.id)),
-            h('div.muted',{text:[g.event,g.date,g.result].filter(Boolean).join(' · ')})])),
-          data.total>12?button('See all '+data.total.toLocaleString()+' in the database',()=>{state.filters={q:term};state.offset=0;return go('database');}):null);
-      },'primary'),found])));
-  }
+  // The PGN Mentor search that used to live here has been replaced by the reference
+  // base: searching ten million games you already have beats downloading one player's
+  // archive to find out whether it holds the line you wanted. The catalog route is
+  // still there for anyone pasting an archive URL into Online & imports.
   function applyPrefs() {
     Board.setPieceSet(state.prefs.pieceSet||'cburnett');
     for(const b of [board,preview,App.board])if(b)b.refreshPieceArt();
@@ -646,7 +566,7 @@
     // to be re-read whenever the library itself changes rather than on every table load.
     let stats={games:0};
     async function refreshStats(){const [fresh,reps]=await Promise.all([api('stats'),api('repertoires')]);stats=fresh;
-      statGrid.replaceChildren(...[[fresh.games,'Games in your library','Searchable, portable PGN'],[fresh.collections.length,'Collections','Organized your way'],[reps.repertoires.length,'Repertoires','Your opening preparation'],[state.folders.length,'Study folders','A place for your next idea']]
+      statGrid.replaceChildren(...[[fresh.games,'Games in your library','Searchable, portable PGN'],[state.collections.length,'Collections','Organized your way'],[reps.repertoires.length,'Repertoires','Your opening preparation'],[state.folders.length,'Study folders','A place for your next idea']]
         .map(([n,t,sub])=>h('div.card.metric',[h('small',{text:t}),h('strong',{text:Number(n).toLocaleString()}),h('span',{text:sub})])));}
     await refreshStats();
     const q=h('input',{placeholder:'Search players, openings, events…',value:state.filters.q||'',type:'search','aria-label':'Search games'});
@@ -1465,13 +1385,226 @@
       h('p.muted',{text:'A lichess study exported as PGN becomes drillable lines. Chapters and variations are read as separate lines; the file itself is filed under Opening trees rather than the game database.'}),
       h('div.toolbar',[button('Import repertoire PGN',()=>importRepertoire(),'primary'),button('Open your repertoires',()=>go('repertoire'))])]));
     content.append(h('div.settings-grid',[paste,h('div.section-stack',[online,bulk,studyCard,repertoireCard])]));await importHistory();}
-  async function masters(){content.append(heading('Learn from the great games','Master games','Build your own reference library from freely available PGN collections.'));
+  // A gigabase changes what this module is for. With ten million games attached there
+  // is no browsing: you come here to find one game, or to cut a few hundred out of the
+  // ten million and study those. So the search leads, the acquisition cards move to the
+  // bottom, and everything that makes a collection hands it straight to the indexer —
+  // because the explorer and the Player Lab read indexed collections, never the base.
+  const bytesLabel=n=>n>=1e9?(n/1e9).toFixed(1)+' GB':n>=1e6?Math.round(n/1e6)+' MB':Math.round(n/1e3)+' KB';
+  async function masters(){
+    const data=await api('masters/references');
+    const base=data.references[0]||null;
+    content.append(heading('Learn from the great games','Master games',
+      base?'Find one game among millions, then cut the part you want to study out of it.'
+          :'Attach a reference base, or build one from freely available collections.',
+      []));
+    if(base)content.append(referenceStrip(base,data));
+    else content.append(attachOffer(data));
+    if(base)await baseSearch(base);
+    content.append(h('details.card',{open:!base},[h('summary.card-pad',{text:'Add more games · weekly tournaments, player archives'}),
+      h('div.card-pad',[await acquisitionCards()])]));
+  }
+  // What is attached, how big it is, and whether its file is still where it should be.
+  function referenceStrip(base,data){
+    const rest=data.references.slice(1);
+    const body=h('div.card-pad',[
+      h('div.reference-head',[
+        h('div',[h('div.eyebrow',{text:base.complete?'Reference base':'Reference base · unfinished'}),
+          h('h3',{text:base.name}),
+          h('p.muted',{text:base.games.toLocaleString()+' games · '+bytesLabel(base.bytes)+' · read in place from '+base.path})]),
+        ...menu([['Browse in the database',()=>{state.filters={collection:String(base.id)};state.offset=0;return go('database');}],
+          ['Attach another base',()=>go('imports')],null,
+          ['Detach this base',async()=>{
+            if(!confirm('Forget '+base.games.toLocaleString()+' games from '+base.name+'?\n\nThe PGN on disk is not touched.'))return;
+            try{await api('masters/detach',{collection:base.id});}
+            catch(err){
+              // Collections carved out of the base link to its games, so they go too.
+              if(!confirm(err.message+'\n\nDetach anyway?'))return;
+              await api('masters/detach',{collection:base.id,force:true});
+            }
+            App.toast('Base detached');await refreshMeta();return go('masters');}],'More actions for this base'])]),
+      ...(base.missing?[h('p.error-message',{text:'The PGN this base points at is no longer at '+base.path+'. Put it back, or detach the base and attach it again from its new home.'})]:[]),
+      // A scan that did not reach the end left some unknown fraction of the file
+      // indexed. Saying "149,383 games" without saying "so far" would be a lie.
+      ...(base.complete?[]:[h('div.card-pad.reference-unfinished',[
+        h('p',{text:'This scan did not finish, so only the '+base.games.toLocaleString()+' games it reached are searchable. Attaching again starts it over and replaces them.'}),
+        h('div.toolbar',[button('Finish attaching '+base.name,async()=>{
+          watchImport();
+          const out=await api('import/reference',{path:base.path,collection:base.name});
+          App.toast(out.added.toLocaleString()+' games attached',6000);
+          await refreshMeta();return go('masters');},'primary')])])]),
+      ...rest.map(r=>h('p.muted',{text:'Also attached: '+r.name+' · '+r.games.toLocaleString()+' games'+(r.missing?' · file missing':'')}))]);
+    return h('section.card',[body]);
+  }
+  // No base yet: offer the one already sitting in the library before offering a picker.
+  function attachOffer(data){
+    const ready=data.attachable[0];
+    const status=h('p.status-message');
+    const path=h('input',{value:ready?ready.path:'',placeholder:data.folder+'/YourBase.pgn'});
+    async function attach(){
+      if(!path.value.trim())throw new Error('Give the PGN’s path inside your library folder.');
+      const name=path.value.trim().split(/[\\/]/).pop().replace(/\.pgn$/i,'');
+      status.textContent='Scanning the base. This reads the file once and copies nothing…';
+      watchImport();
+      try{
+        const out=await api('import/reference',{path:path.value.trim(),collection:'Reference / '+name});
+        status.textContent=out.added.toLocaleString()+' games attached.';
+      }catch(err){status.textContent='';throw err;}
+      await refreshMeta();await go('masters');
+    }
+    return h('section.card.card-pad',[h('div.eyebrow',{text:'Reference base'}),
+      h('h3',{text:ready?'A base is ready to attach':'Attach a base you already have'}),
+      h('p.muted',{text:ready
+        ?ready.name+' · '+bytesLabel(ready.bytes)+' is sitting in your '+data.folder+' folder. Attaching scans it once and records where each game starts; the PGN is read where it lies and never copied.'
+        :'Put a large PGN — Lumbras GigaBase, a ChessBase export, any archive you have the right to use — in the '+data.folder+' folder inside your library, then attach it here. It is read in place, so a ten-gigabyte base costs ten gigabytes, not twenty.'}),
+      field('PGN inside your library',path),
+      h('div.toolbar',[button(ready?'Attach '+ready.name:'Attach this base',attach,'primary'),
+        button('Where is my library?',()=>go('settings'))]),status]);
+  }
+  // Searching ten million games is a database query, so it asks the database. Results
+  // are a sample you can open; the two buttons under them are what the module is for.
+  async function baseSearch(base){
+    const player=h('input',{placeholder:'Surname, e.g. Carlsen',list:'master-player-names',autocomplete:'off'});
+    const names=h('datalist',{id:'master-player-names'});let nameTimer,nameRequest=0;
+    async function suggest(){const id=++nameRequest;
+      try{const found=await api('masters/players?'+new URLSearchParams({q:player.value.trim()}));
+        if(id===nameRequest)names.replaceChildren(...found.players.map(p=>h('option',{value:p.name,label:p.source})));}
+      catch(err){/* typing still works */}}
+    player.addEventListener('input',()=>{clearTimeout(nameTimer);nameTimer=setTimeout(suggest,220);});
+    const colour=colourSelect(''),outcome=outcomeSelect('');
+    const opponent=h('input',{placeholder:'Any opponent'});
+    const event=h('input',{placeholder:'Name it starts with, e.g. Tata Steel'});
+    const picker=openingPicker(hit=>{if(hit.eco_from){eco.value=hit.eco_from;ecoEnd.value=hit.eco_to||hit.eco_from;}});
+    const eco=h('input',{placeholder:'B90','aria-label':'ECO from'}),ecoEnd=h('input',{placeholder:'B99','aria-label':'ECO through'});
+    const yearFrom=h('input',{type:'number',min:1475,max:2100,placeholder:'From year','aria-label':'Year from'});
+    const yearTo=h('input',{type:'number',min:1475,max:2100,placeholder:'Through year','aria-label':'Year through'});
+    const minElo=h('input',{type:'number',min:0,max:3500,placeholder:'e.g. 2500'});
+    const results=h('div.masters-results'),summary=h('p.status-message');
+    let lastFilters=null,lastTotal=0,lastOpening='';
+    function filters(){
+      const next={collection:String(base.id)};
+      // The field asks for a surname, and a surname is a prefix an index can answer.
+      // "%Carlsen%" cannot use one, and on ten million games that is half a minute.
+      if(player.value.trim())next[(colour.value||'player')+'_prefix']=player.value.trim();
+      if(opponent.value.trim())next.query=opponent.value.trim();
+      if(event.value.trim())next.event_prefix=event.value.trim();
+      if(outcome.value)next.outcome=outcome.value;
+      if(eco.value.trim())next.eco=eco.value.trim().toUpperCase();
+      if(ecoEnd.value.trim())next.eco_to=ecoEnd.value.trim().toUpperCase();
+      if(!eco.value.trim()&&picker.input.value.trim())next.opening=picker.input.value.trim();
+      if(minElo.value)next.min_elo=minElo.value;
+      if(yearFrom.value.trim())next.date_from=yearFrom.value.trim()+'-01-01';
+      if(yearTo.value.trim())next.date_to=yearTo.value.trim()+'-12-31';
+      return next;
+    }
+    async function search(){
+      const chosen=filters();
+      if(Object.keys(chosen).length<2)throw new Error('Name a player, event, opening or year first: the whole base is not a search.');
+      // Naming a person or an event lets the search read an index. Everything else —
+      // a rating floor, a year range, free text — has to consider most of the base, and
+      // on ten million games that is seconds rather than milliseconds. Say so.
+      const narrowed=chosen.player_prefix||chosen.white_prefix||chosen.black_prefix||chosen.event_prefix;
+      results.replaceChildren(h('p.muted',{text:narrowed
+        ?'Searching '+base.games.toLocaleString()+' games…'
+        :'Reading most of the base — a search with no player or tournament takes a few seconds…'}));
+      const found=await api('games?'+new URLSearchParams({...chosen,limit:40,sort:'elo'}));
+      lastFilters=chosen;lastTotal=found.total;
+      // What these games are actually called. An ECO range is how the search is made,
+      // not what it is: nobody files a collection under "B90–B99" when the games in it
+      // are the Najdorf. The commonest opening among the matches is that name, and it
+      // comes from the games themselves rather than a lookup table.
+      const named={};
+      for(const g of found.games)if(g.opening)named[g.opening]=(named[g.opening]||0)+1;
+      lastOpening=Object.keys(named).sort((a,b)=>named[b]-named[a])[0]||'';
+      summary.textContent=found.total.toLocaleString()+' games match'+(found.total>40?' · the 40 highest rated are shown':'');
+      results.replaceChildren(...found.games.map(g=>h('div.masters-hit',[
+        h('button.linkish',{type:'button',text:(g.white||'?')+' — '+(g.black||'?'),
+          title:'Open this game on the analysis board',onclick:act(()=>openGame(g.id))}),
+        h('small',{text:[g.white_elo&&g.black_elo?g.white_elo+'/'+g.black_elo:'',g.event,
+          (g.date||'').replace(/\./g,'-').replace(/-00/g,''),g.result,
+          g.eco?g.eco+(g.opening?' · '+g.opening:''):g.opening,
+          Math.ceil((g.ply_count||0)/2)+' moves'].filter(Boolean).join(' · ')})])));
+      if(!found.games.length)results.replaceChildren(h('p',{text:'Nothing in the base matches. Names are stored as “Surname, First” — a surname on its own is the surest search.'}));
+    }
+    async function collect(){
+      if(!lastFilters)throw new Error('Search first, then save what you found.');
+      if(!lastTotal)throw new Error('That search matched nothing, so there is nothing to save.');
+      // Masters / player / opening, the way the rest of the library nests. A player
+      // ends up with one shelf carrying a collection per line you looked up, rather
+      // than a flat list of long names that all begin the same way.
+      const from=eco.value.trim().toUpperCase(),to=ecoEnd.value.trim().toUpperCase();
+      const line=picker.input.value.trim()||lastOpening
+        ||(from&&to&&from!==to?'ECO '+from+'–'+to:from||to||'');
+      const span=yearFrom.value.trim()&&yearTo.value.trim()
+        ?yearFrom.value.trim()+'–'+yearTo.value.trim():yearFrom.value.trim()||yearTo.value.trim();
+      const won={win:'wins',loss:'losses',draw:'draws'}[outcome.value]||'';
+      const detail=[line,won,event.value.trim(),span].filter(Boolean).join(' ');
+      const suggested=['Masters',player.value.trim()||'Selection',detail].filter(Boolean).join(' / ');
+      modal('Save this search as a collection',(body,close)=>{
+        const name=h('input',{value:suggested});
+        const index=h('input',{type:'checkbox',checked:true});
+        body.append(h('p.muted',{text:lastTotal.toLocaleString()+' games will be shelved into a collection of their own, named for the search that found them. The games are not copied — the collection points at the same PGN the base does.'}),
+          field('Collection name',name),
+          h('label.toolbar',[index,'Index its positions, so the opening explorer and Player Lab can read it']),
+          h('p.muted',{text:'Indexing walks every game and records each position. That is what the explorer needs, and it is why the base itself is left unindexed: ten million games would be hundreds of millions of positions.'}),
+          h('div.dialog-actions',[button('Cancel',close),button('Save collection',async()=>{
+            const out=await api('collections/link',{name:name.value.trim(),filters:lastFilters});
+            close();
+            if(!out.matched){App.toast('Nothing matched, so no collection was made.',5000);return;}
+            await refreshMeta();
+            if(index.checked){JobProgress.watch('index');await api('study/index',{collection:out.id});
+              App.toast(out.matched.toLocaleString()+' games saved as '+out.collection+' · indexing now',6000);}
+            else App.toast(out.matched.toLocaleString()+' games saved as '+out.collection,5000);
+            state.filters={collection:String(out.id)};state.offset=0;await go('database');
+          },'primary')]));
+      });
+    }
+    const form=h('section.card.masters-search',[h('div.card-pad',[
+      h('h2',{text:'Find a game'}),
+      h('p.muted',{text:'Every field narrows the same search. A surname alone finds a career; add an opening or a year range and you have a study collection.'}),
+      h('div.filters',[field('Player',player),field('Colour',colour),field('Outcome',outcome)]),names,
+      h('div.filters',[field('Opponent or free text',opponent),field('Tournament',event),field('Minimum rating',minElo)]),
+      h('div.filters',[field('Opening name',picker.input),field('ECO from',eco),field('ECO through',ecoEnd)]),picker.list,
+      h('div.filters',[field('Year from',yearFrom),field('Year through',yearTo)]),
+      actionRow(button('Search',search,'primary'),
+        [button('Save as a collection',collect,'quiet'),
+         button('Open in the database',()=>{if(!lastFilters)throw new Error('Search first.');
+           state.filters={...lastFilters};state.offset=0;return go('database');},'quiet'),
+         button('Clear',()=>{for(const box of [player,opponent,event,eco,ecoEnd,minElo,yearFrom,yearTo,picker.input])box.value='';
+           colour.value='';outcome.value='';results.replaceChildren();summary.textContent='';
+           lastFilters=null;lastOpening='';},'quiet')]),
+      summary,results])]);
+    content.append(form);
+    for(const box of [player,opponent,event,eco,ecoEnd,minElo,yearFrom,yearTo])
+      box.addEventListener('keydown',e=>{if(e.key==='Enter')act(search)(e);});
+    suggest();
+  }
+  // Ways to get games when there is no base, kept together and out of the way when
+  // there is one.
+  async function acquisitionCards(){
+    const week=h('input',{type:'number',placeholder:'TWIC issue number',min:1}),status=h('p.status-message');
     const saved=state.collections.filter(c=>/^Masters(?:\s|$|\/)/i.test(c.name));
-    if(saved.length)content.append(h('details.card.card-pad',{open:true},[h('summary',{text:'Your master collections · '+saved.length}),h('div.toolbar',saved.map(c=>button(c.name.replace(/^Masters\s*\/\s*/, '')+' · '+c.games+' games',()=>{state.filters={collection:String(c.id),kind:c.kind||'games'};state.offset=0;go('database');})))]));
-    await mentorSearch();const week=h('input',{type:'number',placeholder:'TWIC issue number',min:1}),status=h('p.status-message');content.append(h('div.cards-grid',[
-    h('section.card.study-card',[h('div.eyebrow',{text:'Weekly tournament games'}),h('h3',{text:'The Week in Chess'}),h('p.muted',{text:'Choose an issue to download its PGN archive into your Masters collection.'}),field('Issue number',week),button('Import issue',async()=>{if(!Number(week.value))throw new Error('Enter a TWIC issue number.');status.textContent='Downloading and importing…';watchImport();const r=await api('import/source',{path:'https://theweekinchess.com/zips/twic'+Number(week.value)+'g.zip',collection:'Masters / TWIC'});status.textContent=`${r.added} games added · ${r.duplicates} duplicates`;},'primary'),status,link('Browse TWIC issues','https://theweekinchess.com/twic')]),
-    h('section.card.study-card',[h('div.eyebrow',{text:'Players & tournaments'}),h('h3',{text:'PGN Mentor'}),h('p.muted',{text:'Find a player or event collection, then paste its download URL in Online & imports.'}),link('Browse free PGN collections','https://www.pgnmentor.com/files.html'),button('Import a collection',()=>go('imports'))]),
-    h('section.card.study-card',[h('div.eyebrow',{text:'Your offline reference'}),h('h3',{text:'Explore by position'}),h('p.muted',{text:'After import, index a collection from Study folders. The analysis board will show continuations, results, and the earliest dated games at each position.'}),button('Manage position indexes',()=>go('studies'))]) ]));}
+    return h('div',[
+      ...(saved.length?[h('p.muted',{text:'Collections you have cut out so far:'}),
+        h('div.toolbar',saved.map(c=>button(c.name.replace(/^Masters\s*\/\s*/,'')+' · '+c.games+' games',
+          ()=>{state.filters={collection:String(c.id),kind:c.kind||'games'};state.offset=0;return go('database');},'quiet')))]:[]),
+      h('div.cards-grid',[
+        h('section.card.study-card',[h('div.eyebrow',{text:'Weekly tournament games'}),h('h3',{text:'The Week in Chess'}),
+          h('p.muted',{text:'A base is a snapshot. TWIC keeps it current: each issue is the week just played.'}),
+          field('Issue number',week),
+          button('Import issue',async()=>{if(!Number(week.value))throw new Error('Enter a TWIC issue number.');
+            status.textContent='Downloading and importing…';watchImport();
+            const r=await api('import/source',{path:'https://theweekinchess.com/zips/twic'+Number(week.value)+'g.zip',collection:'Masters / TWIC'});
+            status.textContent=`${r.added} games added · ${r.duplicates} duplicates`;await refreshMeta();},'primary'),
+          status,link('Browse TWIC issues','https://theweekinchess.com/twic')]),
+        h('section.card.study-card',[h('div.eyebrow',{text:'Players & tournaments'}),h('h3',{text:'PGN Mentor'}),
+          h('p.muted',{text:'One archive per player, free to download. Useful for a player your base covers thinly.'}),
+          link('Browse free PGN collections','https://www.pgnmentor.com/files.html'),
+          button('Import a collection',()=>go('imports'),'quiet')]),
+        h('section.card.study-card',[h('div.eyebrow',{text:'A base of your own'}),h('h3',{text:'Attach a big PGN'}),
+          h('p.muted',{text:'Any large PGN you have the right to use can be attached in place: put it in the reference folder in your library and it is read where it lies.'}),
+          button('Manage position indexes',()=>go('studies'),'quiet')])])]);
+  }
   async function tactics(){content.append(heading('Recognize the opportunity','Tactics','Train online with Chess Tempo, or work through your own local problem sets.'));const grid=h('div.cards-grid');content.append(grid);grid.append(h('section.card.study-card',[h('div.eyebrow',{text:'Chess Tempo'}),h('h3',{text:'Your tactics trainer'}),h('p.muted',{text:'We recommend Chess Tempo as the best place to train tactics. Use your own account and training history. The native app opens the trainer in its own embedded window.'}),button('Open Chess Tempo',async()=>{if(window.pywebview?.api?.open_tactics)await window.pywebview.api.open_tactics();else window.open('https://chesstempo.com/chess-tactics/','_blank','noopener');},'primary')]));const puzzles=state.collections.filter(c=>c.kind==='puzzles'||/tactic|puzzle|problem/i.test(c.name));grid.append(h('section.card.study-card',[h('div.eyebrow',{text:'Offline problem sets'}),h('h3',{text:'Train your own positions'}),h('p.muted',{text:'Import your authorized PGN exports into a collection named Tactics. Open a problem and choose Train blindfolded to recall its solution.'}),button('Import problem set',()=>go('imports')),...puzzles.map(c=>button(c.name+' · '+c.games,()=>{state.filters={collection:String(c.id),kind:c.kind||'games'};go('database');}))]));}
   // A lichess personal access token, kept in the local library and never handed back
   // out to the page. It is what makes private studies reachable: without study:read

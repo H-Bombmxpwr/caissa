@@ -148,6 +148,8 @@ class ChessBaseTagTests(unittest.TestCase):
         library = self.api.library
         with library._write_lock, library.connect() as db:
             db.execute("UPDATE games SET white_team=NULL, event_date=NULL, variation=NULL")
+            # Such a library predates the backfill marker as well as the columns.
+            db.execute("DELETE FROM settings WHERE key LIKE 'backfill:%'")
         library.close()
         reopened = Api(self.temp.name)
         try:

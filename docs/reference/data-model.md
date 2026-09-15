@@ -8,6 +8,8 @@ library/
   collections/
     my-games/games.pgn  the actual games, appended in import order
     opening-trees/games.pgn
+  reference/
+    GigaBase.pgn        a base read where it lies, never copied in
   studies/
     prep/study.json     a manifest naming the collections in this folder
   books/                PDFs, by id
@@ -16,6 +18,10 @@ library/
 The PGN files are the library. `library.db` records, for each game, the file it is in
 and the byte range it occupies — so reading a game is a seek and a read, and losing the
 index costs you search rather than games.
+
+That indirection is also what lets a multi-gigabyte base be *attached* rather than
+imported: its rows carry a path into `reference/` instead of into a collection folder,
+and `games.source` is `reference`. See [A reference base](../guide/reference-base.md).
 
 ## Tables
 
@@ -54,6 +60,18 @@ A collection contains the games it owns plus the games linked onto it, which is 
 `search(collection=…)`, the collection counts and the PGN export all read it. Both
 columns cascade on delete, and deleting a collection first hands any game it owns but
 another collection also holds to that other collection.
+
+### `reference_bases`
+
+`(collection_id, path, attached_at)` — the collections that are attached bases rather
+than imported games. Their rows in `games` carry `source='reference'` and a `path` into
+the library's `reference/` folder instead of a collection folder, so the PGN is read
+where it lies.
+
+The table exists because the same fact derived by scanning `games` for that source costs
+a full table scan — about eight seconds on ten million rows, every time the Master games
+view opens. Two rows of fact deserve two rows. Each base's game count is then read
+through `games(collection_id)`, which is indexed.
 
 ### `positions`
 

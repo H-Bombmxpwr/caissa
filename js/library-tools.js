@@ -2,7 +2,7 @@
 (function(){
   'use strict';
   let ui;
-  const categories=['Games to study','Chess studies','Opening examples','Model games','Endgames','Tactics','Tournament preparation'];
+  const categories=['Games to study','Chess studies','Opening examples','Model games','Endgames','Tactics','Tournament preparation','Reference'];
   const get=()=>ui;
   async function separateBook(id){
     if(window.pywebview?.api?.open_book){const r=await window.pywebview.api.open_book(Number(id));if(r.error)throw new Error(r.error);}
