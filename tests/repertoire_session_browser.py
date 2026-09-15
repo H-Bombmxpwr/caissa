@@ -25,6 +25,11 @@ with tempfile.TemporaryDirectory(prefix='caissa-repertoire-') as data:
             errors=[]
             page.on('pageerror',lambda error:errors.append(str(error)))
             from playwright.sync_api import expect
+            # Housekeeping actions live behind the card's ⋯ now, so a test opens it first.
+            def card_menu(name, card=None):
+                (card or page).get_by_role('button', name='More actions', exact=False).first.click()
+                page.get_by_role('menuitem', name=name, exact=True).click()
+
             page.goto('http://127.0.0.1:'+str(httpd.server_port))
             page.wait_for_function('window.Caissa')
             rep_id=page.evaluate("""async()=>{
@@ -34,7 +39,7 @@ with tempfile.TemporaryDirectory(prefix='caissa-repertoire-') as data:
                 {fen:Chess.DEFAULT_FEN,moves:['e4','c5','Nf3','d6']}]}});
               await Caissa.go('repertoire');return result.id;
             }""")
-            page.get_by_role('button',name='Drill all lines',exact=True).click()
+            card_menu('Drill all lines')
             board=page.locator('.repertoire-drill-board')
             def play_move(start,end):
                 for key in [start,end]:
@@ -70,7 +75,7 @@ with tempfile.TemporaryDirectory(prefix='caissa-repertoire-') as data:
             assert [line['successes'] for line in data['lines']]==[0,1,1],data
             assert all(line['due']>0 for line in data['lines']),data
             # A part-finished session saves the lines it did complete, and only those.
-            page.get_by_role('button',name='Drill all lines',exact=True).click()
+            card_menu('Drill all lines')
             play_move('e2','e4')
             expect(page.get_by_label('Moves played',exact=True)).to_contain_text('1... e5')
             play_move('g1','f3')

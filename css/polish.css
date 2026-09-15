@@ -70,3 +70,58 @@ input:not([type=checkbox]):not([type=color]),select,textarea{border-radius:7px}
 .section-tabs button[data-account=on]::after{background:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 22%,transparent)}
 .mode-purpose{margin:0 0 16px;padding:12px 15px;font-size:12px;line-height:1.75;border-radius:8px;border-left:3px solid var(--accent);background:color-mix(in srgb,var(--accent) 6%,transparent)}
 .mode-purpose b{color:var(--accent)}
+
+/* ---------- ranked actions ----------
+   Seven identical buttons in a row give a reader no order to read them in, so a card
+   ends up being mostly controls. Three weights fix that without hiding anything: the
+   action you came for is filled, the ones you might want next lose their boxes, and
+   the housekeeping sits behind the ⋯. Nothing destructive is left in the open row. */
+:root{--on-accent:#fffdf3}
+.dark-theme{--on-accent:#12241b}
+
+/* The workspace inherited its button rules from the blindfold trainer's stylesheet,
+   which paints hover a warm brown and the primary hover a blue — neither belongs to
+   this palette, and white on the dark theme's pale green misses contrast badly. The
+   overrides are scoped so the trainer keeps its own look. */
+#workspace button.btn{background:var(--bg-3);border-color:var(--border);color:var(--text-strong)}
+#workspace button.btn:hover{background:color-mix(in srgb,var(--accent) 13%,var(--bg-3));
+  border-color:color-mix(in srgb,var(--accent) 40%,var(--border));filter:none}
+#workspace button.btn.primary,#workspace button.btn.primary:hover{
+  background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+#workspace button.btn.primary:hover{filter:brightness(1.07)}
+#workspace button.btn.danger{color:#a44c42}
+.dark-theme #workspace button.btn.danger{color:#e0897c}
+
+#workspace button.btn.quiet{background:none;border-color:transparent;color:var(--text);padding:8px 8px}
+#workspace button.btn.quiet:hover{background:color-mix(in srgb,var(--accent) 13%,transparent);
+  border-color:transparent;color:var(--text-strong)}
+.action-row{gap:2px}
+.action-row>.btn.primary{margin-right:7px}
+.action-gap{flex:0 0 auto;width:16px}
+
+#workspace button.btn.btn-menu{display:inline-flex;align-items:center;justify-content:center;
+  min-width:34px;min-height:32px;padding:4px 8px;line-height:1;letter-spacing:1px;
+  background:none;border-color:transparent;color:var(--text);font-size:17px}
+#workspace button.btn.btn-menu:hover,#workspace button.btn.btn-menu[aria-expanded=true]{
+  background:color-mix(in srgb,var(--accent) 13%,transparent);color:var(--text-strong);border-color:transparent}
+
+/* A card clips its own overflow, so the menu is drawn in the top layer and placed by
+   hand. It borrows the card's own surface: a torn-off piece of the card, not a widget. */
+.menu-pop{position:fixed;inset:auto;margin:0;padding:5px;min-width:186px;max-width:min(280px,92vw);
+  border:1px solid var(--border);border-radius:8px;background:var(--bg-2);color:var(--text);
+  box-shadow:0 14px 38px rgba(11,28,22,.28)}
+.menu-pop::backdrop{background:none}
+.menu-item{display:block;width:100%;box-sizing:border-box;text-align:left;border:0;background:none;
+  color:var(--text-strong);font:inherit;font-size:13px;padding:9px 11px;border-radius:5px;
+  text-decoration:none;cursor:pointer}
+.menu-item:hover,.menu-item:focus-visible{background:color-mix(in srgb,var(--accent) 15%,transparent)}
+.menu-item:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.menu-item.danger{color:#a44c42}
+.dark-theme .menu-item.danger{color:#e0897c}
+.menu-rule{border:0;border-top:1px solid var(--border);margin:4px 3px}
+@media(max-width:560px){.menu-pop{min-width:170px}}
+/* A card's ⋯ lives in its corner: the same place on every card, and out of the way
+   of the actions, which a narrow card needs the full width for. */
+.card-top{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+.card-top .eyebrow{margin:0}
+#workspace .card-top button.btn.btn-menu{margin:-6px -6px 0 0}

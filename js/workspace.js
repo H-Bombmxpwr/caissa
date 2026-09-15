@@ -203,6 +203,78 @@
     }
     return group;
   }
+  /* ---------- ranked actions ---------- */
+  // Buttons look alike only when they matter alike, and they rarely do. A row of seven
+  // identical ones gives a reader no order to read them in, so a card ends up being
+  // mostly controls. A row here is ranked instead: the thing you came to do is filled,
+  // the few you might do next sit beside it without boxes, and the housekeeping waits
+  // behind the ⋯. Destructive actions are never left in the open row.
+  let menuSeq = 0;
+  function menu(items, label) {
+    const name = label || 'More actions', id = 'menu-' + (++menuSeq);
+    const pop = h('div.menu-pop', {id, role:'menu', popover:'auto'});
+    const trigger = h('button.btn.btn-menu', {type:'button', text:'⋯', title:name,
+      'aria-label':name, 'aria-haspopup':'menu', 'aria-expanded':'false', popovertarget:id});
+    for (const item of items) {
+      if (!item) {pop.append(h('hr.menu-rule')); continue;}
+      // A download is a link, not a command, and stays one inside the menu.
+      if (item.nodeType) {
+        item.classList.remove('btn'); item.classList.add('menu-item');
+        item.setAttribute('role','menuitem');
+        item.addEventListener('click',()=>pop.hidePopover());
+        pop.append(item); continue;
+      }
+      const [text, run, kind] = item;
+      pop.append(h('button.menu-item' + (kind ? '.' + kind : ''), {type:'button', role:'menuitem',
+        text, onclick:act(async()=>{pop.hidePopover(); await run();})}));
+    }
+    // The menu is drawn in the top layer, because the card it belongs to clips its own
+    // overflow. That puts placing it back in our hands: right edge against the trigger,
+    // flipped above when the bottom of the window is closer than the menu is tall.
+    function place() {
+      const at = trigger.getBoundingClientRect(), box = pop.getBoundingClientRect();
+      const below = at.bottom + 6, above = at.top - box.height - 6;
+      // Hanging from the trigger's left edge keeps a menu beside the row it belongs to;
+      // a ⋯ in a card's corner has no room that way and swings to its right edge instead.
+      const left = at.left + box.width <= innerWidth - 8 ? at.left : at.right - box.width;
+      pop.style.left = Math.max(8, Math.min(left, innerWidth - box.width - 8)) + 'px';
+      pop.style.top = (below + box.height <= innerHeight - 8 || above < 8 ? below : above) + 'px';
+      pop.style.visibility = '';
+    }
+    pop.addEventListener('beforetoggle', event => {
+      trigger.setAttribute('aria-expanded', event.newState === 'open' ? 'true' : 'false');
+      if (event.newState === 'open') pop.style.visibility = 'hidden';
+    });
+    pop.addEventListener('toggle', event => {
+      if (event.newState === 'open') {place(); pop.querySelector('.menu-item')?.focus();}
+      else if (pop.contains(document.activeElement) || document.activeElement === document.body) trigger.focus();
+    });
+    pop.addEventListener('keydown', event => {
+      const rows = [...pop.querySelectorAll('.menu-item')], at = rows.indexOf(document.activeElement);
+      const to = i => {event.preventDefault(); rows[(i + rows.length) % rows.length].focus();};
+      if (event.key === 'ArrowDown') to(at + 1);
+      else if (event.key === 'ArrowUp') to(at - 1);
+      else if (event.key === 'Home') to(0);
+      else if (event.key === 'End') to(rows.length - 1);
+      // Escape and Tab: the popover itself handles Escape for a real keypress, but not
+      // every caller of this menu is a real keypress, and a menu never holds the tab order.
+      else if (event.key === 'Escape' || event.key === 'Tab') pop.hidePopover();
+    });
+    return [trigger, pop];
+  }
+  // The pieces of a ranked row, for a heading or a card head that wants them loose.
+  function actions(primary, quiet, more) {
+    // null is a rule between groups and survives; anything else falsy was a condition
+    // that did not hold, so it drops out along with the rule it would have needed.
+    const rest = (more || []).filter(item => item === null || Boolean(item));
+    while (rest[0] === null) rest.shift();
+    while (rest[rest.length - 1] === null) rest.pop();
+    return [primary, ...(quiet || []).filter(Boolean), ...(rest.length ? menu(rest) : [])].filter(Boolean);
+  }
+  const plural = (n, word) => n + ' ' + word + (n === 1 ? '' : 's');
+  function actionRow(primary, quiet, more) {
+    return h('div.toolbar.action-row', actions(primary, quiet, more));
+  }
   function heading(kicker,title,description,actions) {return h('div.page-heading',[h('div',[h('div.eyebrow',{text:kicker}),h('h1',{text:title}),h('p',{text:description})]),h('div.toolbar',actions||[])]);}
   function card(title,body,actions) {return h('section.card',[h('div.card-head',[h('h2',{text:title}),h('div.toolbar',actions||[])]),body]);}
   function empty(title,text,actions) {return h('div.empty',[h('h3',{text:title}),h('p',{text}),h('div.toolbar',{style:{justifyContent:'center'}},actions||[])]);}
@@ -594,7 +666,10 @@
       ['opening','Opening name'],['result','Result'],['annotator','Annotator'],['length','Longest games']],
       state.filters.sort||'date',()=>{state.filters.sort=sort.value;loadGames();});
     const rows=h('tbody'),count=h('span'),pager=h('div.pagination');
-    const filters=h('div.filters',[q,kind,cols,sort,button('Filters',()=>filterDialog(loadGames)),button('Clear filters',()=>{state.filters={};state.offset=0;return go('database');}),button('Index positions',()=>modal('Build the position index',(body,close)=>body.append(LibraryTools.indexControls(),button('Close',close)))),button('Delete matching games',()=>deleteMatching(async()=>{await refreshStats();await loadGames();}),'danger')]);
+    const filters=h('div.filters',[q,kind,cols,sort,...actions(button('Filters',()=>filterDialog(loadGames)),
+      [button('Clear filters',()=>{state.filters={};state.offset=0;return go('database');},'quiet')],
+      [['Index positions',()=>modal('Build the position index',(body,close)=>body.append(LibraryTools.indexControls(),button('Close',close)))],null,
+       ['Delete matching games',()=>deleteMatching(async()=>{await refreshStats();await loadGames();}),'danger']])]);
     const table=h('div.table-scroll',[h('table.games',[h('thead',[h('tr',['#','White','Elo W','Black','Elo B','Result','Moves','ECO / Opening','Tournament','Date','Round','Annotator','Notes','Collections','Added'].map(t=>h('th',{text:t})))]),rows])]);
     const list=h('section.card',[filters,table,pager]);
     const aside=h('div.library-aside.section-stack');
@@ -634,7 +709,9 @@
     harvestCommands(parsed);
     const saveBtn=button(state.dirty?'Save changes *':'Save game',saveGame,'primary');
     content.append(heading('Understand every move',parsed.headers.White+' — '+parsed.headers.Black,[parsed.headers.Event,parsed.headers.Date].filter(Boolean).join(' · ')||'An open board for your ideas',[
-      button('Panels',panelDialog),button('Reset board',()=>{if(state.dirty&&!confirm('Discard unsaved analysis and reset to the starting position?'))return;newGame();go('analysis');}),button('Board editor',boardEditor),button('Export PGN',()=>download(serialize(parsed),'caissa-study.pgn')),button('Add to repertoire',addToRepertoire),saveBtn]));
+      ...actions(saveBtn,[button('Add to repertoire',addToRepertoire,'quiet'),button('Panels',panelDialog,'quiet')],
+        [['Board editor',boardEditor],['Export PGN',()=>download(serialize(parsed),'caissa-study.pgn')],null,
+         ['Reset board',()=>{if(state.dirty&&!confirm('Discard unsaved analysis and reset to the starting position?'))return;newGame();return go('analysis');},'danger']])]));
     content.append(boardTabs());
     const holder=h('div.board-holder'),moves=h('div.move-tree'),engineBody=h('div',[h('p.muted',{style:{padding:'16px'},text:'Analyze a position with your bundled Stockfish.'})]),contextBody=h('div.context-body');
     // Annotations belong to the game the moment they are typed; there is nothing to press.
@@ -668,7 +745,10 @@
       built[id]={id,title,head,box,handle,node:h('section.card.panel',{'data-panel':id},[head,box,handle])};
     }
     panel('notation','Notation',h('div',[moves,branches,h('div.editor',[field('Position comment',comment),nag,h('div.toolbar',[
-      button('Make main line',()=>{const n=state.node;if(!n.parent)return;const list=n.parent.children;list.splice(list.indexOf(n),1);list.unshift(n);markDirty();renderMoves();}),button('Expand variations',()=>moves.querySelectorAll('details.variation').forEach(d=>d.open=true)),button('Collapse variations',()=>moves.querySelectorAll('details.variation').forEach(d=>d.open=false)),button('Remove branch',()=>{const n=state.node;if(!n.parent)return;if(!confirm('Remove this move and everything following it in this branch?'))return;n.parent.children=n.parent.children.filter(c=>c!==n);state.node=n.parent;markDirty();render();})])])]),[h('label.toolbar',[rowsBox,'Score sheet rows'])]);
+      ...actions(button('Make main line',()=>{const n=state.node;if(!n.parent)return;const list=n.parent.children;list.splice(list.indexOf(n),1);list.unshift(n);markDirty();renderMoves();},'quiet'),
+        [button('Expand variations',()=>moves.querySelectorAll('details.variation').forEach(d=>d.open=true),'quiet'),
+         button('Collapse variations',()=>moves.querySelectorAll('details.variation').forEach(d=>d.open=false),'quiet')],
+        [['Remove branch',()=>{const n=state.node;if(!n.parent)return;if(!confirm('Remove this move and everything following it in this branch?'))return;n.parent.children=n.parent.children.filter(c=>c!==n);state.node=n.parent;markDirty();render();},'danger']])])])]),[h('label.toolbar',[rowsBox,'Score sheet rows'])]);
     panel('engine','Stockfish · local analysis',h('div',[h('div.filters',[h('label.live-switch',[liveBox,h('span.switch-track',{'aria-hidden':'true'}),h('strong',{text:'Live analysis'})]),field('Lines',pv),button('Analyze',evaluate),h('label.toolbar',[arrows,'Best move arrows']),h('label.toolbar',[colorLines,'Color variations'])]),engineBody,h('details.engine-usage',[h('summary',{text:'Engine & system usage'}),stats,resources])]),[button('Annotate game',annotate)]);
     const tagsBody=h('div.tags-list');
     panel('tags','Game tags',h('div.card-pad',[tagsBody,h('div.toolbar',[button('Edit tags',editTags),button('Delete game',deleteGame,'danger')])]));
@@ -1082,8 +1162,25 @@
       h('li',{text:'When a session holds several lines, playing a different saved move switches you to that branch, and the board jumps back to each remaining branch in turn. Save review schedules every line you completed, so a part-finished session is still worth saving.'}),
       h('li',{text:'The drill names the opening you have reached as you play it. Hint takes two presses: the first marks the piece to move, the second marks the square it goes to. A hinted line comes back tomorrow, the same as a wrong move.'}),
       h('li',{text:'View repertoire merges shared moves into one study tree per starting position. Different starting positions open as separate labelled boards.'}),
-      h('li',{text:'Use Rename to change a repertoire name and Change side to swap the colour you drill, which also flips the board. Browse lines lets you select and delete saved lines. Export PGN keeps a portable copy.'})])]));
-    const grid=h('div.cards-grid');content.append(grid);if(!data.repertoires.length)grid.append(empty('Start with one good line','Open a game or build a line on the analysis board, then choose Add to repertoire.',[button('Open analysis board',()=>go('analysis'),'primary')]));for(const meta of data.repertoires){const rep=(await api('repertoires/'+meta.id)).repertoire;const data=JSON.parse(rep.data),lines=data.lines||[],due=lines.filter(l=>(l.due||0)<=Date.now());grid.append(h('section.card.study-card',[h('div.eyebrow',{text:meta.color==='w'?'White repertoire':'Black repertoire'}),h('h3',{text:meta.name}),h('p.muted',{text:lines.length+' lines · '+due.length+' due for review'}),h('div.toolbar',[button('Drill due lines',()=>{if(!due.length)throw new Error('All lines reviewed. Come back when they are due.');drillLine(due[0].moves,due[0].fen,rep,due[0],due);},'primary'),button('Drill all lines',()=>{if(!lines.length)throw new Error('Add some lines first.');drillLine(lines[0].moves,lines[0].fen,rep,lines[0],lines);}),button('View repertoire',()=>viewRepertoire(rep)),button('Browse lines',()=>browseRepertoire(rep)),button('Rename',()=>renameRepertoire(rep)),button('Change side',()=>renameRepertoire(rep,true)),button('Export PGN',()=>{const pgn=lines.map(l=>'[Event "'+meta.name.replace(/"/g,'')+'"]\n[SetUp "1"]\n[FEN "'+l.fen+'"]\n[Result "*"]\n\n'+l.moves.map((m,i)=>(i%2===0?(Math.floor(i/2)+1)+'. ':'')+m).join(' ')+' *').join('\n\n');download(pgn,'repertoire.pgn');})])]));}}
+      h('li',{text:'The ⋯ in a card’s corner holds the rest: Drill all lines, Rename, Change side to swap the colour you drill, and Export PGN for a portable copy. Browse lines, beside the drill button, selects and deletes saved lines.'})])]));
+    const grid=h('div.cards-grid');content.append(grid);if(!data.repertoires.length)grid.append(empty('Start with one good line','Open a game or build a line on the analysis board, then choose Add to repertoire.',[button('Open analysis board',()=>go('analysis'),'primary')]));for(const meta of data.repertoires){const rep=(await api('repertoires/'+meta.id)).repertoire;const data=JSON.parse(rep.data),lines=data.lines||[],due=lines.filter(l=>(l.due||0)<=Date.now());
+      const drillDue=()=>{if(!due.length)throw new Error('All lines reviewed. Come back when they are due.');drillLine(due[0].moves,due[0].fen,rep,due[0],due);};
+      const drillAll=()=>{if(!lines.length)throw new Error('Add some lines first.');drillLine(lines[0].moves,lines[0].fen,rep,lines[0],lines);};
+      const exportLines=()=>{const pgn=lines.map(l=>'[Event "'+meta.name.replace(/"/g,'')+'"]\n[SetUp "1"]\n[FEN "'+l.fen+'"]\n[Result "*"]\n\n'+l.moves.map((m,i)=>(i%2===0?(Math.floor(i/2)+1)+'. ':'')+m).join(' ')+' *').join('\n\n');return download(pgn,'repertoire.pgn');};
+      // With nothing due, drilling the due lines can only produce an error, so the
+      // whole repertoire takes the primary slot and the card says why.
+      grid.append(h('section.card.study-card',[
+        h('div.card-top',[h('div.eyebrow',{text:meta.color==='w'?'White repertoire':'Black repertoire'}),
+          // Drilling everything is a variant of the primary action, so it heads the menu
+          // rather than competing with it in the row.
+          ...menu([due.length&&['Drill all lines',drillAll],due.length&&null,
+            ['Rename',()=>renameRepertoire(rep)],['Change side',()=>renameRepertoire(rep,true)],
+            ['Export PGN',exportLines]],'More actions for '+meta.name)]),
+        h('h3',{text:meta.name}),
+        h('p.muted',{text:plural(lines.length,'line')+' · '+(due.length?due.length+' due for review':'all reviewed')}),
+        actionRow(due.length?button('Drill due lines',drillDue,'primary'):button('Drill all lines',drillAll,'primary'),
+          [button('View repertoire',()=>viewRepertoire(rep),'quiet'),
+           button('Browse lines',()=>browseRepertoire(rep),'quiet')])]));}}
   function viewRepertoire(rep){
     const groups=new Map();
     for(const line of JSON.parse(rep.data).lines||[]){const fen=line.fen||new Chess().fen();if(!groups.has(fen))groups.set(fen,[]);groups.get(fen).push(line);}
@@ -1275,7 +1372,12 @@
   }
   async function studies(){content.append(heading('A place for your ideas','Study folders','Organize preparation into real folders, with portable PGNs behind every collection.',[button('Create collection',collectionDialog),button('＋ Study folder',()=>folderDialog(),'primary')]));content.append(h('p.muted',{text:state.studyRoot}));const grid=h('div.cards-grid');content.append(grid);if(!state.folders.length)grid.append(empty('Build your study space','Create a folder such as Tournament preparation, then add White repertoire, Black repertoire, Model games, and Endgames beneath it.',[button('Create study structure',async()=>{const root=await api('study/folders',{name:'Chess study'});for(const name of ['White repertoire','Black repertoire','Annotated games','Model games','Endgames','Tactics'])await api('study/folders',{name,parent_id:root.id});await go('studies');},'primary')]));
     grid.className='study-overview';grid.append(LibraryTools.studyTree(state,{browse:c=>{state.filters={collection:String(c.id),kind:c.kind||'games'};state.offset=0;go('database');},assign:assignDialog,create:folderDialog,remove:deleteFolderDialog,repertoire:()=>go('repertoire')}));
-    const collections=h('div.card-pad');for(const c of state.collections)collections.append(h('div.context-item',[h('b',{text:c.name+' · '+c.games+' games'}),h('div.toolbar',[button('Browse',()=>{state.filters={collection:String(c.id),kind:c.kind||'games'};state.offset=0;go('database');}),button('Index positions',async()=>{await api('study/index',{collection:c.id});}),button('Rename',()=>collectionRenameDialog(c)),h('a.btn',{href:'/api/collections/'+c.id+'/pgn',download:c.name+'.pgn',text:'Export PGN'}),button('Delete',()=>collectionDeleteDialog(c),'danger')])]));content.append(h('div',{style:{marginTop:'24px'}},[h('details.card',[h('summary.card-pad',{text:'All collections · export, delete and position indexing'}),collections])]));}
+    const collections=h('div.card-pad');for(const c of state.collections)collections.append(h('div.context-item',[h('b',{text:c.name+' · '+c.games+' games'}),
+      actionRow(button('Browse',()=>{state.filters={collection:String(c.id),kind:c.kind||'games'};state.offset=0;return go('database');},'quiet'),[],
+        [['Index positions',async()=>{await api('study/index',{collection:c.id});}],
+         ['Rename',()=>collectionRenameDialog(c)],
+         h('a.btn',{href:'/api/collections/'+c.id+'/pgn',download:c.name+'.pgn',text:'Export PGN'}),null,
+         ['Delete',()=>collectionDeleteDialog(c),'danger']])]));content.append(h('div',{style:{marginTop:'24px'}},[h('details.card',[h('summary.card-pad',{text:'All collections · export, delete and position indexing'}),collections])]));}
 
   function folderDialog(parent){modal('Create a study folder',(body,close)=>{const category=select(LibraryTools.categories,'Games to study');body.append(field('Study category',category));const name=h('input',{placeholder:'e.g. Autumn tournament preparation'}),parents=select([['','Top level'],...state.folders.map(f=>[String(f.id),f.path])],parent?String(parent):'');body.append(field('Folder name',name),field('Inside',parents),h('div.dialog-actions',[button('Cancel',close),button('Create folder',async()=>{await api('study/folders',{name:name.value,category:category.value,parent_id:parents.value?Number(parents.value):null});close();go('studies');},'primary')]));});}
   function deleteFolderDialog(folder){
@@ -1576,7 +1678,7 @@
     sections.forEach(n=>n.remove());content.append(tabs,pane);show(...groups[0]);applyPrefs();}
   document.addEventListener('DOMContentLoaded',async()=>{
     await App.persistenceReady;
-    LibraryTools.init({h,api,button,field,select,heading,openGame,resizeBoard,
+    LibraryTools.init({h,api,button,field,select,heading,openGame,resizeBoard,actions,actionRow,menu,
       // From a node in the tree to the games that made it, without retyping a FEN.
       browsePosition:fen=>{state.filters={position:fen,kind:''};state.offset=0;return go('database');},
       // The explorer keeps its own orientation, separate from the analysis board's.

@@ -58,13 +58,15 @@ with tempfile.TemporaryDirectory(prefix='caissa-quality-') as data:
             page.keyboard.press('End');assert page.evaluate('Caissa.state.node.san')=='Be7'
             page.keyboard.press('Home');assert page.evaluate('Caissa.state.node.ply')==0
             page.get_by_label('Position comment',exact=True).fill('Root note typed immediately before export.')
+            page.get_by_role('button',name='More actions',exact=False).first.click()
             with page.expect_download() as download:
-                page.get_by_role('button',name='Export PGN',exact=True).click()
+                page.get_by_role('menuitem',name='Export PGN',exact=True).click()
             exported=Path(download.value.path()).read_text(encoding='utf-8')
             assert 'Root note typed immediately before export.' in exported
             assert '[%cal Bf1b5,Rb5e8]' in exported and '(2. Bc4' in exported
             page.evaluate('''()=>{window.__exported=null;window.pywebview={api:{export_pgn:async text=>{window.__exported=text;return {saved:true,path:'test.pgn'};}}};}''')
-            page.get_by_role('button',name='Export PGN',exact=True).click()
+            page.get_by_role('button',name='More actions',exact=False).first.click()
+            page.get_by_role('menuitem',name='Export PGN',exact=True).click()
             page.wait_for_function('window.__exported && window.__exported.includes("Root note")')
             page.evaluate('delete window.pywebview')
             page.get_by_role('button',name='Span Notation across both columns',exact=True).click()

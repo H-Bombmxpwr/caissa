@@ -25,6 +25,11 @@ with tempfile.TemporaryDirectory(prefix='caissa-repertoire-') as data:
             errors=[]
             page.on('pageerror',lambda error:errors.append(str(error)))
             from playwright.sync_api import expect
+            # Housekeeping actions live behind the card's ⋯ now, so a test opens it first.
+            def card_menu(name, card=None):
+                (card or page).get_by_role('button', name='More actions', exact=False).first.click()
+                page.get_by_role('menuitem', name=name, exact=True).click()
+
             page.goto('http://127.0.0.1:'+str(httpd.server_port))
             page.wait_for_function('window.Caissa')
             rep_id=page.evaluate("""async()=>{
@@ -74,7 +79,7 @@ with tempfile.TemporaryDirectory(prefix='caissa-repertoire-') as data:
             import json
             line=json.loads(page.evaluate('(id)=>Caissa.api("repertoires/"+id)',rep_id)['repertoire']['data'])['lines'][0]
             assert line['successes']==2 and line['interval']==1,line
-            page.get_by_role('button',name='Change side',exact=True).click()
+            card_menu('Change side')
             page.get_by_label('Repertoire color',exact=True).select_option('w')
             page.get_by_role('button',name='Save side',exact=True).click()
             page.get_by_role('button',name='Browse lines',exact=True).click()

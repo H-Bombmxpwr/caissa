@@ -417,7 +417,12 @@
         row.classList.toggle('chosen',i===choice));
     }
     document.addEventListener('keydown',keys);
-    content.append(h('div.opening-grid',[h('div',[holder,line,h('div.toolbar',[button('Back a move',()=>replay(played.slice(0,-1))),button('Start again',()=>replay([])),button('Flip board',flip),button('Analyze this position',()=>ui.analyzeFen(game.fen())),button('Open these games',()=>ui.browsePosition(game.fen()))]),
+    // Walking the tree and leaving it are different jobs: the board controls stay
+    // unboxed beside the board, and only the two exits look like buttons.
+    content.append(h('div.opening-grid',[h('div',[holder,line,h('div.toolbar.action-row',[
+      button('Back a move',()=>replay(played.slice(0,-1)),'quiet'),button('Start again',()=>replay([]),'quiet'),
+      button('Flip board',flip,'quiet'),h('span.action-gap'),
+      button('Analyze this position',()=>ui.analyzeFen(game.fen())),button('Open these games',()=>ui.browsePosition(game.fen()))]),
       h('p.muted.key-hint',{text:'← back · → play the highlighted move · ↑ ↓ choose one · Home to the start'})]),h('section.card',[tabs,pane,indexControls(),h('p.card-pad.muted',{text:'Import PGNs from Master games or Online & imports, then index them. ChessBase CTG/CTB/CTO and Polyglot BIN files are not imported by this module.'})])]));
     ui.resizeBoard(holder,'openingBoardSize');choose('Collection tree');render();
   }
@@ -462,7 +467,9 @@
     function collection(c){const count=c.indexed_games||0,ready=c.games>0&&count===c.games;return h('div.collection-leaf'+(ready?'.indexed':'.needs-index'),[h('span.index-badge',{text:ready?'✓ Indexed':count?'Partially indexed':'Not indexed',title:count+' of '+c.games+' games indexed'}),button(c.name,()=>actions.browse(c)),h('small',{text:count+' / '+c.games+' indexed'})]);}
     for(const folder of state.folders){
       const children=state.folders.filter(f=>f.parent_id===folder.id),collections=listFor(folder.id),parent=state.folders.find(f=>f.id===folder.parent_id);
-      const node=h('details.study-node',{open:true,'data-folder-id':folder.id},[h('summary',[h('b',{text:folder.name}),h('span.kind-badge',{text:folder.category}),h('small',{text:children.length+' subfolders · '+collections.length+' collections'})]),h('div.folder-tools',[h('p.breadcrumb',{text:'Study folders / '+(parent?folder.path:'Top level / '+folder.name)}),field('Study category',select(categories,folder.category||categories[0],async e=>{await api('study/folders/'+folder.id,{category:e.target.value},'PUT');folder.category=e.target.value;node.querySelector('.kind-badge').textContent=e.target.value;})),h('div.toolbar',[button('Add collection',()=>actions.assign(folder)),button('New subfolder',()=>actions.create(folder.id)),button('Delete folder',()=>actions.remove(folder),'danger')])]),...collections.map(collection)]);
+      const node=h('details.study-node',{open:true,'data-folder-id':folder.id},[h('summary',[h('b',{text:folder.name}),h('span.kind-badge',{text:folder.category}),h('small',{text:children.length+' subfolders · '+collections.length+' collections'})]),h('div.folder-tools',[h('p.breadcrumb',{text:'Study folders / '+(parent?folder.path:'Top level / '+folder.name)}),field('Study category',select(categories,folder.category||categories[0],async e=>{await api('study/folders/'+folder.id,{category:e.target.value},'PUT');folder.category=e.target.value;node.querySelector('.kind-badge').textContent=e.target.value;})),ui.actionRow(button('Add collection',()=>actions.assign(folder),'quiet'),
+        [button('New subfolder',()=>actions.create(folder.id),'quiet')],
+        [['Delete folder',()=>actions.remove(folder),'danger']])]),...collections.map(collection)]);
       cards.set(folder.id,node);
     }
     const top=h('section',[h('h3',{text:'Study folders · top level'})]);tree.append(h('p.muted',{text:'Folders contain subfolders and collections. Collections contain games. Repertoires are separate sets of lines to practise.'}),h('div.toolbar',[button('Expand all',()=>tree.querySelectorAll('details').forEach(d=>d.open=true)),button('Collapse all',()=>tree.querySelectorAll('details').forEach(d=>d.open=false))]),top);

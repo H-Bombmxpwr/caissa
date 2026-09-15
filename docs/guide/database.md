@@ -53,7 +53,7 @@ An import now reports `linked` alongside `added`, `duplicates` and `skipped`, so
 
 ## Renaming a collection
 
-**Study folders → All collections → Rename.** A collection's name is also the name of the
+**Study folders → All collections →** the row's ⋯ **→ Rename.** A collection's name is also the name of the
 folder its PGN lives in, so renaming moves that folder and rewrites the games' stored
 paths together — the games stay readable, and their study folder manifest is rewritten to
 match. Nothing else changes: links, position indexes and review history all survive.
@@ -101,7 +101,8 @@ the file you are searching.
 
 ## Deleting games
 
-**Delete matching games** removes everything the current filters match. It always shows
+**Delete matching games**, in the ⋯ beside the filters, removes everything the current
+filters match. It always shows
 a preview first: how many games, a sample of them, and the exact filter set in force.
 Confirming deletes only rows whose identity still matches what the preview saw, so a
 concurrent import cannot widen the deletion.

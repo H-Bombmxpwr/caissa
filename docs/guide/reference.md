@@ -301,8 +301,8 @@ and cached, so the readings never slow the search.
 - Each Stockfish line carries its depth as a chip and an **Add to tree** button that grafts
   the line into the notation as a variation — up to ten moves of it, or the whole line if
   it is shorter — and puts you on its first move so the arrow keys walk through it.
-- Drag the board's lower-right corner to resize it. **Copy FEN**, **Reset board**, and
-  **Board editor** are available directly in analysis. Editing starts a new study;
+- Drag the board's lower-right corner to resize it. **Copy FEN** sits under the board;
+  **Reset board** and **Board editor** are in the ⋯ beside Save game. Editing starts a new study;
   save it to keep it. Blindfold controls belong to the trainer.
 - **Analyze / Live analysis** runs continuous Stockfish search. Lines and depth update
   without replacing them with a thinking message. Toggle **Best move arrows** and
@@ -358,7 +358,7 @@ search that matches nothing in the archive makes no collection and says so.
 
 ### Rename a collection
 
-**Study folders → All collections → Rename.** The folder holding the collection's
+**Study folders → All collections →** the row's ⋯ **→ Rename.** The folder holding the collection's
 PGN is renamed with it and the games' stored paths are rewritten, so the games
 stay readable; the study folder manifest is rewritten too. A name another
 collection already uses is refused.
@@ -374,7 +374,7 @@ saved in Settings is used — and Player lab's My prep fills in the same usernam
 
 ### Rename repertoires and remove lines
 
-On the Repertoire page, choose **Rename** on a repertoire card and save its new
+On the Repertoire page, open the ⋯ in a card's corner, choose **Rename**, and save its new
 name. **Change side** opens the same dialog, so the name and the colour can both
 be changed from either button; the confirmation says which of the two changed.
 Choose **Browse lines**, select the saved lines to remove, and click

@@ -12,7 +12,7 @@
 ; writes carries that mark, and a Start menu entry and a working uninstaller come free.
 
 #ifndef AppVersion
-  #define AppVersion "1.0.3"
+  #define AppVersion "1.1.0"
 #endif
 
 #define AppName "Caissa"

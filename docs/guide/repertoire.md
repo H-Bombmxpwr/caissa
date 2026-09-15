@@ -80,6 +80,9 @@ the analysis board instead of drilling it, or to drill that single line.
 
 ## Renaming, changing side and removing lines
 
+The ⋯ in a card's corner holds everything that is not drilling or reading:
+**Drill all lines**, **Rename**, **Change side** and **Export PGN**.
+
 **Rename** on a repertoire card edits its name, and **Change side** edits the colour you
 play — the same dialog, reached from either button, so either field can be changed from
 either one. Changing the side flips the drill board and switches which moves are asked of
