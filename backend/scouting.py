@@ -6,10 +6,11 @@ import re
 import time
 from collections import defaultdict
 
+from . import openings as opening_names
 from . import pgnutil
 from .chess import Chess, START, color
 
-VERSION = 2
+VERSION = 3
 SCHEMA = '''
 CREATE TABLE IF NOT EXISTS scouting_cache (
  game_id INTEGER PRIMARY KEY REFERENCES games(id) ON DELETE CASCADE,
@@ -122,6 +123,7 @@ class Scouting:
                                line=' '.join(line) if ply < 24 else None))
             board.move(node['san'])
             result[-1]['next_key'] = board.key()
+            result[-1]['fen_after'] = board.fen()
         with self.library._write_lock, db:
             db.execute('INSERT OR REPLACE INTO scouting_cache VALUES(?,?,?)', (row['id'], digest, json.dumps(result)))
         return digest, result
@@ -143,10 +145,13 @@ class Scouting:
         rows = self.library.connect().execute('SELECT g.* FROM games g WHERE ' + ' AND '.join(clauses) + ' ORDER BY g.date DESC,g.id DESC', params).fetchall()
         scores, groups, openings = [], defaultdict(dict), defaultdict(dict)
         opening_lines = {}
+        named = defaultdict(dict)
+        named_meta = {}
         completed_by_side = defaultdict(int)
         losses, clocks, mistakes, skipped = defaultdict(list), [], [], []
         games_with_eval = set()
         clock_games = set()
+        catalogue = {}
         for row in rows:
             side = 'w' if row['white'].casefold() == player.casefold() else 'b'
             if query.get('color') in ('w', 'b') and side != query['color']:
@@ -161,6 +166,22 @@ class Scouting:
             scores.append(score)
             if score is not None:
                 completed_by_side[side] += 1
+            catalogue[row['id']] = dict(id=row['id'], white=row['white'], black=row['black'], date=row['date'],
+                                        result=outcome, speed=row['speed'], event=row['event'], color=side,
+                                        opponent=row['black'] if side == 'w' else row['white'],
+                                        opponent_elo=row['black_elo'] if side == 'w' else row['white_elo'],
+                                        eco=row['eco'], opening=row['opening'])
+            # The opening as the library names it. A game that never got a name is
+            # classified here from its own first moves rather than left uncounted.
+            title = row['opening'] or None
+            eco = row['eco'] or None
+            if not title:
+                guess = opening_names.classify((row['first_moves'] or '').split())
+                if guess:
+                    title, eco = guess['opening'], eco or guess['eco']
+            if title:
+                named[(side, title)][row['id']] = score
+                named_meta.setdefault((side, title), dict(eco=eco, moves=(row['first_moves'] or '').split()[:12]))
             seen = set()
             for move in moves:
                 if move['side'] != side:
@@ -171,7 +192,9 @@ class Scouting:
                         seen.add(theme)
                 if move['line'] and move['ply'] in (6, 7, 14, 15, 22, 23):
                     openings[(side, move['next_key'])][row['id']] = score
-                    opening_lines.setdefault((side, move['next_key']), move['line'])
+                    opening_lines.setdefault((side, move['next_key']),
+                                             dict(line=move['line'], moves=move['line'].split(),
+                                                  fen=move.get('fen_after'), ply=move['ply'] + 1))
                 loss = move['loss']
                 if loss is not None:
                     games_with_eval.add(row['id'])
@@ -180,35 +203,59 @@ class Scouting:
                     if 'Rook ending' in move['themes'] and move['cp'] is not None and move['cp'] * (1 if side == 'w' else -1) >= 200:
                         groups['Winning rook ending (at least +2 pawns)'][row['id']] = score
                     if loss >= 150:
-                        mistakes.append(dict(game_id=row['id'], digest=digest, **move))
+                        mistakes.append(dict(game_id=row['id'], digest=digest, color=side, **move))
                 if move['clock'] is not None:
                     clock_games.add(row['id'])
-                    clocks.append(dict(game_id=row['id'], **move))
+                    clocks.append(dict(game_id=row['id'], color=side, **move))
         baseline = tally(scores)
         patterns = [dict(theme=theme, **tally(list(values.values())), evidence=list(values)[:12]) for theme, values in groups.items()]
         for item in patterns:
             item['small_sample'] = item['games'] < minimum
             item['difference_pp'] = round(item['score_pct'] - baseline['score_pct'], 1) if item['games'] and baseline['games'] else None
         patterns.sort(key=lambda x: (x['small_sample'], x['difference_pp'] if x['difference_pp'] is not None else 100))
-        repertoire = [dict(color=side, key=key, line=opening_lines[(side,key)], **tally(list(values.values())), evidence=list(values)[:12]) for (side, key), values in openings.items()]
+        repertoire = [dict(color=side, key=key, **opening_lines[(side, key)], **tally(list(values.values())), evidence=list(values)[:12])
+                      for (side, key), values in openings.items()]
         for entry in repertoire:
             denominator = completed_by_side[entry['color']]
             entry['frequency_pct'] = round(100 * entry['games']/denominator, 1) if denominator else None
+            found = opening_names.classify(entry['moves'])
+            entry['name'] = found['opening'] if found else None
+            entry['eco'] = found['eco'] if found else None
         repertoire.sort(key=lambda x: -x['games'])
+        # What they open with, by name rather than by position. Position lines transpose
+        # and split; the name is the thing a reader recognises and can prepare against.
+        catalogued = [dict(color=side, opening=title, evidence=list(values)[:12],
+                           **named_meta[(side, title)], **tally(list(values.values())))
+                      for (side, title), values in named.items()]
+        for entry in catalogued:
+            denominator = completed_by_side[entry['color']]
+            entry['frequency_pct'] = round(100 * entry['games']/denominator, 1) if denominator else None
+        catalogued.sort(key=lambda x: (-x['games'], x['opening']))
         weak = sorted([r for r in repertoire if r['games'] >= minimum], key=lambda r: (r['score_pct'], -r['games']))[:10]
         timed = [m for m in clocks if m['spent'] is not None]
+        repertoire, catalogued = repertoire[:40], catalogued[:40]
+        mistakes = sorted(mistakes, key=lambda m: -m['loss'])[:100]
+        thinks = sorted(timed, key=lambda m: -m['spent'])[:10]
+        # Only the games something in the report actually points at travel with it: the
+        # scan may have read thousands, and the reader can only follow the ones on screen.
+        cited = {i for group in (patterns, repertoire, catalogued, weak) for entry in group for i in entry['evidence']}
+        cited.update(m['game_id'] for m in mistakes)
+        cited.update(m['game_id'] for m in thinks)
+        catalogue = {i: catalogue[i] for i in cited if i in catalogue}
         return dict(player=player, baseline=baseline, analyzed_games=len(scores), skipped=skipped,
                     evaluated_games=len(games_with_eval), clock_games=len(clock_games), minimum_games=minimum,
-                    patterns=patterns, repertoire=repertoire[:40], weakest_lines=weak,
+                    patterns=patterns, repertoire=repertoire, weakest_lines=weak, openings=catalogued,
+                    games=catalogue, collection=int(query['collection']) if query.get('collection') else None,
                     suggested_line=weak[0] if weak else None,
-                    accuracy=[dict(phase=k, moves=len(v), mean_cp_loss=round(sum(v)/len(v), 1)) for k,v in losses.items()],
+                    accuracy=[dict(phase=k, moves=len(v), mean_cp_loss=round(sum(v)/len(v), 1)) for k, v in losses.items()],
                     clocks=dict(moves=len(clocks), low_time_moves=sum(m['clock'] < 30 for m in clocks),
-                                measured_thinks=len(timed), longest_thinks=sorted(timed, key=lambda m: -m['spent'])[:10]),
-                    mistakes=sorted(mistakes, key=lambda m: -m['loss'])[:100],
+                                measured_thinks=len(timed), longest_thinks=thinks),
+                    mistakes=mistakes,
                     notes=['Scores count wins as 1 and draws as 0.5; unfinished games are excluded.',
                            'Intervals are conservative 95% bounds assuming independent games. Patterns are descriptive, not causal.',
                            'Evaluations require adjacent saved [%eval] annotations; mate scores are excluded.',
                            'Clock time uses consecutive same-player clocks and simple base+increment controls.',
+                           'Opening names come from the lichess CC0 opening index, applied to the moves actually played.',
                            'No population benchmark, theory departure or tactical motif is inferred.'])
 
     def drills(self, player):

@@ -28,3 +28,43 @@
   .scouting-print h2 { font-size: 13pt; margin-top: 12pt; }
   .scouting-print p { margin: 5pt 0; }
 }
+
+/* Player lab: evidence you can see. A line is a position, not a string of SAN, so
+   every claim in the report carries the board it was made on and clicks through to it. */
+.scouting-progress { list-style: none; margin: 4px 0 18px; padding: 0; display: grid; gap: 8px; font-size: 12px; }
+.scouting-progress li { display: flex; align-items: center; gap: 10px; color: var(--text-dim); }
+.scouting-progress li[data-state=done] { color: var(--text); }
+.scouting-progress-mark { width: 14px; height: 14px; border-radius: 50%; flex: none;
+  border: 2px solid var(--border); }
+.scouting-progress li[data-state=working] .scouting-progress-mark {
+  border-color: var(--accent); border-right-color: transparent; animation: scout-spin 900ms linear infinite; }
+.scouting-progress li[data-state=done] .scouting-progress-mark { border-color: var(--accent); background: var(--accent); }
+@keyframes scout-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .scouting-progress li[data-state=working] .scouting-progress-mark { animation: none; } }
+
+.scout-line { display: flex; gap: 16px; align-items: flex-start; padding: 14px 0;
+  border-bottom: 1px solid var(--border); }
+.scout-line:last-child { border-bottom: 0; }
+.scout-line-body { min-width: 0; flex: 1; }
+.scout-line-body h4 { margin: 0 0 4px; font: 15px Georgia, serif; color: var(--text-strong); }
+.scout-line-body p { margin: 4px 0; font-size: 12px; }
+.scout-thumb { width: 148px; aspect-ratio: 1; flex: none; }
+.scout-thumb-button { padding: 0; border: 1px solid var(--border); background: none;
+  border-radius: 6px; overflow: hidden; line-height: 0; flex: none; }
+.scout-thumb-button:hover { border-color: var(--accent); }
+.evidence-list { display: flex; flex-direction: column; gap: 3px; margin-top: 6px; font-size: 12px; }
+.evidence-list .linkish { border: 0; background: none; padding: 0; text-align: left;
+  color: var(--text-strong); text-decoration: underline dotted; }
+.evidence-list .linkish:hover { text-decoration: underline; }
+.scout-think .linkish { border: 0; background: none; padding: 0; color: var(--text-strong);
+  text-decoration: underline dotted; }
+@media (max-width: 700px) { .scout-line { flex-direction: column; } .scout-thumb { width: min(260px, 70vw); } }
+@media print { .scout-thumb-button, .scouting-progress { display: none !important; } }
+
+/* Popularity arrows: how often a move is played here, never an engine opinion. */
+.book-arrow-controls { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin: 10px 0; font-size: 12px; }
+.book-arrow-controls .field.compact { display: flex; align-items: center; gap: 6px; margin: 0; }
+.book-arrow-controls .field.compact select { padding: 5px 8px; }
+.book-arrow-note { flex-basis: 100%; }
+.cg-shapes .shape-book { opacity: .72; }
+.cg-shapes .shape-book-head { opacity: .72; }

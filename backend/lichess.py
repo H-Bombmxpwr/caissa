@@ -94,13 +94,16 @@ def _request(url, accept, token=None, throttle=None, timeout=120, retries=2, dat
             time.sleep(2 * attempt)
 
 
-def user_games(user, max_games=100, color=None, rated=None, perf=None, since=None, token=None):
+def user_games(user, max_games=100, color=None, rated=None, perf=None, since=None,
+               until=None, token=None):
     params = {
         "max": int(max_games),
         "moves": "true",
         "tags": "true",
-        "clocks": "false",
-        "evals": "false",
+        # Clock times and stored evaluations are what the Player Lab reads to find time
+        # trouble and costly moves; without them the export is a game list and no more.
+        "clocks": "true",
+        "evals": "true",
         "opening": "true",
         "sort": "dateDesc",
     }
@@ -112,6 +115,8 @@ def user_games(user, max_games=100, color=None, rated=None, perf=None, since=Non
         params["perfType"] = perf
     if since:
         params["since"] = int(since)
+    if until:
+        params["until"] = int(until)
     url = "%s/api/games/user/%s?%s" % (API, urllib.parse.quote(user), urllib.parse.urlencode(params))
     return _request(url, "application/x-chess-pgn", token=token)
 
@@ -119,8 +124,8 @@ def user_games(user, max_games=100, color=None, rated=None, perf=None, since=Non
 def _user_games_url(user, max_games=None, color=None, rated=None, perf=None, since=None,
                     until=None):
     params = {
-        "moves": "true", "tags": "true", "clocks": "false",
-        "evals": "false", "opening": "true", "sort": "dateDesc",
+        "moves": "true", "tags": "true", "clocks": "true",
+        "evals": "true", "opening": "true", "sort": "dateDesc",
     }
     if max_games:
         params["max"] = int(max_games)
@@ -160,6 +165,7 @@ def import_all_user_games(library, user, collection, token=None, batch_size=200,
 
     totals = {"added": 0, "duplicates": 0, "skipped": 0, "linked": 0}
     batch, chunk = [], []
+    landed = {}
 
     def flush():
         if not batch:
@@ -167,6 +173,7 @@ def import_all_user_games(library, user, collection, token=None, batch_size=200,
         result = library.add_games("\n\n".join(batch), collection=collection, source="lichess")
         for key in totals:
             totals[key] += result.get(key, 0)
+        landed.update(collection_id=result.get("collection_id"), collection=result.get("collection"))
         batch.clear()
         if progress:
             progress(totals["added"] + totals["duplicates"], 0)
@@ -197,6 +204,9 @@ def import_all_user_games(library, user, collection, token=None, batch_size=200,
         # Whatever arrived before the connection dropped is already saved.
         raise ConnectionError(str(err.reason)) from err
     totals["user"] = user
+    # The collection is what the caller indexes next, so it travels with the counts.
+    totals["collection"] = landed.get("collection", collection)
+    totals["collection_id"] = landed.get("collection_id")
     return totals
 
 

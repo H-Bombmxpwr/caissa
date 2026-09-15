@@ -132,6 +132,66 @@ class ScoutingTests(unittest.TestCase):
         self.assertEqual(clocks['moves'],2)
         self.assertEqual(clocks['measured_thinks'],1)
 
+    def test_openings_are_named_per_colour_with_their_own_share(self):
+        """What they open with, counted separately for each side of the board."""
+        for n in range(4):
+            self.add(date='2026.01.0%d' % (n + 1),
+                     moves='1. e4 c5 2. Nf3 d6 3. d4 cxd4 4. Nxd4 Nf6 5. Nc3 a6 1-0')
+        self.add(white='Bob', black='Alice', result='0-1', date='2026.02.01',
+                 moves='1. d4 Nf6 2. c4 g6 3. Nc3 Bg7 0-1')
+        openings = self.report()['openings']
+        white = [o for o in openings if o['color'] == 'w']
+        black = [o for o in openings if o['color'] == 'b']
+        self.assertEqual(len(white), 1)
+        self.assertIn('Sicilian', white[0]['opening'])
+        self.assertEqual(white[0]['games'], 4)
+        self.assertEqual(white[0]['frequency_pct'], 100)     # all four of her White games
+        self.assertEqual(white[0]['score_pct'], 100)
+        self.assertEqual(white[0]['moves'][:2], ['e4', 'c5'])
+        self.assertEqual(len(black), 1)
+        self.assertEqual(black[0]['games'], 1)
+        self.assertEqual(black[0]['score_pct'], 100)         # she won that one as Black
+
+    def test_lines_carry_the_position_they_reach(self):
+        """Every line the report offers has to be openable on a board."""
+        for n in range(3):
+            self.add(date='2026.01.0%d' % (n + 1),
+                     moves='1. e4 c5 2. Nf3 d6 3. d4 cxd4 4. Nxd4 Nf6 0-1', result='0-1')
+        line = self.report(min_games=2)['repertoire'][0]
+        board = Chess(line['fen'])
+        self.assertEqual(board.fen(), line['fen'])           # a legal, replayable position
+        self.assertEqual(line['line'].split(), line['moves'])
+        self.assertEqual(len(line['moves']), line['ply'])
+        replayed = Chess()
+        for san in line['moves']:
+            self.assertTrue(replayed.move(san))
+        self.assertEqual(replayed.fen(), line['fen'])
+
+    def test_mistakes_point_at_the_position_before_the_move(self):
+        ident = self.add(moves='{[%eval 0.20]} 1. e4 {[%eval 0.10]} e5 {[%eval 0.20]} '
+                               '2. Nf3 {[%eval -4.00]} Nc6 1-0')
+        mistake = self.report()['mistakes'][0]
+        self.assertEqual(mistake['game_id'], ident)
+        self.assertEqual(mistake['color'], 'w')
+        board = Chess(mistake['fen'])
+        self.assertTrue(board.move(mistake['san']))          # the move played is legal here
+        self.assertEqual(mistake['ply'], 2)                  # two half-moves came before it
+
+    def test_only_the_games_the_report_cites_travel_with_it(self):
+        for n in range(6):
+            self.add(date='2026.01.0%d' % (n + 1))
+        report = self.report()
+        cited = {i for group in ('patterns', 'repertoire', 'openings', 'weakest_lines')
+                 for entry in report[group] for i in entry['evidence']}
+        cited.update(m['game_id'] for m in report['mistakes'])
+        cited.update(m['game_id'] for m in report['clocks']['longest_thinks'])
+        self.assertTrue(cited)
+        self.assertEqual({int(i) for i in report['games']}, cited)
+        row = report['games'][cited.pop()]
+        self.assertEqual(sorted(row),
+                         ['black', 'color', 'date', 'eco', 'event', 'id', 'opening',
+                          'opponent', 'opponent_elo', 'result', 'speed', 'white'])
+
     def test_wrong_player_cannot_create_drill(self):
         ident=self.add()
         with self.assertRaisesRegex(ValueError,'played by'):

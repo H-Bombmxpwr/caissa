@@ -1,11 +1,11 @@
 # Player lab
 
-Player lab aggregates your local games into a scouting report. Enter the exact
-White or Black name from the PGN (case does not matter). You can also fetch the
-latest 100 public games through the existing Lichess or Chess.com importers.
-Imports go into a `Prep: handle` collection and use the normal import history.
-Use Online & imports for larger collections. Different handles are separate
-players; names are never matched by substring.
+Player lab aggregates games into a scouting report. Enter the exact White or Black
+name from the PGN (case does not matter). It can read games already in your library,
+or fetch them from Lichess or Chess.com first. **Build report** does the whole job in
+one run: fetch, index the new games so the opening explorer can read them, then build
+the report. Imports go into a `Prep: handle` collection and use the normal import
+history. Different handles are separate players; names are never matched by substring.
 
 ## What the two modes are for
 
@@ -30,10 +30,16 @@ finds the leak; the practice positions close it.
 
 1. Name the player. **Opponent prep** wants their exact PGN name or online handle;
    **My prep** fills in your linked Lichess username by itself.
-2. Choose **Local games** to use your library, or an online source to import the
-   latest 100 public games when you click **Build report**.
-3. Open evidence games to check patterns, then analyze a line or, in My prep, create
-   practice from a saved mistake.
+2. Choose where the games come from. **Games already in my library** uses what you
+   have; the two online sources fetch first.
+3. Set the fetch, if you are fetching. **Time control** narrows the fetch as well as the
+   report. **How many games** defaults to 100 and takes any number; tick **Every game on
+   the profile** for the whole account in that time control. Both dates are optional —
+   leave them empty for the newest games, or fill either one to restrict the window.
+4. **Build report**. Each stage reports what it did as it finishes.
+5. Click any board to open that position on the analysis board, open an evidence game,
+   or hand the collection to the opening explorer. In My prep, create practice from a
+   saved mistake.
 
 My prep fills your linked Lichess username from Settings. Online imports and
 Lichess trainer fields use the same default. You can edit the name, especially
@@ -47,12 +53,27 @@ Choose a speed, date range, and minimum number of completed games. A first repor
 replays the matching games; subsequent reports reuse a local cache. Changing the
 PGN, including its comments, invalidates that game's cache automatically.
 
-The report shows score (wins plus half of draws), pawn-structure and material
-patterns, game phases, frequently played opening positions, and low-scoring lines
-to investigate. Evidence buttons open source games. A game contributes once per
-pattern even if the position recurs. Transposed opening lines share a position
-key, with one representative move order displayed. Opening snapshots are taken
-after the player's fourth, eighth, and twelfth turns in ordinary games.
+The report shows score (wins plus half of draws), **what they open with**, low-scoring
+lines to investigate, pawn-structure and material patterns, game phases, move quality
+and clock pressure, and the mistakes behind them.
+
+Openings are named from the moves actually played, using the lichess CC0 opening index,
+and counted separately for each colour: the share is of that player's completed games
+with that colour, and the score is theirs. A game whose PGN carries no `Opening` tag is
+classified from its own first moves rather than left out of the count.
+
+Every line, opening and mistake carries the board it happened on. Clicking a board opens
+that position on the analysis board — a mistake opens its game at the move before the
+mistake, with the move played drawn as an arrow. Evidence buttons name the game and its
+date and open it.
+
+**Open in the opening explorer** hands the explorer the collection just built and the
+player's name, so the collection tree opens already reading their games.
+
+A game contributes once per pattern even if the position recurs. Transposed opening
+lines share a position key, with one representative move order displayed. Opening
+snapshots are taken after the player's fourth, eighth, and twelfth turns in ordinary
+games.
 
 Small samples remain visible and are labelled. Conservative 95% Hoeffding bounds
 describe uncertainty in the score under an independent-game assumption. Patterns
@@ -64,9 +85,10 @@ browser/system print dialog.
 
 ## Evaluations and clocks
 
-Move-quality statistics require adjacent saved numeric `[%eval]` comments.
-Use **Annotate game**, then **Save game**, on the analysis board. Scores are
-normalized to the mover's perspective and reported as mean centipawn loss, not
+Move-quality statistics require adjacent saved numeric `[%eval]` comments. Lichess
+exports carry both evaluations and clock times, so games fetched from Lichess arrive
+ready to read. For any other source, use **Annotate game**, then **Save game**, on the
+analysis board. Scores are normalized to the mover's perspective and reported as mean centipawn loss, not
 an invented accuracy percentage. Mate evaluations and missing pairs are excluded.
 The report includes coverage counts so unannotated games are not mistaken for
 error-free games. Phase labels use simple material/move-number rules.
@@ -84,7 +106,8 @@ A saved move losing at least 150 centipawns can become a practice position.
 **Create practice position** asks the local Stockfish for a best move and stores
 the source game, position, phase theme, PGN fingerprint, and answer in SQLite.
 This is a single-best-move exercise; another sound move may not match its answer.
-The report shows up to 100 mistakes, with practice buttons for the first 20.
+The report keeps up to 100 mistakes and shows the eight costliest, each with its board
+and a practice button.
 
 Enter SAN or coordinates in a due exercise. The server checks the move and
 schedules a retest: 1, 3, 9, 27, then 30 days after consecutive successes; a
@@ -94,12 +117,7 @@ source game deletes its exercises. Editing the source preserves older exercises
 as historical positions; newly created exercises use the edited PGN fingerprint.
 Success counts measure practice only, and never label a weakness “fixed.”
 
-## Human moves and visualization
-
-The human-move lookup takes a FEN and mover rating range. Index the relevant
-collections from Database first. It reports observed move frequency and White's
-score in your local indexed games, using the first occurrence of a repeated
-position per game. These are not population estimates or Maia predictions.
+## Visualization rating
 
 Blindfold training now shows a persistent experimental visualization practice
 rating. It starts at 1000, uses fixed level difficulty and a 24-point update

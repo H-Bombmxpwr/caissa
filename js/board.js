@@ -65,6 +65,7 @@
     this.checkSquare = null;
     this.customHighlights = {};
     this.answerHighlights = {};   // computed hints — never shown during a peek
+    this.bookShapes = [];      // database popularity, drawn dashed so it is never mistaken for analysis
     this.shapes = [];
     this.answerShapes = [];
     this.drag = null;
@@ -351,9 +352,12 @@
   };
 
   /* shapes: [{from,to,brand,label}] arrows or [{square,brand,label}] circles.
-     label is a short badge drawn in the destination square's corner. */
+     label is a short badge drawn in the destination square's corner.
+     opts.answer holds engine output, opts.book holds database frequencies; each layer
+     is replaced on its own so an engine arrow never wipes out a book arrow. */
   Board.prototype.setShapes = function (shapes, opts) {
-    if (opts && opts.answer) this.answerShapes = shapes || [];
+    if (opts && opts.book) this.bookShapes = shapes || [];
+    else if (opts && opts.answer) this.answerShapes = shapes || [];
     else this.shapes = shapes || [];
     this._renderShapes();
   };
@@ -370,9 +374,12 @@
     ['green', 'blue', 'red', 'yellow', 'purple'].forEach(function (c) {
       out += '<marker id="arrow-' + c + '" orient="auto" markerWidth="4" markerHeight="8" refX="2.05" refY="2.01">' +
         '<path d="M0,0 V4 L3,2 Z" class="shape-' + c + '"/></marker>';
+      out += '<marker id="book-' + c + '" orient="auto" markerWidth="5" markerHeight="10" refX="2.6" refY="2.51">' +
+        '<path d="M0,0 V5 L3.6,2.5 Z" class="shape-' + c + ' shape-book-head"/></marker>';
     });
     out += '</defs>';
-    let visible = this.peeking ? this.shapes : this.shapes.concat(this.answerShapes);
+    let visible = this.peeking ? this.shapes
+      : this.shapes.concat(this.bookShapes).concat(this.answerShapes);
     if (this.drawing) visible = visible.concat([this.drawing.from === this.drawing.to
       ? { square: this.drawing.from, brand: this.drawing.brand }
       : { from: this.drawing.from, to: this.drawing.to, brand: this.drawing.brand }]);
@@ -389,8 +396,12 @@
         let bx = x2 + 0.5, by = y2 + 0.5;
         const dx = bx - ax, dy = by - ay, len = Math.sqrt(dx * dx + dy * dy) || 1;
         bx -= (dx / len) * 0.3; by -= (dy / len) * 0.3;
-        out += '<line x1="' + ax + '" y1="' + ay + '" x2="' + bx + '" y2="' + by +
-          '" class="shape-' + brand + '" stroke-width="0.12" marker-end="url(#arrow-' + brand + ')"/>';
+        out += s.book
+          ? '<line x1="' + ax + '" y1="' + ay + '" x2="' + bx + '" y2="' + by +
+            '" class="shape-' + brand + ' shape-book" stroke-width="0.075" stroke-dasharray="0.16 0.09" ' +
+            'stroke-linecap="round" marker-end="url(#book-' + brand + ')"/>'
+          : '<line x1="' + ax + '" y1="' + ay + '" x2="' + bx + '" y2="' + by +
+            '" class="shape-' + brand + '" stroke-width="0.12" marker-end="url(#arrow-' + brand + ')"/>';
         out += badge(s.label, x2, y2, brand);
       }
     });

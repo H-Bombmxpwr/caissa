@@ -44,6 +44,19 @@ positions are stored under a transposition key.
 
 Moves are ordered by how often they were played, not by how well they did.
 
+### Popularity arrows
+
+**Popularity arrows** draws the most played continuations on the board, numbered 1 to 5
+in that order. Choose how many with the **Show** control beside the tick box; the choice
+is remembered.
+
+The arrows are dashed and thinner than the ones you draw or the ones the engine
+suggests, because they are a different kind of claim: they say what a database contains,
+not what the position deserves. Each tab draws its own — on **Collection tree** they come
+from the games you filtered above, on **Reference databases** from whichever reference is
+selected — so an arrow always belongs to the numbers next to it. They follow the board,
+and clear when you step to a position the database has nothing to say about.
+
 ## Filters
 
 Every filter narrows the whole report — the moves, the trend and the weakest lines all

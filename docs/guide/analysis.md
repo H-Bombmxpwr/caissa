@@ -37,6 +37,14 @@ another's, which is the whole point of numbering them on the board.
 Turn the arrows off with **Best move arrows**. **Add to tree** writes a line into the
 game as a real variation, up to ten moves of it.
 
+### Popularity arrows
+
+The **Opening book** panel draws arrows of its own, from whichever database it is
+reading: **Popularity arrows** ranks the most played continuations 1 to 5, and **Show**
+sets how many. They are dashed and thinner than the engine's, so the two can be on the
+board at once without being confused for each other — one says what is played here, the
+other says what the machine prefers. Hiding the panel clears them.
+
 ### The telemetry panel
 
 Under the controls is a grid of what the search and the machine are actually doing:

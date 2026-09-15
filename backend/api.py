@@ -4,6 +4,7 @@ Every handler returns (status, payload). Payloads are dicts (sent as JSON) or a
 (bytes, content_type) tuple for raw downloads.
 """
 
+import datetime
 import json
 import os
 import re
@@ -38,6 +39,26 @@ COLLECT_FILTERS = ('query', 'collection', 'player', 'white', 'black', 'eco', 'ec
 
 # What a collection can hold. The game database lists COLLECTION_KINDS[0] only.
 COLLECTION_KINDS = ('games', 'studies', 'openings')
+
+
+def _epoch_ms(value, end_of_day=False):
+    """lichess wants milliseconds; a person picking a date wants a date. Accepts both.
+
+    `end_of_day` makes an inclusive upper bound: "until 2024-06-30" should keep the
+    games played on the 30th rather than stopping at midnight that morning.
+    """
+    if value in (None, ''):
+        return None
+    text = str(value).strip()
+    if text.isdigit() and len(text) > 8:
+        return int(text)
+    try:
+        stamp = datetime.datetime.strptime(text.replace('.', '-')[:10], '%Y-%m-%d')
+    except ValueError:
+        return None
+    if end_of_day:
+        stamp += datetime.timedelta(days=1, milliseconds=-1)
+    return int(stamp.replace(tzinfo=datetime.timezone.utc).timestamp() * 1000)
 
 
 class ApiError(Exception):
@@ -97,7 +118,8 @@ class Api:
                 self.import_status = {'running': True, 'label': label, 'done': 0, 'total': 0,
                                       'added': 0, 'duplicates': 0, 'skipped': 0, 'error': None, 'batch_id': batch}
                 self._progress_offset = self._progress_last = 0
-                self._progress_streaming = (head == 'import' and (rest[1:] != ['lichess'] or bool((body or {}).get('all')))) or head == 'lichess'
+                whole_account = bool((body or {}).get('all')) or str((body or {}).get('max', '')) in ('0', 'all')
+                self._progress_streaming = (head == 'import' and (rest[1:] != ['lichess'] or whole_account)) or head == 'lichess'
                 self.library.on_progress = self._import_progress
                 try:
                     status, payload = handler(method, rest[1:], query, body)
@@ -510,8 +532,12 @@ class Api:
                         raise ApiError('Give a local path or download URL')
                     return 200, importers.import_source(self.library, source, body.get('collection') or 'My games')
                 user = str(body.get('user', '')).strip()
+                # 0 (or "all") means the whole account; anything else is a game count.
+                wanted = body.get('max', 100)
+                wanted = 0 if wanted in (0, '0', 'all', None, '') else max(1, int(wanted))
                 return 200, importers.chesscom(self.library, user, body.get('collection') or 'chess.com imports',
-                                              max(1, min(int(body.get('max', 100)), 2000)))
+                                               wanted, perf=body.get('perf'), since=body.get('since'),
+                                               until=body.get('until'))
             except OSError as err:
                 raise ApiError('Could not import source: '+str(err), 503) from err
             finally:
@@ -529,9 +555,9 @@ class Api:
                     self.library.setting("lichess_token", body["token"])
                 collection = body.get("collection") or "lichess imports"
                 selection = {"color": body.get("color"), "rated": body.get("rated"),
-                             "perf": body.get("perf"), "since": body.get("since"),
-                             "until": body.get("until")}
-                if body.get("all"):
+                             "perf": body.get("perf"), "since": _epoch_ms(body.get("since")),
+                             "until": _epoch_ms(body.get("until"), end_of_day=True)}
+                if body.get("all") or str(body.get("max", "")) in ("0", "all"):
                     # No ceiling and no idea how many are coming, so it is streamed
                     # and written in batches rather than held in memory.
                     return 200, lichess.import_all_user_games(
@@ -541,7 +567,7 @@ class Api:
                     user,
                     max_games=max(1, int(body.get("max", 100))),
                     token=token,
-                    **{k: v for k, v in selection.items() if k != "until"},
+                    **selection,
                 )
                 result = self.library.add_games(pgn, collection=collection, source="lichess")
                 result["user"] = user

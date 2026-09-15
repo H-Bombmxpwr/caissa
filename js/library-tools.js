@@ -59,6 +59,47 @@
     }
     await refreshShelf().catch(e=>shelf.replaceChildren(h('p.error-message',{text:e.message})));
   }
+  /* Arrows for whatever database is on screen.
+
+     The board already draws two kinds of arrow: the ones you draw yourself and the
+     ones the engine suggests. A third kind — how often a move is actually played —
+     is a different sort of claim, so it is drawn dashed and thinner, and ranked:
+     arrow 1 is the most played continuation in the database being read, not the best
+     move in the position. Nothing here consults an engine. */
+  const BOOK_BRANDS=['green','blue','purple','yellow','red'];
+  const MAX_BOOK_ARROWS=5;
+  function remembered(key,fallback){
+    try{const saved=localStorage.getItem('caissa-'+key);return saved===null?fallback:JSON.parse(saved);}
+    catch(err){return fallback;}
+  }
+  function remember(key,value){
+    try{localStorage.setItem('caissa-'+key,JSON.stringify(value));}catch(err){/* private mode */}
+  }
+  function bookShapes(fen,moves,limit){
+    const ranked=[...(moves||[])].sort((a,b)=>(b.games||0)-(a.games||0)).slice(0,limit);
+    const out=[];
+    ranked.forEach((m,i)=>{
+      let played=null;
+      try{played=new Chess(fen).move(m.san);}catch(err){played=null;}
+      if(played)out.push({from:played.from,to:played.to,brand:BOOK_BRANDS[i%BOOK_BRANDS.length],
+                          label:String(i+1),book:true});
+    });
+    return out;
+  }
+  function arrowControls(key,onChange){
+    const {h,select}=get();
+    const toggle=h('input',{type:'checkbox',checked:remembered(key+'-on',true)===true});
+    const count=select(Array.from({length:MAX_BOOK_ARROWS},(_,i)=>[String(i+1),(i+1)+(i?' arrows':' arrow')]),
+                       String(remembered(key+'-count',3)));
+    toggle.addEventListener('change',()=>{remember(key+'-on',toggle.checked);count.disabled=!toggle.checked;onChange();});
+    count.addEventListener('change',()=>{remember(key+'-count',Number(count.value));onChange();});
+    count.disabled=!toggle.checked;
+    const node=h('div.book-arrow-controls',[
+      h('label.toolbar',[toggle,'Popularity arrows']),
+      h('label.field.compact',[h('span',{text:'Show'}),count]),
+      h('span.muted.book-arrow-note',{text:'Dashed and numbered by how often the move is played here — not an engine opinion.'})]);
+    return {node,shapes(fen,moves){return toggle.checked?bookShapes(fen,moves,Number(count.value)):[];}};
+  }
   function indexControls(){
     const {h,api,button,select,field}=get();
     const choice=select([['','Choose collection']],'');const status=h('p.muted',{role:'status'});
@@ -66,9 +107,11 @@
     api('collections').then(d=>choice.append(...d.collections.map(c=>h('option',{value:c.id,text:c.name+' ('+c.games+')'})))).catch(e=>status.textContent=e.message);
     return root;
   }
-  function openingPanel(getFen,onMove){
+  function openingPanel(getFen,onMove,onArrows){
     const {h,api,button,field,select}=get();
-    let shown={fen:null,sans:[]};
+    let shown={fen:null,sans:[]},latest={fen:null,moves:[]};
+    const arrows=arrowControls('book-arrows',()=>draw());
+    function draw(){if(onArrows)onArrows(latest.fen===getFen()?arrows.shapes(latest.fen,latest.moves):[]);}
     const source=select([['bundled','Included book — Lichess Elite (offline)'],['local','My indexed games (offline)'],['masters','Lichess Masters — deep reference'],['lichess','Lichess rated games — broad reference']],'bundled');
     const choice=select([['','All indexed collections']],'');const output=h('div');let request=0,timer;
     const since=h('input',{type:'text',placeholder:'e.g. 2000 (Masters) or 2020-01 (Lichess)'}),until=h('input',{type:'text',placeholder:'Latest available'});
@@ -76,7 +119,9 @@
     const speeds=select([['','All time controls'],['rapid,classical','Rapid & classical'],['blitz','Blitz'],['classical','Classical']],'');
     const signin=h('p.muted',{hidden:true,text:'Lichess now requires a signed-in account on its opening explorer. Connect your lichess account in Settings — any token will do; no extra permission is needed.'});
     const online=h('div',{hidden:true},[signin,field('From year / month',since),field('Through year / month',until),field('Lichess rating bands',ratings),field('Lichess time controls',speeds)]);
-    const root=h('div.card-pad',[field('Reference database',source),field('Opening-book source',choice),online,button('Refresh opening book',refresh),h('p.muted',{text:'Explore as deep as the database has games: no fixed move-depth cutoff. Online positions are cached in your library. White / draw / Black statistics are game results, not engine evaluations.'}),output]);
+    const root=h('div.card-pad',[field('Reference database',source),field('Opening-book source',choice),online,
+      h('div.toolbar',[button('Refresh opening book',refresh)]),arrows.node,
+      h('p.muted',{text:'Explore as deep as the database has games: no fixed move-depth cutoff. Online positions are cached in your library. White / draw / Black statistics are game results, not engine evaluations.'}),output]);
     api('collections').then(d=>choice.append(...d.collections.map(c=>h('option',{value:c.id,text:c.name})))).catch(()=>{});
     choice.addEventListener('change',refresh);
     choice.disabled=true;
@@ -86,7 +131,7 @@
     function refresh(){clearTimeout(timer);const id=++request;timer=setTimeout(()=>load(id),250);}
     async function load(id){const fen=getFen();output.textContent='Reading opening book…';try{
       const data=await api('book?'+new URLSearchParams({fen,collection:choice.value,source:source.value,since:since.value,until:until.value,ratings:ratings.value,speeds:speeds.value}));if(id!==request||fen!==getFen())return;
-      shown={fen,sans:data.moves.map(m=>m.san)};
+      shown={fen,sans:data.moves.map(m=>m.san)};latest={fen,moves:data.moves};draw();
       output.replaceChildren();const total=data.moves.reduce((n,m)=>n+m.games,0);
       if(data.book)output.append(h('p',{text:data.book.title+' · Included offline · '+data.book.games.toLocaleString()+' source games · '+data.book.positions.toLocaleString()+' positions · through '+data.book.max_plies/2+' moves · continuations seen in at least '+data.book.min_games+' games'}));
       else if(data.source)output.append(h('p',{text:(data.source==='masters'?'Lichess Masters':'Lichess rated games')+' · '+(data.total||0).toLocaleString()+' games'+(data.stale?' · Offline fallback: older cached results':data.cached?' · Saved reference':' · Online reference')}));
@@ -96,7 +141,7 @@
       for(const g of data.games)output.append(button(g.white+' — '+g.black+' · '+g.date,()=>ui.openGame(g.id)));
       for(const g of data.reference_games||[])output.append(h('a.btn',{href:'https://lichess.org/'+(data.source==='masters'?'study/master/':'')+encodeURIComponent(g.id),target:'_blank',rel:'noopener',text:(g.white?.name||'White')+' — '+(g.black?.name||'Black')+' · '+(g.year||'')+' · Open reference game'}));
     }catch(e){if(id===request)output.textContent=e.message;}}
-    return {root,refresh,listed:()=>shown};
+    return {root,refresh,listed:()=>shown,redraw:draw,clearArrows(){latest={fen:null,moves:[]};if(onArrows)onArrows([]);}};
   }
   /* One player's openings, scored from that player's side of the board.
 
@@ -105,8 +150,11 @@
      strongest player in an imported collection. The score, the win/draw/loss bar and
      the trend all belong to that player. It reads the position index, so a collection
      must be indexed before it has anything to say. */
-  function openingReport(getFen,onMove,onLine){
+  function openingReport(getFen,onMove,onLine,onArrows,prefill){
     const {h,api,button,field,select}=get();
+    let latest={fen:null,moves:[]};
+    const arrows=arrowControls('tree-arrows',()=>draw());
+    function draw(){if(onArrows)onArrows(latest.fen===getFen()?arrows.shapes(latest.fen,latest.moves):[]);}
     const collection=select([['','Every indexed collection']],'');
     const names=h('datalist',{id:'tree-player-names'});
     const player=h('input',{placeholder:'Player name, as it appears in the games',list:'tree-player-names',autocomplete:'off'});
@@ -167,7 +215,7 @@
     }
 
     function showMoves(data){
-      shown={fen:data.fen,sans:data.moves.map(m=>m.san)};
+      shown={fen:data.fen,sans:data.moves.map(m=>m.san)};latest={fen:data.fen,moves:data.moves};draw();
       movesBody.replaceChildren();
       if(!data.moves.length){
         movesBody.append(h('p.muted',{text:'Nothing was played from here in the indexed games.'}));
@@ -251,7 +299,12 @@
     }
     api('collections').then(d=>{
       collection.append(...d.collections.map(c=>h('option',{value:c.id,text:c.name+' · '+c.games+' games'})));
+      // A report handed over from the Player Lab already knows whose games these are.
+      if(prefill&&prefill.collection&&d.collections.some(c=>String(c.id)===String(prefill.collection)))
+        collection.value=String(prefill.collection);
+      if(prefill&&prefill.player)player.value=prefill.player;
       suggest();
+      if(prefill&&(prefill.collection||prefill.player))refreshAll();
     }).catch(()=>{});
     collection.addEventListener('change',async()=>{
       shown={fen:null,sans:[]};
@@ -272,7 +325,7 @@
     const root=h('div',[
       h('div.card-pad',[
         h('p.muted',{text:'One player’s games, scored from that player’s side of the board. Name the player below — yourself, or whoever the collection is of — and every figure reads as their result rather than White’s. Leave it empty to read the collection from White’s side. Needs an indexed collection.'}),
-        field('Collection',collection),names,field('Player',player),
+        field('Collection',collection),names,field('Player',player),arrows.node,
         h('div.toolbar',[field('Colour',colour),field('Time control',speed),field('Rated',rated)]),
         h('div.toolbar',[field('From',since),field('Until',until)]),
         h('div.toolbar',[field('Opponent rating from',minElo),field('Opponent rating to',maxElo)]),
@@ -283,7 +336,8 @@
         field('Only lines with',minGames),weakBody]),
     ]);
     refreshAll();
-    return {root,refresh:refreshAll,player,collection,listed:()=>shown};
+    return {root,refresh:refreshAll,player,collection,listed:()=>shown,redraw:draw,
+            clearArrows(){latest={fen:null,moves:[]};if(onArrows)onArrows([]);}};
   }
   async function openingView(content){
     const {h,button,heading}=get();let game=new Chess();const history=[];
@@ -291,8 +345,12 @@
     const holder=h('div.board-holder'),board=new Board(holder,
       {viewOnly:false,orientation:ui.explorerOrientation?.()||'w'});
     const line=h('p');
-    const panel=openingPanel(()=>game.fen(),play);
-    const report=openingReport(()=>game.fen(),play,replay);
+    // Only the tab you are reading may draw on the board, so the arrows always belong
+    // to the database named above them.
+    const paint=owner=>shapes=>{if(showing===owner)board.setShapes(shapes,{book:true});};
+    const panel=openingPanel(()=>game.fen(),play,paint('Reference databases'));
+    const report=openingReport(()=>game.fen(),play,replay,paint('Collection tree'),
+                               ui.explorerPrefill?ui.explorerPrefill():null);
     // Two readings of the same board: the reference, and your own results.
     const tabs=h('div.context-tabs');
     const pane=h('div');
@@ -300,7 +358,8 @@
     function choose(name){showing=name;
       tabs.querySelectorAll('button').forEach(b=>b.classList.toggle('active',b.textContent===name));
       pane.replaceChildren(name==='Collection tree'?report.root:panel.root);
-      refresh();}
+      board.setShapes([],{book:true});
+      refresh();(name==='Collection tree'?report:panel).redraw();}
     for(const name of ['Collection tree','Reference databases'])
       tabs.append(h('button',{type:'button',text:name,onclick:()=>choose(name)}));
     function play(input){const moved=game.move(input);if(!moved)throw new Error('Illegal book move');
@@ -321,6 +380,7 @@
     const played=[];                       // the SAN of the line currently on the board
     function render(){
       board.setPosition(game);
+      board.setShapes([],{book:true});   // the old position's arrows are not this position's
       board.setMovable({color:game.turnColor(),dests:game.destinationsMap(),
         onMove:(from,to)=>play({from,to,promotion:'q'})});
       line.replaceChildren(played.length

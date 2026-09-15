@@ -46,9 +46,13 @@ with tempfile.TemporaryDirectory(prefix='caissa-scout-') as data:
             page.get_by_label('Report',exact=True).select_option('self')
             expect(player).to_have_value('Alice')
             page.get_by_label('Games',exact=True).select_option('chesscom')
-            expect(player).to_have_value('')
+            expect(player).to_have_value('Alice')
+            expect(page.get_by_label('How many games',exact=True)).to_be_visible()
+            page.get_by_label('Games',exact=True).select_option('lichess')
+            expect(player).to_have_value('Alice')
             page.get_by_label('Games',exact=True).select_option('local')
             expect(player).to_have_value('Alice')
+            expect(page.get_by_label('How many games',exact=True)).to_be_hidden()
             player.fill('Local Alias')
             page.evaluate("CaissaAccount.set({connected:true,username:'NewHandle'})")
             expect(player).to_have_value('Local Alias')
@@ -61,6 +65,15 @@ with tempfile.TemporaryDirectory(prefix='caissa-scout-') as data:
             page.get_by_role('heading',name='Scouting report: Alice').wait_for()
             assert '220 centipawns lost' in page.locator('.scouting-report').inner_text()
             assert '1 completed games' in page.locator('.scouting-report').inner_text()
+            # One run, and the whole report is there — including the boards behind it.
+            expect(page.get_by_role('heading',name='What they open with')).to_be_visible()
+            expect(page.get_by_role('heading',name='Mistakes to revisit')).to_be_visible()
+            assert 'What people at a rating' not in page.locator('.scouting-report').inner_text()
+            thumbs=page.locator('.scout-thumb')
+            assert thumbs.count(), 'every claim in the report carries its board'
+            assert page.locator('.scout-thumb .cg-board').count()==thumbs.count(), \
+                'thumbnails are drawn on arrival, not when something else happens first'
+            assert page.locator('.evidence-list .linkish').first.inner_text().startswith('Alice')
             printed=page.pdf(format='A4')
             assert len(re.findall(rb'/Type\s*/Page\b',printed))==1, 'Prep sheet must fit one page for this fixture'
             page.get_by_role('button',name='Create practice position',exact=True).click()
@@ -68,10 +81,17 @@ with tempfile.TemporaryDirectory(prefix='caissa-scout-') as data:
             page.get_by_label('Your move',exact=True).fill('d4')
             page.get_by_role('button',name='Check move',exact=True).click()
             page.wait_for_function("document.querySelector('.scouting-drill input[disabled]')")
-            page.get_by_role('button',name='Find human moves').click()
-            page.get_by_text('0 matching indexed games',exact=True).wait_for()
+            # The explorer is handed the player the report was about.
+            page.get_by_role('button',name='Open in the opening explorer',exact=True).click()
+            page.wait_for_selector('.opening-grid')
+            expect(page.get_by_label('Player',exact=True)).to_have_value('Alice')
+            expect(page.locator('.book-arrow-controls')).to_be_visible()
+            page.evaluate("async()=>await Caissa.go('scouting')")
+            page.get_by_label('Player',exact=True).fill('Alice')
+            page.get_by_role('button',name='Build report',exact=True).click()
+            page.get_by_role('heading',name='Scouting report: Alice').wait_for()
             # Open evidence and exercise the real board input.
-            page.locator('.scouting-report').get_by_role('button',name='Game 1',exact=True).first.click()
+            page.locator('.evidence-list .linkish').first.click()
             page.wait_for_selector('.analysis-board')
             page.screenshot(path=str(ROOT/'tmp'/'scouting-analysis.png'))
             wrap=page.locator('.analysis-board .cg-wrap')

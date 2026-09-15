@@ -473,7 +473,13 @@
     return Object.entries(parsed.headers).map(([k,v])=>'['+k+' "'+esc(v)+'"]').join('\n')+'\n\n'+comment(parsed.root)+' '+branch(parsed.root)+' '+(parsed.headers.Result||'*')+'\n';
   }
   function newGame() {state.selected=null;state.parsed=PGN.parse('[Event "Study"]\n[White "White"]\n[Black "Black"]\n[Result "*"]\n\n*');state.node=state.parsed.root;state.dirty=false;activeBoard();}
-  async function openGame(id) {
+  // A fresh board holding one position, for a line that belongs to no saved game.
+  function analyzeFen(fen){
+    stashBoard();state.boards.splice(++state.boardIndex,0,makeBoard());adoptBoard(state.boardIndex);
+    state.parsed=PGN.parse('[Event "Opening exploration"]\n[White "White"]\n[Black "Black"]\n[SetUp "1"]\n[FEN "'+fen+'"]\n[Result "*"]\n\n*');
+    state.node=state.parsed.root;state.selected=null;state.dirty=true;stashBoard();return go('analysis');
+  }
+  async function openGame(id,ply) {
     const {game}=await api('games/'+id);const parsed=PGN.parse(game.pgn);
     if(parsed.errors.length)throw new Error('This PGN contains unrecognized moves: '+parsed.errors.slice(0,5).join(', '));
     // A tab already holding work of its own steps aside; an untouched one is reused.
@@ -483,7 +489,12 @@
     // and without this the analysis board would believe the game has no opening at all.
     if(!parsed.headers.Opening&&game.opening)parsed.headers.Opening=game.opening;
     if(!parsed.headers.ECO&&game.eco)parsed.headers.ECO=game.eco;
-    state.selected=game;state.parsed=parsed;state.node=parsed.root;state.dirty=false;stashBoard();
+    state.selected=game;state.parsed=parsed;state.dirty=false;
+    // A report points at one position in the game. Landing on move one and asking the
+    // reader to find it again would waste the only thing the report knew.
+    state.node=parsed.root;
+    if(ply>0){let node=parsed.root;for(let i=0;i<ply&&node.children.length;i++)node=node.children[0];state.node=node;}
+    stashBoard();
     await go('analysis');
   }
   /* ---------- analysis boards ---------- */
@@ -549,7 +560,10 @@
     if(App.cleanup){App.cleanup();App.cleanup=null;App.peek.end();}
     content.dataset.view=view;location.hash='workspace/'+view;content.replaceChildren(h('p.muted',{text:'Opening your workspace…'}));
     try {await refreshMeta();if(ticket!==state.route)return;content.replaceChildren();
-      await ({computer:()=>{state.analysisCleanup=ComputerPlay.mount(content,{h,button,field,select,api,heading,resizeBoard,promote:choose=>modal('Promote pawn',(body,close)=>body.append(h('div.toolbar',['q','r','b','n'].map(p=>button(p.toUpperCase(),()=>{close();choose(p);}))))),analyze:pgn=>{stashBoard();state.boards.splice(++state.boardIndex,0,makeBoard());adoptBoard(state.boardIndex);state.parsed=PGN.parse(pgn);state.node=state.parsed.root;state.selected=null;state.dirty=true;stashBoard();return go('analysis');}});},scouting:()=>ScoutingView(content,{h,button,field,select,api,heading,openGame}),database:database,analysis:analysis,repertoire:repertoires,masters:masters,imports:imports,studies:studies,tactics:tactics,settings:settings,books:()=>LibraryTools.booksView(content),openingbook:()=>LibraryTools.openingView(content)}[view]||database)();
+      await ({computer:()=>{state.analysisCleanup=ComputerPlay.mount(content,{h,button,field,select,api,heading,resizeBoard,promote:choose=>modal('Promote pawn',(body,close)=>body.append(h('div.toolbar',['q','r','b','n'].map(p=>button(p.toUpperCase(),()=>{close();choose(p);}))))),analyze:pgn=>{stashBoard();state.boards.splice(++state.boardIndex,0,makeBoard());adoptBoard(state.boardIndex);state.parsed=PGN.parse(pgn);state.node=state.parsed.root;state.selected=null;state.dirty=true;stashBoard();return go('analysis');}});},scouting:()=>ScoutingView(content,{h,button,field,select,api,heading,openGame,go,card,empty,analyzeFen,
+        // Hand the freshly built prep collection to the explorer instead of making
+        // the reader find it in a drop-down again.
+        openExplorer:prefill=>{state.explorerPrefill=prefill||null;return go('openingbook');}}),database:database,analysis:analysis,repertoire:repertoires,masters:masters,imports:imports,studies:studies,tactics:tactics,settings:settings,books:()=>LibraryTools.booksView(content),openingbook:()=>LibraryTools.openingView(content)}[view]||database)();
     }catch(err){if(ticket===state.route)content.replaceChildren(h('div.view-error',[h('h2',{text:'Could not open this view'}),h('p.error-message',{text:err.message}),button('Try again',()=>go(view))]));}
   }
   async function database() {
@@ -661,7 +675,11 @@
     panel('context','Position context',h('div',[contextTabs,contextBody]));
     panel('tablebase','Endgame tablebase',h('div',[h('label.toolbar.card-pad',[tablebaseToggle,'Show exact endgame results (online)']),tablebaseBody]));
     const reader=LibraryTools.pdfReader();panel('books','Books',reader.root);
-    const openingBook=LibraryTools.openingPanel(()=>state.node.fenAfter,play);
+    // Popularity arrows are the book's, drawn dashed so they never read as engine output.
+    const openingBook=LibraryTools.openingPanel(()=>state.node.fenAfter,play,
+      // The panel is built before the board is, and asks to clear its arrows as the
+      // layout is applied; there is nothing to clear until the board exists.
+      shapes=>{if(board)board.setShapes(layout.hidden.includes('openingbook')?[]:shapes,{book:true});});
     panel('openingbook','Opening book',h('div',[openingBook.root,LibraryTools.indexControls()]));
     const tablebaseCard=built.tablebase.node;
     const dockMain=h('div.dock.dock-main'),dockSide=h('div.dock.dock-side'),dockWide=h('div.dock.dock-wide');
@@ -682,7 +700,7 @@
         h('button.panel-btn',{type:'button',text:'✕',title:'Hide this panel','aria-label':'Hide '+title,
           onclick:()=>{if(!layout.hidden.includes(id))layout.hidden.push(id);applyLayout();}})]);
     }
-    function applyLayout(){if(!layout.hidden.includes('openingbook'))openingBook.refresh();dockWide.replaceChildren(...layout.wide.filter(id=>!layout.hidden.includes(id)).map(id=>built[id].node));
+    function applyLayout(){if(!layout.hidden.includes('openingbook'))openingBook.refresh();else openingBook.clearArrows();dockWide.replaceChildren(...layout.wide.filter(id=>!layout.hidden.includes(id)).map(id=>built[id].node));
       for(const where of ['main','side']){
         const dock=where==='main'?dockMain:dockSide;
         dock.replaceChildren(...layout[where].filter(id=>!layout.hidden.includes(id)&&!layout.wide.includes(id)).map(id=>built[id].node));
@@ -785,7 +803,7 @@
         body.append(h('div.dialog-actions',[button('Cancel',close)]));
       });
     }
-    function render(){if(!layout.hidden.includes('openingbook'))openingBook.refresh();const g=new Chess(state.node.fenAfter);board.setPosition(g);board.setLastMove(state.node.move?[state.node.move.from,state.node.move.to]:null);board.setMovable({color:g.turnColor(),dests:g.destinationsMap(),onMove:(from,to)=>{const p=g.get(from);if(p?.type==='p'&&/[18]$/.test(to)){modal('Promote pawn',(body,close)=>body.append(h('div.toolbar',['q','r','b','n'].map(promo=>button(promo.toUpperCase(),()=>{close();play({from,to,promotion:promo});})))));}else play({from,to});}});comment.value=state.node.comment||'';nag.value=state.node.nags[0]||'';fen.textContent=state.node.fenAfter;latestLines=[];board.setShapes(state.node.shapes||[]);drawBest();renderTablebase();renderMoves();renderContext();clearTimeout(liveTimer);if(live)liveTimer=setTimeout(evaluate,350);}
+    function render(){if(!layout.hidden.includes('openingbook'))openingBook.refresh();const g=new Chess(state.node.fenAfter);board.setPosition(g);board.setLastMove(state.node.move?[state.node.move.from,state.node.move.to]:null);board.setMovable({color:g.turnColor(),dests:g.destinationsMap(),onMove:(from,to)=>{const p=g.get(from);if(p?.type==='p'&&/[18]$/.test(to)){modal('Promote pawn',(body,close)=>body.append(h('div.toolbar',['q','r','b','n'].map(promo=>button(promo.toUpperCase(),()=>{close();play({from,to,promotion:promo});})))));}else play({from,to});}});comment.value=state.node.comment||'';nag.value=state.node.nags[0]||'';fen.textContent=state.node.fenAfter;latestLines=[];board.setShapes(state.node.shapes||[]);board.setShapes([],{book:true});drawBest();renderTablebase();renderMoves();renderContext();clearTimeout(liveTimer);if(live)liveTimer=setTimeout(evaluate,350);}
     // One brand per engine line, so a line's arrow, its border and its score all
     // carry the same colour. Map before filtering: a line with no PV still owns its slot.
     function brandFor(i){return ['green','blue','red','yellow','purple'][i%5];}
@@ -1330,11 +1348,10 @@
       h('label.toolbar',[everything,'Import every game on the account']),maxField,tokenField,tokenNote,
       button('Import account games',async()=>{
         if(!online_collection.value.trim())throw new Error('Name the collection these games should go into.');
-        if(everything.checked&&source.value!=='lichess')throw new Error('Importing every game is a lichess export. For chess.com, set a maximum.');
         onlineStatus.textContent=everything.checked?'Downloading every game — this can take a while for a large account…':'Downloading games…';
         watchImport();
         const result=await api('import/'+source.value,{user:user.value,all:everything.checked,
-          max:Number(max.value),token:token.value,collection:online_collection.value.trim()});
+          max:everything.checked?0:Number(max.value),token:token.value,collection:online_collection.value.trim()});
         onlineStatus.textContent=`Added ${result.added} games · ${result.duplicates} duplicates`
           +(result.linked?` · ${result.linked} linked from other collections`:'');
       },'primary'),onlineStatus,
@@ -1565,10 +1582,9 @@
       // The explorer keeps its own orientation, separate from the analysis board's.
       explorerOrientation:()=>state.prefs.explorerOrientation||state.prefs.orientation||'w',
       saveExplorerOrientation:act(async side=>{state.prefs.explorerOrientation=side;await savePrefs();}),
-      analyzeFen:fen=>{
-      stashBoard();state.boards.splice(++state.boardIndex,0,makeBoard());adoptBoard(state.boardIndex);
-      state.parsed=PGN.parse('[Event "Opening exploration"]\n[White "White"]\n[Black "Black"]\n[SetUp "1"]\n[FEN "'+fen+'"]\n[Result "*"]\n\n*');state.node=state.parsed.root;state.selected=null;state.dirty=true;stashBoard();return go('analysis');
-    }});
+      // Read once and cleared: a prefill belongs to the trip that carried it.
+      explorerPrefill:()=>{const carried=state.explorerPrefill;state.explorerPrefill=null;return carried;},
+      analyzeFen});
     const initial=location.hash;const originalGo=go; // App boots first so the original trainer stays intact.
     const root=document.getElementById('workspace');nav=h('nav.module-nav',{'aria-label':'Workspace'});
     modules.forEach(([id,icon,title])=>{const b=h('button',{onclick:()=>{if(state.analysisCleanup){state.analysisCleanup();state.analysisCleanup=null;}go(id);}},[h('span',{'aria-hidden':true,text:icon}),title]);b.dataset.view=id;nav.append(b);});

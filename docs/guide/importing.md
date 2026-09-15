@@ -77,7 +77,10 @@ https://theweekinchess.com/...zip  downloaded and streamed
 
 **Your online games** imports from lichess or chess.com by username. A lichess token is
 optional here but makes rate limits kinder, and if you have connected your account in
-Settings the stored token is used automatically.
+Settings the stored token is used automatically. **Import every game on the account**
+works for both services; without it, set a maximum. Lichess exports arrive with their
+clock times and stored evaluations, which is what the Player Lab reads to find time
+trouble and costly moves.
 
 ### Following an import
 

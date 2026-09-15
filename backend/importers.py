@@ -187,21 +187,59 @@ def import_source(library, source, collection):
             os.remove(path)
     return import_local(library, os.path.abspath(os.path.expanduser(source)), collection)
 
-def chesscom(library, user, collection, maximum=100):
+def _month_key(value):
+    """A YYYY-MM sort key from a date, or None. Accepts 2024-06-01 and 2024.06.01."""
+    if not value:
+        return None
+    digits = re.match(r'(\d{4})[-./](\d{1,2})', str(value).strip())
+    return '%s-%02d' % (digits[1], int(digits[2])) if digits else None
+
+
+def chesscom(library, user, collection, maximum=100, perf=None, since=None, until=None):
+    """Import a chess.com account, newest game first.
+
+    `maximum` of 0 means every game the account has. `perf` narrows to one time control
+    — bullet, blitz, rapid, classical or correspondence — and `since`/`until` are ISO
+    dates: whole months outside the range are never fetched, which is what keeps "every
+    rapid game this year" from downloading a decade.
+    """
     if not re.fullmatch(r'[A-Za-z0-9_-]{1,100}', user):
         raise ValueError('Give a valid chess.com username')
+    # chess.com's own brackets disagree with the library's at the edges — it calls a
+    # 30-minute game rapid, and its slowest bracket "daily" — so the time control is
+    # read from each game's own PGN with the same rule the index uses. The fetch and
+    # the report that follows it then describe exactly the same set of games.
+    speed = (perf or '').strip().lower() or None
+    first, last = _month_key(since), _month_key(until)
     base = 'https://api.chess.com/pub/player/'+urllib.parse.quote(user.lower())+'/games/archives'
     archives = json.loads(lichess._request(base, 'application/json'))['archives']
-    total, remaining = dict(added=0, duplicates=0, skipped=0, linked=0), maximum
+    total = dict(added=0, duplicates=0, skipped=0, linked=0)
+    remaining = maximum if maximum and maximum > 0 else None
+    collection_id = None
     for archive in reversed(archives):
         if not archive.startswith('https://api.chess.com/pub/player/'):
             continue
+        month = _month_key('-'.join(archive.rsplit('/', 2)[-2:]))
+        if (first and month and month < first) or (last and month and month > last):
+            continue
         games = json.loads(lichess._request(archive, 'application/json')).get('games', [])
-        pgns = [g['pgn'] for g in reversed(games) if g.get('pgn') and g.get('rules','chess')=='chess'][:remaining]
+        pgns = [g['pgn'] for g in reversed(games)
+                if g.get('pgn') and g.get('rules', 'chess') == 'chess'
+                and (not speed or pgnutil.speed_of(
+                    pgnutil.headers(g['pgn']).get('TimeControl')) == speed)]
+        if remaining is not None:
+            pgns = pgns[:remaining]
+        if not pgns:
+            continue
         result = library.add_games('\n\n'.join(pgns), collection, 'chesscom')
+        collection_id = result.get('collection_id', collection_id)
         for key in total:
             total[key] += result[key]
-        remaining -= len(pgns)
-        if remaining <= 0:
-            break
+        if remaining is not None:
+            remaining -= len(pgns)
+            if remaining <= 0:
+                break
+    total['user'] = user
+    total['collection'] = collection
+    total['collection_id'] = collection_id
     return total
