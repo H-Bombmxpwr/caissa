@@ -88,6 +88,8 @@ with tempfile.TemporaryDirectory(prefix='caissa-sounds-') as data:
             # The settings card offers the bundled sets by name, with no file pickers
             # required to use one.
             page.evaluate('Caissa.go("settings")')
+            # The sound card lives behind its own settings tab.
+            page.get_by_role('button', name='Sound', exact=True).click()
             page.wait_for_selector('select[aria-label="Sound set"]')
             options = page.locator('select[aria-label="Sound set"] option').all_inner_texts()
             assert any('Lichess standard' in o for o in options), options

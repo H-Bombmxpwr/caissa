@@ -7,13 +7,33 @@ Imports go into a `Prep: handle` collection and use the normal import history.
 Use Online & imports for larger collections. Different handles are separate
 players; names are never matched by substring.
 
+## What the two modes are for
+
+Player lab replays one person's games and reports what keeps happening in them. Which
+person that is, is the only difference between the two modes — the report is the same
+either way, and every figure in it links to the games it came from.
+
+**Opponent prep** is the obvious one, and it is what the lab opens on. Name someone you
+are about to play. The report tells you what they open with as each colour, which lines
+they score worst in, and where their clock runs low. Take a low-scoring line to the
+analysis board and prepare against it.
+
+**My prep** is the same report turned on yourself, and answers a different question:
+*what do I keep getting wrong?* It shows the openings you actually play rather than the
+ones you meant to, the lines you lose in, the moves that cost the most centipawns and the
+time trouble around them. The part that only exists in this mode is the last step: any
+mistake it finds can be saved as a **practice position**, which then comes back on a
+schedule — 1, 3, 9, 27 and 30 days — until you play it right. That is the loop. The report
+finds the leak; the practice positions close it.
+
 ## Start here
 
-1. Choose **My prep** for your own games or **Opponent prep** for another player.
+1. Name the player. **Opponent prep** wants their exact PGN name or online handle;
+   **My prep** fills in your linked Lichess username by itself.
 2. Choose **Local games** to use your library, or an online source to import the
    latest 100 public games when you click **Build report**.
-3. Open evidence games to check patterns, then analyze a line or create practice
-   from a saved mistake.
+3. Open evidence games to check patterns, then analyze a line or, in My prep, create
+   practice from a saved mistake.
 
 My prep fills your linked Lichess username from Settings. Online imports and
 Lichess trainer fields use the same default. You can edit the name, especially

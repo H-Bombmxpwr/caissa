@@ -106,6 +106,28 @@ account is connected. See [Your lichess account](lichess.md).
 The **Master games** module points at free collections — The Week in Chess by issue
 number, and PGN Mentor's player and tournament files — and imports them the same way.
 
+PGN Mentor publishes **one archive per player**, so "import Morozevich" always means his
+entire career, not the part you searched for. That archive is kept as `Masters / <player>`.
+What you searched for — an opening or ECO range, a colour, an outcome, a span of years —
+is then saved as a collection of its own, named for the search:
+
+```
+Masters / Morozevich                                  every game in the archive
+Masters / Morozevich / King's Indian Defense 1996–2012  just the ones you asked for
+```
+
+The second collection holds *links*, not copies: each game still lives in the archive and
+is simply shelved in both places, so the same player can carry as many opening collections
+as you care to look up without the library storing anything twice. Searching the same
+player again for a different opening adds another shelf beside the first.
+
+If a search matches nothing in the archive, no shelf is made and the whole archive is
+shown instead, with a message saying so.
+
+**Year from** and **Year through** narrow by the game's date and, when set, become part of
+the collection's name — so the same opening over two different periods stays two
+collections rather than one.
+
 ## Naming openings
 
 Games imported without an `Opening` tag can be named from the bundled ECO data:

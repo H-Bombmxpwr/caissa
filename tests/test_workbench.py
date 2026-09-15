@@ -60,6 +60,68 @@ class WorkbenchTests(unittest.TestCase):
         self.assertEqual(names['Sicilian, Najdorf']['games'],2)
         self.assertEqual([o['name'] for o in self.call('GET','openings',None,{'q':'Italian'})['openings']],['Italian Game'])
 
+    def test_renaming_a_collection_keeps_its_games_readable(self):
+        self.call('POST','games',{'pgn':pgn('Kept'),'collection':'Old name'})
+        before=self.call('GET','games',None,{'collection':'Old name'})['games'][0]
+        renamed=self.call('PUT','collections/Old name',{'name':'New name'})['collection']
+        self.assertEqual(renamed['name'],'New name')
+        names=[c['name'] for c in self.call('GET','collections')['collections']]
+        self.assertIn('New name',names)
+        self.assertNotIn('Old name',names)
+        # The PGN folder travelled with the name, so the text is still where the row says.
+        after=self.call('GET','games',None,{'collection':'New name'})['games'][0]
+        self.assertEqual(after['id'],before['id'])
+        self.assertNotEqual(after['path'],before['path'])
+        self.assertIn('1. d4',self.api.library.game_pgn(after['id']) or '')
+        self.assertEqual(self.call('GET','games',None,{'collection':'Old name'})['total'],0)
+
+    def test_a_collection_cannot_be_renamed_onto_another(self):
+        self.call('POST','games',{'pgn':pgn('A'),'collection':'First'})
+        self.call('POST','games',{'pgn':pgn('B'),'collection':'Second'})
+        with self.assertRaises(ApiError):
+            self.call('PUT','collections/First',{'name':'Second'})
+        with self.assertRaises(ApiError):
+            self.call('PUT','collections/First',{'name':'  '})
+        self.assertEqual(self.call('GET','games',None,{'collection':'First'})['total'],1)
+
+    def test_collect_links_matching_games_without_copying_them(self):
+        self.call('POST','games',{'pgn':pgn('Kasparov','E97'),'collection':'Masters / Kasparov'})
+        self.call('POST','games',{'pgn':self.rated('Kasparov','X','1-0',2800,2700,'B90','Sicilian, Najdorf'),
+                                  'collection':'Masters / Kasparov'})
+        out=self.call('POST','collections/link',
+                      {'name':"Masters / Kasparov / King's Indian",
+                       'filters':{'collection':'Masters / Kasparov','eco':'E60','eco_to':'E99'}})
+        self.assertEqual((out['matched'],out['linked']),(1,1))
+        shelf=self.call('GET','games',None,{'collection':"Masters / Kasparov / King's Indian"})
+        self.assertEqual(shelf['total'],1)
+        self.assertEqual(shelf['games'][0]['eco'],'E97')
+        # Linking does not move the game out of the collection that owns it.
+        self.assertEqual(self.call('GET','games',None,{'collection':'Masters / Kasparov'})['total'],2)
+        # Re-running is idempotent rather than doubling the shelf.
+        again=self.call('POST','collections/link',
+                        {'name':"Masters / Kasparov / King's Indian",
+                         'filters':{'collection':'Masters / Kasparov','eco':'E60','eco_to':'E99'}})
+        self.assertEqual((again['matched'],again['linked']),(1,0))
+        # An unfiltered request would shelve the whole library, so it is refused.
+        with self.assertRaises(ApiError):
+            self.call('POST','collections/link',{'name':'Everything','filters':{}})
+        with self.assertRaises(ApiError):
+            self.call('POST','collections/link',{'name':'Everything','filters':{'nonsense':'x'}})
+
+    def test_opening_name_follows_a_line_as_it_is_played(self):
+        # A drill names the position the player has reached, so the answer is a list of
+        # the plies at which the name changes rather than one name for the whole line.
+        names=self.call('POST','openings/name',{'moves':['e4','e5','Nf3','Nc6','Bb5','a6']})['names']
+        self.assertEqual(names[0],{'ply':1,'eco':'B00','opening':"King's Pawn Game"})
+        self.assertEqual(names[-1]['opening'],'Ruy Lopez: Morphy Defense')
+        self.assertEqual([n['ply'] for n in names],sorted(n['ply'] for n in names))
+        # A repeated name is not repeated, so 2...e5 adds no entry of its own.
+        self.assertEqual([n['opening'] for n in names].count("King's Pawn Game"),1)
+        # Junk from the client stops the walk instead of raising.
+        self.assertEqual(self.call('POST','openings/name',{'moves':['e4','zzz','Nf3']})['names'],names[:1])
+        self.assertEqual(self.call('POST','openings/name',{})['names'],[])
+        self.assertEqual(self.call('POST','openings/name',{'moves':['e4'],'fen':'nonsense'})['names'],[])
+
     def test_import_reports_progress_and_settles(self):
         self.assertFalse(self.call('GET','import/status')['running'])
         self.call('POST','games',{'pgn':pgn('Progress'),'collection':'Watched'})

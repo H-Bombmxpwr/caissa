@@ -46,14 +46,34 @@ with tempfile.TemporaryDirectory(prefix='caissa-repertoire-') as data:
                     page.mouse.down();page.mouse.move(*square(end),steps=8);page.mouse.up()
                 else:
                     page.mouse.click(x,y);page.mouse.click(*square(end))
+            # The line is named for the position reached, not for where it is going.
+            expect(page.locator('.drill-opening')).to_have_text("B00 · King's Pawn Game")
             play_move('c7','c5')
             page.get_by_text('That is not the saved move. Try again.',exact=True).wait_for()
             expect(page.get_by_label('Moves played',exact=True)).to_have_text('1. e4 ')
+            # First press of Hint marks the piece, second marks the square it goes to.
+            hint=page.get_by_role('button',name='Hint',exact=True)
+            hint.click()
+            assert board.locator('square[data-key="e7"].hl-blue').count()==1
+            assert board.locator('square.hl-yellow').count()==0
+            page.get_by_role('button',name='Show the square',exact=True).click()
+            assert board.locator('square[data-key="e5"].hl-yellow').count()==1
+            expect(page.get_by_role('button',name='Hint shown',exact=True)).to_be_disabled()
             play_move('e7','e5',True)
             expect(page.get_by_label('Moves played',exact=True)).to_contain_text('2. Nf3')
+            # Playing the move clears the hint and re-arms the button.
+            assert board.locator('square.hl-blue,square.hl-yellow').count()==0
+            expect(page.get_by_role('button',name='Hint',exact=True)).to_be_enabled()
+            expect(page.locator('.drill-opening')).to_have_text("C40 · King's Knight Opening")
             play_move('b8','c6')
             page.get_by_role('heading',name='Line complete',exact=True).wait_for()
+            expect(page.locator('.drill-opening')).to_have_text("C44 · King's Knight Opening: Normal Variation")
             page.get_by_role('button',name='Save review',exact=True).click()
+            page.get_by_text('1 line scheduled for review',exact=True).wait_for()
+            # A hinted line is not a clean review, so it comes back tomorrow.
+            import json
+            line=json.loads(page.evaluate('(id)=>Caissa.api("repertoires/"+id)',rep_id)['repertoire']['data'])['lines'][0]
+            assert line['successes']==2 and line['interval']==1,line
             page.get_by_role('button',name='Change side',exact=True).click()
             page.get_by_label('Repertoire color',exact=True).select_option('w')
             page.get_by_role('button',name='Save side',exact=True).click()

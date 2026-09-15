@@ -47,8 +47,22 @@ is nothing to type. Promotions ask which piece you want. **Board size** resizes 
 and **Moves played** lists only the moves you have actually reached, so it never shows you
 the move you are being asked for.
 
+Under the prompt, the drill names the opening you have reached — *B90 · Sicilian Defense:
+Najdorf Variation* — from lichess's CC0 opening data, the same naming the game database
+uses. It names the position you are standing in, not the one the line ends in, so it
+follows you into the variation without telling you where the line is going. On a line that
+leaves the named openings behind, or one starting from a set-up position that never joins
+them, it simply shows nothing.
+
+**Hint** works in two presses. The first marks the piece that moves, in blue; the second
+marks the square it moves to, in amber. Stopping after the first press is the point — it
+is usually all you need, and it leaves you to work out the rest. A hinted line counts as a
+retry when the review is saved, so it comes back tomorrow, and the hint clears itself once
+you play the move.
+
 Blindfold mode is off by default. Tick it to hide the pieces as a memory exercise; a
-**Peek** button then appears and counts how often you use it.
+**Peek** button then appears and counts how often you use it. A peek shows the position
+but never the hint, so the two do not do each other's work.
 
 A session that holds several lines drills them as one tree. Playing a saved move belonging
 to a different line switches you onto that line rather than marking you wrong, and when a

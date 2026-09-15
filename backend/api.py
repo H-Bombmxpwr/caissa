@@ -20,6 +20,7 @@ from .study import Study
 from . import importers
 from . import literature
 from . import openingtree
+from . import openings as opening_names
 from . import repertoire as repertoire_pgn
 from .books import Books
 from .scouting import Scouting
@@ -28,6 +29,12 @@ EXTRA_FILTERS = ('annotator','site','round','termination','annotated','date_from
                  'white_min_elo','white_max_elo','black_min_elo','black_max_elo','kind',
                  'team','title','fide_id','source_title','variation','event_type',
                  'event_date_from','event_date_to')
+
+# What POST /api/collections/link may filter on: the game fields a saved search is
+# built from, and nothing that would let a request reach outside the library.
+COLLECT_FILTERS = ('query', 'collection', 'player', 'white', 'black', 'eco', 'eco_to', 'result',
+                   'outcome', 'opening', 'event', 'year', 'date_from', 'date_to', 'min_elo',
+                   'max_elo', 'min_length', 'max_length', 'position', 'tag', 'kind')
 
 # What a collection can hold. The game database lists COLLECTION_KINDS[0] only.
 COLLECTION_KINDS = ('games', 'studies', 'openings')
@@ -134,6 +141,10 @@ class Api:
         """
         if method == 'POST' and rest == ['classify']:
             return 200, self.library.name_openings((body or {}).get('collection'))
+        if method == 'POST' and rest == ['name']:
+            body = body or {}
+            moves = [san for san in (body.get('moves') or []) if isinstance(san, str)]
+            return 200, {'names': opening_names.progression(moves, body.get('fen') or None)}
         if method != 'GET':
             raise ApiError('unsupported openings request', 405)
         term = (query.get('q') or '').strip()
@@ -321,6 +332,35 @@ class Api:
             if not name:
                 raise ApiError("a collection needs a name")
             return 200, {"collection": self.library.ensure_collection(name, (body or {}).get("kind", "games"))}
+        if method == "POST" and rest == ["link"]:
+            body = body or {}
+            name = str(body.get("name", "")).strip()
+            if not name:
+                raise ApiError("a collection needs a name")
+            kind = body.get("kind") or "games"
+            if kind not in COLLECTION_KINDS:
+                raise ApiError("unknown collection kind: " + str(kind))
+            filters = {key: value for key, value in (body.get("filters") or {}).items()
+                       if key in COLLECT_FILTERS and value not in (None, "")}
+            if not filters:
+                raise ApiError("Narrow the search before collecting it: an empty filter is the whole library.")
+            try:
+                return 200, self.library.collect_into(name, filters, kind)
+            except ValueError as err:      # a malformed date or ELO never reaches SQL
+                raise ApiError(str(err))
+        if method == "PUT" and len(rest) == 1:
+            info = self.library.collection(rest[0])
+            if not info:
+                raise ApiError("no such collection", 404)
+            try:
+                renamed = self.library.rename_collection(info["id"], (body or {}).get("name", ""))
+            except ValueError as err:
+                raise ApiError(str(err))
+            folder = self.library.connect().execute(
+                'SELECT folder_id FROM collection_folders WHERE collection_id=?', (info['id'],)).fetchone()
+            if folder:
+                self.study.write_manifest(folder['folder_id'])
+            return 200, {"collection": renamed}
         if rest and rest[-1] == "pgn" and method == "GET":
             info = self.library.collection(rest[0])
             if not info:

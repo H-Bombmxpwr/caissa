@@ -33,10 +33,16 @@ with tempfile.TemporaryDirectory(prefix='caissa-scout-') as data:
             }''')
             from playwright.sync_api import expect
             player=page.get_by_label('Player',exact=True)
-            expect(player).to_have_value('Alice')
-            page.get_by_label('Report',exact=True).select_option('opponent')
+            # Opponent prep leads, because scouting somebody else is the obvious use.
+            expect(page.get_by_label('Report',exact=True)).to_have_value('opponent')
             expect(player).to_have_value('')
+            expect(page.locator('.mode-purpose')).to_contain_text('Preparing against someone')
             player.fill('Bob')
+            page.get_by_label('Report',exact=True).select_option('self')
+            expect(player).to_have_value('Alice')
+            expect(page.locator('.mode-purpose')).to_contain_text('Reviewing your own play')
+            page.get_by_label('Report',exact=True).select_option('opponent')
+            expect(player).to_have_value('Bob')
             page.get_by_label('Report',exact=True).select_option('self')
             expect(player).to_have_value('Alice')
             page.get_by_label('Games',exact=True).select_option('chesscom')

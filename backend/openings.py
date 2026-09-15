@@ -52,6 +52,37 @@ def classify(sans, start_fen=None, depth=MAX_PLIES):
     return {"eco": best[0], "opening": best[1]} if best else None
 
 
+def progression(sans, start_fen=None, depth=MAX_PLIES):
+    """Each point along `sans` where the opening's name changes.
+
+    `classify` answers "what is this line called" for a finished game. A drill needs the
+    answer at every stage, because the name the player is standing in changes as the line
+    is played. Returning only the plies where it changes keeps the list short and lets the
+    caller name any position by taking the last entry at or before its ply.
+    """
+    table = index()
+    if not table or not sans:
+        return []
+    try:
+        game = Chess(start_fen) if start_fen else Chess()
+    except (ValueError, KeyError, IndexError):
+        return []
+    found, best = [], None
+    for ply, san in enumerate(sans[:depth], 1):
+        try:                       # a caller-supplied line stops at its first bad move
+            if not game.move(san):
+                break
+        except (ValueError, KeyError, IndexError):
+            break
+        named = table.get(game.key())
+        if named and (best is None or named[2] >= best[2]):
+            best = named
+            if found and found[-1]["opening"] == named[1]:
+                continue           # two positions, one name: the player learns nothing new
+            found.append({"ply": ply, "eco": named[0], "opening": named[1]})
+    return found
+
+
 def name_for(meta, sans):
     """What a game's ECO and Opening tags should say, without overwriting the file's own.
 

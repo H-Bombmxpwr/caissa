@@ -46,13 +46,19 @@ with tempfile.TemporaryDirectory(prefix='caissa-autoimport-') as data:
 
                 # Nothing on offer until an account is connected.
                 page.evaluate('Caissa.go("settings")')
+                # The account lives behind its own settings tab.
+                page.get_by_role('button', name='Account & connection').click()
                 page.wait_for_selector('input[aria-label="Personal access token"]')
+                assert page.locator('[data-section="Account & connection"]').get_attribute('data-account') == 'off'
                 assert page.locator('.autoimport').count() == 0, 'offered without an account'
 
                 page.fill('input[aria-label="Personal access token"]', 'lip_test')
                 page.get_by_role('button', name='Connect account', exact=True).click()
                 page.wait_for_selector('.autoimport')
                 assert page.get_by_text('Off. Your games arrive only when you import them by hand.').count() == 1
+                # Connecting is reflected on the tab and in the badge, without a reload.
+                assert page.locator('.account-badge').inner_text().startswith('Connected as')
+                assert page.locator('[data-section="Account & connection"]').get_attribute('data-account') == 'on'
 
                 # The options appear only once it is switched on.
                 assert page.locator('.autoimport select[aria-label="How often"]').is_visible() is False

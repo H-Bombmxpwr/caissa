@@ -237,6 +237,64 @@ class Library:
         os.makedirs(os.path.join(self.collections_dir, slugify(name)), exist_ok=True)
         return self.collection(name)
 
+    def rename_collection(self, ident, name):
+        """Give a collection a new name, taking its PGN folder with it.
+
+        Games record where their text lives as a path under the library, so the folder
+        move and the paths have to travel together or the games stop being readable. If
+        the destination folder is already taken the files stay where they are: the games
+        still read correctly from the old folder, and only new imports land under the new
+        name.
+        """
+        info = self.collection(ident)
+        if not info:
+            return None
+        name = (name or "").strip()
+        if not name:
+            raise ValueError("a collection needs a name")
+        clash = self.collection(name)
+        if clash and clash["id"] != info["id"]:
+            raise ValueError("another collection is already called " + name)
+        old_slug, new_slug = slugify(info["name"]), slugify(name)
+        with self._write_lock:
+            conn = self.connect()
+            conn.execute("UPDATE collections SET name = ? WHERE id = ?", (name, info["id"]))
+            old_dir = os.path.join(self.collections_dir, old_slug)
+            new_dir = os.path.join(self.collections_dir, new_slug)
+            if new_slug != old_slug and os.path.isdir(old_dir) and not os.path.exists(new_dir):
+                os.rename(old_dir, new_dir)
+                # Stored paths were written with whichever separator built them, so both
+                # spellings are rewritten rather than guessed at.
+                for sep in ("/", os.sep):
+                    old_rel, new_rel = "collections" + sep + old_slug + sep, "collections" + sep + new_slug + sep
+                    conn.execute("UPDATE games SET path = ? || substr(path, ?) WHERE substr(path, 1, ?) = ?",
+                                 (new_rel, len(old_rel) + 1, len(old_rel), old_rel))
+            conn.commit()
+        os.makedirs(os.path.join(self.collections_dir, new_slug), exist_ok=True)
+        return self.collection(info["id"])
+
+    def collect_into(self, name, filters, kind="games"):
+        """Put every game matching a search onto one shelf, without copying it.
+
+        The master collections are built this way. PGN Mentor ships one archive per
+        player, so a collection for one opening of that player's is the archive filtered:
+        the games keep living in the collection they were imported into and are linked
+        onto the new shelf, rather than being stored a second time.
+        """
+        info = self.ensure_collection(name, kind)
+        found = self.search(limit=200000, **filters)
+        linked = 0
+        with self._write_lock:
+            conn = self.connect()
+            for game in found["games"]:
+                if game["collection_id"] == info["id"]:
+                    continue
+                linked += conn.execute("INSERT OR IGNORE INTO game_collections VALUES (?,?,?)",
+                                       (game["id"], info["id"], int(time.time()))).rowcount
+            conn.commit()
+        return {"collection": info["name"], "id": info["id"],
+                "matched": len(found["games"]), "linked": linked}
+
     def collections_for(self, game_ids):
         """Every collection each of these games sits in, owner first then links."""
         ids = [int(i) for i in game_ids]

@@ -7,10 +7,20 @@
 
   // Share only public account identity with forms; the token stays on the server.
   let identity=null,identityRequest=null,identityVersion=0;
+  // element -> {refresh, seen}. A registration is dropped only once its element has
+  // been in the document and then left it: a field registered while its view is still
+  // being built has simply not been appended yet, and must not be swept away.
   const accountFields=new Map();
+  function pruneAccountFields(){
+    for(const [element,entry] of accountFields){
+      if(element.isConnected)entry.seen=true;
+      else if(entry.seen)accountFields.delete(element);
+    }
+  }
   function setIdentity(value){
     identityVersion++;identity=value;
-    for(const [input,refresh] of accountFields){if(input.isConnected)refresh();else accountFields.delete(input);}
+    pruneAccountFields();
+    for(const [element,entry] of accountFields)if(element.isConnected)entry.refresh();
     global.dispatchEvent(new CustomEvent('caissa-account-changed',{detail:value}));
     return value;
   }
@@ -31,11 +41,19 @@
       if(!name){if(automatic&&input.value===automatic)input.value='';automatic='';return;}
       if(!edited||!input.value||input.value===automatic){input.value=name;automatic=name;}
     }
-    for(const existing of accountFields.keys())if(!existing.isConnected)accountFields.delete(existing);
-    accountFields.set(input,refresh);refresh();account().then(refresh);
+    pruneAccountFields();accountFields.set(input,{refresh,seen:input.isConnected});refresh();account().then(refresh);
     return refresh;
   }
-  global.CaissaAccount={get:account,set:setIdentity,fill:fillAccount};
+  // Anything that only wants to *show* the connection — a badge, a field that should
+  // not ask for a token twice — registers here and is redrawn whenever it changes.
+  // Registrations are pruned the moment their element leaves the page, so a view that
+  // has been navigated away from stops being redrawn without having to unsubscribe.
+  function watchAccount(element,render){
+    function refresh(){render(identity||{connected:false});}
+    pruneAccountFields();accountFields.set(element,{refresh,seen:element.isConnected});refresh();account().then(refresh).catch(()=>{});
+    return refresh;
+  }
+  global.CaissaAccount={get:account,set:setIdentity,fill:fillAccount,watch:watchAccount};
 
   function cacheRead() {
     try { return JSON.parse(localStorage.getItem(CACHE_KEY)) || {}; } catch (e) { return {}; }

@@ -343,6 +343,35 @@ and cached, so the readings never slow the search.
   the database page backfills games imported before this existed.
 
 
+### Keep a master search as its own collection
+
+PGN Mentor ships one archive per player, so **Import & find matching games** always
+downloads that player's whole career and keeps it as `Masters / player`. The
+search you ran is then saved beside it as `Masters / player / what you searched
+for` — the opening name, or the ECO range when no opening is named, plus the years
+when a year range is set. That second collection holds links to the same games,
+not copies, so one player can carry several opening collections without the
+library storing anything twice, and the database opens on it after the import. A
+search that matches nothing in the archive makes no collection and says so.
+**Year from** and **Year through** filter by game date and are part of the name.
+
+
+### Rename a collection
+
+**Study folders → All collections → Rename.** The folder holding the collection's
+PGN is renamed with it and the games' stored paths are rewritten, so the games
+stay readable; the study folder manifest is rewritten too. A name another
+collection already uses is refused.
+
+
+### See that lichess is connected
+
+**Settings → Account & connection** shows **Connected as *you***, and the tab
+itself carries a green dot whether or not it is open. While connected, the online
+importer fills in your username and hides the token field entirely — the token
+saved in Settings is used — and Player lab's My prep fills in the same username.
+
+
 ### Rename repertoires and remove lines
 
 On the Repertoire page, choose **Rename** on a repertoire card and save its new
@@ -387,6 +416,17 @@ moves played automatically. Use **Change side** on its card to change that color
 default and can be enabled for an optional memory exercise. Promotions ask which
 piece to promote to. Complete the line and choose **Save review** to update its
 practice schedule.
+
+Beneath the prompt the drill names the opening reached so far, as an ECO code and
+name from lichess's CC0 data — the same source the database's opening column uses.
+The name deepens as the line is played and changes when the session moves to
+another branch; a position outside the named openings shows nothing.
+
+**Hint** takes two presses: the first highlights the piece to move in blue, the
+second highlights its destination in amber. The highlight clears when the move is
+played, and the button is re-armed for the next one. A hint counts against the
+line the same way a wrong move does, so a hinted line is rescheduled for tomorrow
+rather than pushed further out.
 
 
 ### Drill a whole repertoire in one session

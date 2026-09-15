@@ -51,6 +51,18 @@ move, not a link.
 An import now reports `linked` alongside `added`, `duplicates` and `skipped`, so
 "0 added, 14 linked" tells you the games were already there and are now on this shelf too.
 
+## Renaming a collection
+
+**Study folders → All collections → Rename.** A collection's name is also the name of the
+folder its PGN lives in, so renaming moves that folder and rewrites the games' stored
+paths together — the games stay readable, and their study folder manifest is rewritten to
+match. Nothing else changes: links, position indexes and review history all survive.
+
+A name another collection already uses is refused rather than merging the two. If the
+destination folder somehow already exists on disk, the files are left where they are; the
+games still read correctly from the old folder and only new imports land under the new
+name.
+
 ## Searching
 
 The search box matches players, event, opening, ECO, annotator, site, team, source

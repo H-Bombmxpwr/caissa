@@ -374,35 +374,64 @@
     const eco=h('input',{value:'E60',placeholder:'E60','aria-label':'ECO from'}),ecoEnd=h('input',{value:'E99',placeholder:'E99','aria-label':'ECO through'});
     const picker=openingPicker(hit=>{if(hit.eco_from){eco.value=hit.eco_from;ecoEnd.value=hit.eco_to||hit.eco_from;}},'King’s Indian');
     const colour=colourSelect(''),outcome=outcomeSelect(''),results=h('div');
+    const yearFrom=h('input',{type:'number',min:1475,max:2100,placeholder:'1960','aria-label':'Year from'});
+    const yearTo=h('input',{type:'number',min:1475,max:2100,placeholder:'1972','aria-label':'Year through'});
+    function years(){
+      const from=yearFrom.value.trim(),to=yearTo.value.trim();
+      return from||to?{from:from||'1475',to:to||String(new Date().getFullYear())}:null;
+    }
     function filtersFor(collection){
-      const next={collection};
+      const next={collection},span=years();
       if(player.value.trim())next[colour.value||'player']=player.value.trim();
       if(outcome.value)next.outcome=outcome.value;
       if(eco.value.trim())next.eco=eco.value.trim().toUpperCase();
       if(ecoEnd.value.trim())next.eco_to=ecoEnd.value.trim().toUpperCase();
       if(!eco.value.trim()&&picker.input.value.trim())next.opening=picker.input.value.trim();
+      if(span){next.date_from=span.from+'-01-01';next.date_to=span.to+'-12-31';}
       return next;
+    }
+    // PGN Mentor publishes one archive per player, so an import is always that player's
+    // whole career. The search is what makes a collection worth keeping, so it gets a
+    // shelf of its own named after it, and one player can have as many as you look up.
+    function shelfLabel(){
+      const from=eco.value.trim().toUpperCase(),to=ecoEnd.value.trim().toUpperCase();
+      const opening=picker.input.value.trim()||(from&&to&&from!==to?'ECO '+from+'–'+to:from||to||'');
+      const span=years(),period=span?(span.from===span.to?span.from:span.from+'–'+span.to):'';
+      return [opening,period].filter(Boolean).join(' ');
     }
     content.append(card('Search PGN Mentor player collections',h('div.card-pad',[
       field('Player surname',player),
       h('div.toolbar',[field('Colour',colour),field('Outcome',outcome)]),
       field('Opening name',picker.input),picker.list,
       h('div.toolbar',[field('ECO from',eco),field('ECO through',ecoEnd)]),
+      h('div.toolbar',[field('Year from',yearFrom),field('Year through',yearTo)]),
       h('div.toolbar',[
         button('Find collections',async()=>{
           results.textContent='Searching PGN Mentor…';
           const data=await api('masters/catalog?'+new URLSearchParams({q:player.value}));
           results.replaceChildren(...data.players.map(p=>h('div.context-item',[h('b',{text:p.name}),
             button('Import & find matching games',async()=>{
-              const collection='Masters / '+p.name;
+              const archive='Masters / '+p.name,label=shelfLabel();
               watchImport();
-              await api('import/source',{path:p.url,collection});
-              state.filters=filtersFor(collection);state.offset=0;await go('database');
+              await api('import/source',{path:p.url,collection:archive});
+              let collection=archive;
+              let shelved=null;
+              if(label){
+                const shelf=await api('collections/link',{name:archive+' / '+label,filters:filtersFor(archive)});
+                if(shelf.matched){shelved=shelf;collection=shelf.collection;
+                  App.toast(shelf.matched+' of the archive’s games match · saved as '+shelf.collection,6000);}
+                else App.toast('Nothing in '+archive+' matches this search, so only the full archive was kept.',6000);
+              }
+              await refreshMeta();
+              // The shelf already holds exactly the matching games, so it is shown by id
+              // and the filter bar reflects it rather than re-applying the whole search.
+              state.filters=shelved?{collection:String(shelved.id)}:filtersFor(archive);
+              state.offset=0;await go('database');
             })])));
           if(!data.players.length)results.textContent='No player collections found. Try a surname.';
         },'primary'),
-        button('Clear all fields',()=>{player.value='';picker.input.value='';eco.value='';ecoEnd.value='';colour.value='';outcome.value='';results.replaceChildren();})]),
-      h('p.muted',{text:'Downloads the selected collection, then combines your filters locally. Picking an opening fills the ECO range from the games you already have, which finds the same openings in PGNs that carry no opening name.'}),
+        button('Clear all fields',()=>{player.value='';picker.input.value='';eco.value='';ecoEnd.value='';colour.value='';outcome.value='';yearFrom.value='';yearTo.value='';results.replaceChildren();})]),
+      h('p.muted',{text:'PGN Mentor publishes one archive per player, so the download is always that player’s whole career, kept as Masters / player. Your search is then saved as a collection of its own — Masters / player / what you searched for — holding just the matching games. The games are shelved there, not copied, so one player can carry as many opening collections as you look up. Picking an opening fills the ECO range from the games you already have, which finds the same openings in PGNs that carry no opening name.'}),
       results])));
     const lookup=h('input',{placeholder:'Kasparov Topalov, Wijk aan Zee, Najdorf…','aria-label':'Find a game in your library'});
     const found=h('div');
@@ -1033,6 +1062,7 @@
       h('li',{text:'Choose Add to repertoire, then All variations or Main line only. Both start at the initial position and include complete lines. Choose an existing repertoire or create one; already-covered lines are skipped.'}),
       h('li',{text:'Return here and use Browse lines to study, or Drill due lines to practise on a full-size board. Drag pieces or click a square and its destination; the opponent’s moves are played for you. Drill all lines practises the whole repertoire instead of only what is due.'}),
       h('li',{text:'When a session holds several lines, playing a different saved move switches you to that branch, and the board jumps back to each remaining branch in turn. Save review schedules every line you completed, so a part-finished session is still worth saving.'}),
+      h('li',{text:'The drill names the opening you have reached as you play it. Hint takes two presses: the first marks the piece to move, the second marks the square it goes to. A hinted line comes back tomorrow, the same as a wrong move.'}),
       h('li',{text:'View repertoire merges shared moves into one study tree per starting position. Different starting positions open as separate labelled boards.'}),
       h('li',{text:'Use Rename to change a repertoire name and Change side to swap the colour you drill, which also flips the board. Browse lines lets you select and delete saved lines. Export PGN keeps a portable copy.'})])]));
     const grid=h('div.cards-grid');content.append(grid);if(!data.repertoires.length)grid.append(empty('Start with one good line','Open a game or build a line on the analysis board, then choose Add to repertoire.',[button('Open analysis board',()=>go('analysis'),'primary')]));for(const meta of data.repertoires){const rep=(await api('repertoires/'+meta.id)).repertoire;const data=JSON.parse(rep.data),lines=data.lines||[],due=lines.filter(l=>(l.due||0)<=Date.now());grid.append(h('section.card.study-card',[h('div.eyebrow',{text:meta.color==='w'?'White repertoire':'Black repertoire'}),h('h3',{text:meta.name}),h('p.muted',{text:lines.length+' lines · '+due.length+' due for review'}),h('div.toolbar',[button('Drill due lines',()=>{if(!due.length)throw new Error('All lines reviewed. Come back when they are due.');drillLine(due[0].moves,due[0].fen,rep,due[0],due);},'primary'),button('Drill all lines',()=>{if(!lines.length)throw new Error('Add some lines first.');drillLine(lines[0].moves,lines[0].fen,rep,lines[0],lines);}),button('View repertoire',()=>viewRepertoire(rep)),button('Browse lines',()=>browseRepertoire(rep)),button('Rename',()=>renameRepertoire(rep)),button('Change side',()=>renameRepertoire(rep,true)),button('Export PGN',()=>{const pgn=lines.map(l=>'[Event "'+meta.name.replace(/"/g,'')+'"]\n[SetUp "1"]\n[FEN "'+l.fen+'"]\n[Result "*"]\n\n'+l.moves.map((m,i)=>(i%2===0?(Math.floor(i/2)+1)+'. ':'')+m).join(' ')+' *').join('\n\n');download(pgn,'repertoire.pgn');})])]));}}
@@ -1081,19 +1111,39 @@
       const history=h('div.drill-history',{'aria-label':'Moves played','aria-live':'polite'});
       const progress=h('p.drill-progress',{'aria-live':'polite'});
       const promotion=h('div.toolbar');
+      const named=h('p.drill-opening',{'aria-live':'polite'});
       const owner=rep?.color||new Chess(fen).turnColor();
-      let index=0,mistakes=0,g=new Chess(fen),completed=false,waiting=false,saved=false,timer;
+      const openings=new Map();   // line key -> the plies at which its opening is renamed
+      let index=0,mistakes=0,hints=0,stage=0,g=new Chess(fen),completed=false,waiting=false,saved=false,timer;
       const b=new Board(holder,{orientation:owner,blindfold:'off',animationMs:state.prefs.animate===false?0:state.prefs.animationMs||200});
       const blind=h('input',{type:'checkbox',checked:false,onchange:()=>{b.setBlindfold(blind.checked&&!completed?'pieces':'off');peek.hidden=!blind.checked;}});
       const peek=button('Peek',()=>{});peek.hidden=true;
       peek.addEventListener('pointerdown',()=>{b.setPeeking(true);App.stat('repertoire-peeks',{count:1});});
       ['pointerup','pointerleave','pointercancel'].forEach(event=>peek.addEventListener(event,()=>b.setPeeking(false)));
       dialog.addEventListener('close',()=>clearTimeout(timer));
+      /* The opening is named for the position actually reached, so it follows the player
+         into the line without telling them where the line is going. */
+      function showOpening(){
+        const stages=openings.get(key(currentLine));
+        if(!stages)return;
+        const reached=stages.filter(entry=>entry.ply<=index).pop();
+        named.textContent=reached?reached.eco+' · '+reached.opening:'';
+      }
+      async function loadOpening(){
+        const id=key(currentLine);
+        named.textContent=openings.has(id)?named.textContent:'';
+        if(!openings.has(id)){
+          const moves=currentLine.moves.map(move=>typeof move==='string'?move:move.san);
+          openings.set(id,(await api('openings/name',{moves,fen:currentLine.fen||null})).names||[]);
+          if(key(currentLine)!==id)return;   // the player branched while this was in flight
+        }
+        showOpening();
+      }
       function record(san){
         const fields=g.fen().split(' '),move=g.move(san);
         if(!move)throw new Error('This saved line contains an illegal move: '+san);
         index++;history.append(h('span',{text:fields[5]+(fields[1]==='w'?'. ':'... ')+move.san+' '}));
-        b.setLastMove([move.from,move.to]);
+        b.setLastMove([move.from,move.to]);showOpening();
       }
       function submit(move){
         if(waiting||completed)return;
@@ -1101,7 +1151,7 @@
         promotion.replaceChildren();
         if(played&&played.san!==sans[index]){
           const alternative=queue.findIndex(l=>(l.fen||Chess.DEFAULT_FEN)===fen&&l.moves[index]===played.san&&sans.slice(0,index).every((m,i)=>l.moves[i]===m));
-          if(alternative>=0){const next=queue.splice(alternative,1,currentLine)[0];currentLine=next;sans=next.moves;}
+          if(alternative>=0){const next=queue.splice(alternative,1,currentLine)[0];currentLine=next;sans=next.moves;loadOpening();}
           else if((sessionLines||[]).some(l=>(l.fen||Chess.DEFAULT_FEN)===fen&&l.moves[index]===played.san&&sans.slice(0,index).every((m,i)=>l.moves[i]===m))){
             feedback.textContent='That is a repertoire move already covered. Try a different continuation for this branch.';b.setPosition(g,{sound:false});return;
           }
@@ -1109,7 +1159,7 @@
         if(!played||played.san!==sans[index]){
           mistakes++;feedback.textContent='That is not the saved move. Try again.';b.setPosition(g,{sound:false});return;
         }
-        record(played.san);feedback.textContent='Correct.';waiting=true;
+        record(played.san);clearHint();feedback.textContent='Correct.';waiting=true;
         b.setPosition(g);b.setMovable({color:null});timer=setTimeout(advance,350);
       }
       function onMove(from,to){
@@ -1121,7 +1171,26 @@
       }
       function renderBoard(){
         b.setPosition(g);b.setMovable({color:completed||waiting?null:owner,dests:g.destinationsMap(),onMove});
+        hint.disabled=completed||waiting;
       }
+      function clearHint(){
+        stage=0;b.setHighlights({},{answer:true});hint.textContent='Hint';
+      }
+      const hint=button('Hint',()=>{
+        if(completed||waiting)throw new Error('There is no move to hint at right now.');
+        const test=new Chess(g.fen()),move=test.move(sans[index]);
+        if(!move)throw new Error('This saved line contains an illegal move: '+sans[index]);
+        if(!stage){
+          stage=1;hints++;App.stat('repertoire-hints',{count:1});
+          b.setHighlights({[move.from]:'hl-blue'},{answer:true});
+          hint.textContent='Show the square';
+          feedback.textContent='Move the highlighted piece. Press again for the square it goes to.';
+        }else{
+          stage=2;b.setHighlights({[move.from]:'hl-blue',[move.to]:'hl-yellow'},{answer:true});
+          hint.textContent='Hint shown';hint.disabled=true;
+          feedback.textContent='Play '+move.from+'–'+move.to+'. A hinted line comes back tomorrow.';
+        }
+      });
       const finish=button('Save review',async()=>{
         if(!results.length)throw new Error('Finish at least one line before saving a review.');
         if(rep){
@@ -1129,12 +1198,13 @@
           for(const review of results){
             const item=data.lines.find(l=>key(l)===key(review.line));
             if(!item)continue;
-            item.successes=(item.successes||0)+(review.mistakes===0?1:0);
-            item.interval=review.mistakes?1:Math.max(1,Math.round((item.interval||.4)*2.5));item.due=Date.now()+item.interval*86400000;
+            const clean=!review.mistakes&&!review.hints;
+            item.successes=(item.successes||0)+(clean?1:0);
+            item.interval=clean?Math.max(1,Math.round((item.interval||.4)*2.5)):1;item.due=Date.now()+item.interval*86400000;
           }
           await api('repertoires/'+rep.id,{name:latest.name,color:latest.color,data},'PUT');
         }
-        App.stat('repertoire',{reviews:results.length,mistakes:results.reduce((sum,r)=>sum+r.mistakes,0)});
+        App.stat('repertoire',{reviews:results.length,mistakes:results.reduce((sum,r)=>sum+r.mistakes,0),hints:results.reduce((sum,r)=>sum+r.hints,0)});
         saved=true;close();App.toast(results.length+(results.length===1?' line':' lines')+' scheduled for review');
         if(state.view==='repertoire')go('repertoire');
       },'primary');finish.disabled=true;
@@ -1148,7 +1218,8 @@
         for(let i=1;i<queue.length;i++)if(sharedPrefix(queue[i])>sharedPrefix(queue[chosen]))chosen=i;
         const next=queue.splice(chosen,1)[0],shared=sharedPrefix(next);
         currentLine=next;sans=next.moves;fen=next.fen||Chess.DEFAULT_FEN;
-        index=0;mistakes=0;completed=false;waiting=false;g=new Chess(fen);history.replaceChildren();b.setLastMove(null);
+        index=0;mistakes=0;hints=0;completed=false;waiting=false;g=new Chess(fen);history.replaceChildren();b.setLastMove(null);
+        clearHint();loadOpening();
         while(index<shared)record(sans[index]);
         b.setPosition(g,{animate:false,sound:false});
         feedback.textContent=shared?'Jumped back to the next branch after '+shared+' moves. Find the other continuation.':'Starting the next line from its initial position.';
@@ -1159,7 +1230,7 @@
         while(index<sans.length&&g.turnColor()!==owner)record(sans[index]);
         completed=index===sans.length;
         if(completed){
-          results.push({line:currentLine,mistakes});
+          results.push({line:currentLine,mistakes,hints});
           if(queue.length){
             waiting=true;prompt.textContent='Branch complete';feedback.textContent='Correct — branch complete. Moving to the next variation…';
             timer=setTimeout(nextBranch,1100);
@@ -1176,17 +1247,17 @@
       body.append(h('div.repertoire-drill-layout',[
         h('div.drill-board-column',[holder,field('Board size',size)]),
         h('div.drill-sidebar',[h('p',{text:'You play '+(owner==='w'?'White':'Black')+'. Drag pieces or click a piece and its destination. Opponent moves play automatically.'}),
-          progress,prompt,h('h4',{text:'Moves played'}),history,promotion,feedback,h('label.toolbar',[blind,'Blindfold mode (optional)']),peek,
+          progress,prompt,named,h('h4',{text:'Moves played'}),history,promotion,feedback,h('label.toolbar',[blind,'Blindfold mode (optional)']),h('div.toolbar',[hint,peek]),
           h('div.dialog-actions',[button('Close',()=>{
             if(results.length&&!saved&&!confirm(results.length+(results.length===1?' completed line has':' completed lines have')+' not been saved. Close anyway?'))return;
             close();
           }),finish])])
-      ]));advance();
+      ]));advance();loadOpening();
     });
   }
   async function studies(){content.append(heading('A place for your ideas','Study folders','Organize preparation into real folders, with portable PGNs behind every collection.',[button('Create collection',collectionDialog),button('＋ Study folder',()=>folderDialog(),'primary')]));content.append(h('p.muted',{text:state.studyRoot}));const grid=h('div.cards-grid');content.append(grid);if(!state.folders.length)grid.append(empty('Build your study space','Create a folder such as Tournament preparation, then add White repertoire, Black repertoire, Model games, and Endgames beneath it.',[button('Create study structure',async()=>{const root=await api('study/folders',{name:'Chess study'});for(const name of ['White repertoire','Black repertoire','Annotated games','Model games','Endgames','Tactics'])await api('study/folders',{name,parent_id:root.id});await go('studies');},'primary')]));
     grid.className='study-overview';grid.append(LibraryTools.studyTree(state,{browse:c=>{state.filters={collection:String(c.id),kind:c.kind||'games'};state.offset=0;go('database');},assign:assignDialog,create:folderDialog,remove:deleteFolderDialog,repertoire:()=>go('repertoire')}));
-    const collections=h('div.card-pad');for(const c of state.collections)collections.append(h('div.context-item',[h('b',{text:c.name+' · '+c.games+' games'}),h('div.toolbar',[button('Browse',()=>{state.filters={collection:String(c.id),kind:c.kind||'games'};state.offset=0;go('database');}),button('Index positions',async()=>{await api('study/index',{collection:c.id});}),h('a.btn',{href:'/api/collections/'+c.id+'/pgn',download:c.name+'.pgn',text:'Export PGN'}),button('Delete',()=>collectionDeleteDialog(c),'danger')])]));content.append(h('div',{style:{marginTop:'24px'}},[h('details.card',[h('summary.card-pad',{text:'All collections · export, delete and position indexing'}),collections])]));}
+    const collections=h('div.card-pad');for(const c of state.collections)collections.append(h('div.context-item',[h('b',{text:c.name+' · '+c.games+' games'}),h('div.toolbar',[button('Browse',()=>{state.filters={collection:String(c.id),kind:c.kind||'games'};state.offset=0;go('database');}),button('Index positions',async()=>{await api('study/index',{collection:c.id});}),button('Rename',()=>collectionRenameDialog(c)),h('a.btn',{href:'/api/collections/'+c.id+'/pgn',download:c.name+'.pgn',text:'Export PGN'}),button('Delete',()=>collectionDeleteDialog(c),'danger')])]));content.append(h('div',{style:{marginTop:'24px'}},[h('details.card',[h('summary.card-pad',{text:'All collections · export, delete and position indexing'}),collections])]));}
 
   function folderDialog(parent){modal('Create a study folder',(body,close)=>{const category=select(LibraryTools.categories,'Games to study');body.append(field('Study category',category));const name=h('input',{placeholder:'e.g. Autumn tournament preparation'}),parents=select([['','Top level'],...state.folders.map(f=>[String(f.id),f.path])],parent?String(parent):'');body.append(field('Folder name',name),field('Inside',parents),h('div.dialog-actions',[button('Cancel',close),button('Create folder',async()=>{await api('study/folders',{name:name.value,category:category.value,parent_id:parents.value?Number(parents.value):null});close();go('studies');},'primary')]));});}
   function deleteFolderDialog(folder){
@@ -1206,6 +1277,16 @@
     });
   }
   function collectionDialog(){modal('Create a collection',(body,close)=>{const name=h('input',{placeholder:'e.g. My annotated tournament games'});body.append(field('Collection name',name),h('div.dialog-actions',[button('Cancel',close),button('Create',async()=>{await api('collections',{name:name.value});close();go('studies');},'primary')]));});}
+  function collectionRenameDialog(c){modal('Rename collection',(body,close)=>{
+    const name=h('input',{value:c.name});
+    body.append(field('Collection name',name),
+      h('p.muted',{text:'The folder holding this collection’s PGN is renamed with it, so its games stay readable and its study folder manifest is rewritten. A name another collection already uses is refused.'}),
+      h('div.dialog-actions',[button('Cancel',close),button('Save name',async()=>{
+        if(!name.value.trim())throw new Error('Enter a collection name.');
+        await api('collections/'+c.id,{name:name.value.trim()},'PUT');
+        close();await refreshMeta();await go('studies');App.toast('Collection renamed');
+      },'primary')]));name.focus();name.select();
+  });}
   function collectionDeleteDialog(c){
     modal('Delete '+c.name+'?',(body,close)=>{
       const files=h('input',{type:'checkbox'});
@@ -1233,10 +1314,20 @@
     everything.addEventListener('change',()=>{maxField.hidden=everything.checked;});
     const fillOnlineUser=CaissaAccount.fill(user,()=>source.value==='lichess');
     source.addEventListener('change',fillOnlineUser);
+    // The server already falls back to the token stored in Settings, so a connected
+    // account should never be asked to paste one again.
+    const tokenField=field('lichess token',token),tokenNote=h('p.account-note');
+    const showToken=CaissaAccount.watch(tokenField,data=>{
+      const linked=data.connected&&source.value==='lichess';
+      tokenField.hidden=linked;tokenNote.hidden=!linked;
+      if(linked){token.value='';tokenNote.replaceChildren(h('b',{text:'lichess connected'}),
+        h('span',{text:' · importing as '+data.username+'. The token saved in Settings is used, so there is nothing to paste.'}));}
+    });
+    source.addEventListener('change',showToken);
     let onlineNamedByHand=false;online_collection.addEventListener('input',()=>{onlineNamedByHand=true;});
     source.addEventListener('change',()=>{if(!onlineNamedByHand)online_collection.value=source.value==='lichess'?'lichess imports':'chess.com imports';});
     const online=card('Your online games',h('div.card-pad',[field('Service',source),field('Collection name',online_collection),field('Username',user),
-      h('label.toolbar',[everything,'Import every game on the account']),maxField,field('lichess token',token),
+      h('label.toolbar',[everything,'Import every game on the account']),maxField,tokenField,tokenNote,
       button('Import account games',async()=>{
         if(!online_collection.value.trim())throw new Error('Name the collection these games should go into.');
         if(everything.checked&&source.value!=='lichess')throw new Error('Importing every game is a lichess export. For chess.com, set a maximum.');
@@ -1333,19 +1424,25 @@
   }
   async function lichessAccount(){
     const status=h('p.status-message',{role:'status'});
+    const badge=h('p.account-badge',{'aria-live':'polite'});
     const detail=h('p.muted');
     const token=h('input',{type:'password',placeholder:'lip_… paste your token here',autocomplete:'off',spellcheck:false});
+    const tokenField=field('Personal access token',token);
     const actions=h('div.toolbar');
     const watcher=h('div');
     const body=h('div.card-pad',[
-      h('p.muted',{text:'Connect your lichess account to import your own games and your private or unlisted studies. The token is stored in your local library and is never sent anywhere but lichess.'}),
-      detail,field('Personal access token',token),actions,status,watcher]);
+      badge,
+      h('p.muted',{text:'Connect your lichess account to import your own games and your private or unlisted studies. The token is stored in your local library and is never sent anywhere but lichess. Once it is connected, your username fills itself in across Caissa and no import asks for the token again.'}),
+      detail,tokenField,actions,status,watcher]);
     async function refresh(){
       const data=await api('lichess/account');CaissaAccount.set(data);
       actions.replaceChildren();
+      badge.dataset.state=data.connected?'connected':'off';
+      badge.textContent=data.connected?'Connected as '+(data.title?data.title+' ':'')+data.username:'Not connected';
+      tokenField.hidden=false;
       if(data.connected){
         const scopes=(data.scopes||[]).join(', ')||'no scopes reported';
-        detail.replaceChildren(h('b',{text:'Connected as '+(data.title?data.title+' ':'')+data.username}),h('span',{text:' · '+scopes}));
+        detail.replaceChildren(h('span',{text:'Token permissions: '+scopes}));
         status.textContent=data.can_read_studies===false
           ?'This token cannot read studies. Create a new one including study:read to import private studies.':'';
         token.value='';token.placeholder='Stored — paste a new token to replace it';
@@ -1355,7 +1452,7 @@
         watcher.replaceChildren(autoImportControls());
       }else{
         watcher.replaceChildren();
-        detail.replaceChildren(h('span',{text:'Not connected. '}),link('Create a token with the right permissions',data.token_url));
+        detail.replaceChildren(link('Create a token with the right permissions',data.token_url));
         status.textContent=data.error?'The stored token was rejected: '+data.error:'';
         actions.append(button('Connect account',async()=>{
           if(!token.value.trim())throw new Error('Paste the token from lichess first.');
@@ -1451,8 +1548,15 @@
     content.append(h('div.settings-grid',[card('Board & pieces',h('div.card-pad',[field('Board palette',swatches),h('div.toolbar',[field('Light squares',light),field('Dark squares',dark)]),field('Dark theme',h('input',{type:'checkbox',checked:!!state.prefs.darkMode,onchange:act(async e=>{state.prefs.darkMode=e.target.checked;await savePrefs();})})),field('Piece set',pieceSet),field('Piece treatment',treatments),field('Default orientation',orientation),field('Coordinates',coordinates),field('Animate moves and captures',animate),field('Animation duration',select([['100','Fast · 100 ms'],['200','Normal · 200 ms'],['350','Smooth · 350 ms'],['500','Slow · 500 ms']],String(state.prefs.animationMs||200),act(async e=>{state.prefs.animationMs=Number(e.target.value);await savePrefs();})))])),card('Preview',h('div.card-pad',[holder,h('p.muted',{style:{marginTop:'20px'},text:'Your palette applies to analysis, previews, and all seven blindfold exercises.'})]))]));
     const sections=[...content.children].slice(1),tabs=h('div.section-tabs',{'aria-label':'Settings sections'}),pane=h('div.settings-pane');
     const groups=[['Appearance',[sections.at(-1)]],['Sound',[sections[2]]],['Account & connection',sections.slice(0,2)],['Library & storage',sections.slice(3,-1)]];
-    function show(label,nodes){pane.replaceChildren(...nodes.filter(Boolean));tabs.querySelectorAll('button').forEach(b=>{b.classList.toggle('active',b.textContent===label);b.setAttribute('aria-pressed',String(b.textContent===label));});}
-    groups.forEach(([label,nodes])=>tabs.append(button(label,()=>show(label,nodes))));sections.forEach(n=>n.remove());content.append(tabs,pane);show(...groups[0]);applyPrefs();}
+    function show(label,nodes){pane.replaceChildren(...nodes.filter(Boolean));tabs.querySelectorAll('button').forEach(b=>{b.classList.toggle('active',b.dataset.section===label);b.setAttribute('aria-pressed',String(b.dataset.section===label));});}
+    groups.forEach(([label,nodes])=>{const tab=button(label,()=>show(label,nodes));tab.dataset.section=label;tabs.append(tab);});
+    // The lichess connection lives behind a tab, so the tab itself says whether there is one.
+    const accountTab=tabs.querySelector('[data-section="Account & connection"]');
+    CaissaAccount.watch(accountTab,data=>{
+      accountTab.dataset.account=data.connected?'on':'off';
+      accountTab.title=data.connected?'lichess connected as '+data.username:'No lichess account connected';
+    });
+    sections.forEach(n=>n.remove());content.append(tabs,pane);show(...groups[0]);applyPrefs();}
   document.addEventListener('DOMContentLoaded',async()=>{
     await App.persistenceReady;
     LibraryTools.init({h,api,button,field,select,heading,openGame,resizeBoard,

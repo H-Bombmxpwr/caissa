@@ -57,6 +57,9 @@ with tempfile.TemporaryDirectory(prefix='caissa-repertoire-') as data:
             play_move('f1','b5')
             expect(page.locator('.drill-progress')).to_have_text('2 / 3 lines completed')
             expect(page.get_by_label('Moves played',exact=True)).to_have_text('1. e4 1... c5 ')
+            # The name follows the branch the board jumped to, and the hint is re-armed.
+            expect(page.locator('.drill-opening')).to_have_text('B20 · Sicilian Defense')
+            expect(page.get_by_role('button',name='Hint',exact=True)).to_be_enabled()
             play_move('g1','f3')
             page.get_by_role('heading',name='Repertoire session complete',exact=True).wait_for()
             expect(page.locator('.drill-progress')).to_have_text('3 / 3 lines completed')

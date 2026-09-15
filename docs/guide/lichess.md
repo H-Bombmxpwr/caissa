@@ -14,8 +14,18 @@ token, lichess will not admit an unlisted study exists.
    **Connect account**.
 
 The token is checked with lichess before it is stored, so a mistyped or expired token
-fails immediately rather than silently later. Once connected, the card shows which
-account it belongs to and which scopes it carries.
+fails immediately rather than silently later.
+
+Once connected, the card says **Connected as *you***, and the **Account & connection**
+tab carries a green dot so you can see the connection without opening the tab.
+
+Being connected also changes what the rest of Caissa asks you for:
+
+- **Online & imports → Your online games** fills in your username and stops asking for a
+  token at all — it says which account it will import as and uses the stored token.
+- **Player lab → My prep** fills in your username the same way.
+- Anywhere a lichess username is wanted, it is already filled in; typing over it is
+  always allowed, and what you type is kept.
 
 > **Where the token lives**
 >

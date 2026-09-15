@@ -117,6 +117,8 @@
 .repertoire-drill-board{width:min(100%,560px);aspect-ratio:1;margin:0 auto}
 .drill-board-column{min-width:0}
 .drill-sidebar{min-width:0}
+.drill-opening{margin:2px 0 12px;font-size:13px;color:var(--text-strong);font-variant-numeric:lining-nums;min-height:1.2em}
+.drill-opening:empty{margin:0}
 .drill-history{min-height:70px;max-height:240px;overflow:auto;line-height:2;padding:12px;background:var(--bg-3);border-radius:5px}
 .drill-history span{display:inline-block;margin-right:8px}
 @media(max-width:760px){.repertoire-drill-layout{grid-template-columns:minmax(0,1fr)}.drill-history{max-height:140px}}

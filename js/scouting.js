@@ -5,9 +5,12 @@
     const {h, button, field, select, api, heading, openGame} = ctx;
     content.append(heading('Understand the player','Player lab','Find recurring patterns, prepare for an opponent, and retest mistakes from your games.'));
     const player=h('input',{placeholder:'Exact PGN name or online handle',value:''});
-    const mode=select([['self','My prep'],['opponent','Opponent prep']],'self');
+    // Scouting somebody else is the obvious use, so it leads; turning the same report
+    // on yourself is the same machinery read the other way round and is explained as such.
+    const mode=select([['opponent','Opponent prep'],['self','My prep']],'opponent');
     const source=select([['local','Local games'],['lichess','Import latest 100 from Lichess'],['chesscom','Import latest 100 from Chess.com']],'local');
-    const accountHint=h('p.muted',{text:'My prep uses your linked Lichess username. For local PGNs, you can enter the exact White or Black name instead.'});
+    const accountHint=h('p.muted');
+    const purpose=h('p.mode-purpose');
     const refreshAccount=CaissaAccount.fill(player,()=>mode.value==='self'&&source.value!=='chesscom');
     const drafts=new Map();let draftKey=mode.value+':'+source.value;
     function changeContext(){
@@ -19,18 +22,25 @@
       accountHint.textContent=mode.value==='opponent'
         ?'Enter the opponent name: exact PGN name or online handle. Scores in this report belong to the opponent.'
         :source.value==='chesscom'?'Enter your Chess.com handle. Your linked Lichess account is separate.'
-        :'My prep uses your linked Lichess username. For local PGNs, enter the exact White or Black name if it differs.';
+        :'My prep fills in your linked Lichess username. For local PGNs, enter the exact White or Black name if it differs.';
+      purpose.replaceChildren(h('b',{text:mode.value==='opponent'?'Preparing against someone: ':'Reviewing your own play: '}),
+        h('span',{text:mode.value==='opponent'
+          ?'the report is built from their games — what they open with as each colour, which lines they score worst in, and where their clock runs low. Every row lists the games behind it, so you can take a candidate line to the analysis board and prepare it.'
+          :'the same report turned on yourself — the openings you actually play, the lines you lose in, the moves that cost the most centipawns, and the time trouble around them. Any mistake it finds can be saved as a practice position that comes back on a schedule until you play it right.'}));
     }
     mode.addEventListener('change',changeContext);source.addEventListener('change',changeContext);
-    content.append(h('section.card',[
+    content.append(h('section.card.card-pad',[
       h('h2',{text:'Start here'}),
+      h('p',{text:'The Player Lab replays one person’s games and reports what keeps happening in them. It reads games already in your library, or imports the latest 100 from Lichess or Chess.com first. Nothing is guessed: every figure links to the games it came from.'}),
+      purpose,
       h('ol',[
-        h('li',{text:'Choose My prep to review your play, or Opponent prep to investigate someone else.'}),
-        h('li',{text:'Choose Local games for games already imported. An online source imports the latest 100 public games when you press Build report.'}),
-        h('li',{text:'Build report, then open an evidence game to inspect a pattern. Use low-scoring lines to guide analysis and saved mistakes to create practice.'})
+        h('li',{text:'Name the player. Opponent prep wants their exact PGN name or online handle; My prep fills in your linked Lichess username by itself.'}),
+        h('li',{text:'Choose Local games to use what you have already imported, or an online source to fetch the latest 100 public games when you press Build report.'}),
+        h('li',{text:'Build report, then open any evidence game to see the pattern on the board. Low-scoring lines are where to aim preparation; in My prep, save a mistake as a practice position.'})
       ]),
-      h('p.muted',{text:'Score means wins plus half of draws for the selected player. Minimum games controls opening suggestions; start with 5. Move-quality and clock sections need saved evaluation and clock annotations. The rating lookup below is a separate search of indexed local games.'})
+      h('p.muted',{text:'Score means wins plus half of draws for the named player, whoever that is. Minimum games controls opening suggestions; start with 5. Move-quality and clock sections need games carrying saved evaluations and clock times. The rating lookup below is a separate search of indexed local games.'})
     ]));
+    changeContext();
     const speed=select([['','All speeds'],['bullet','Bullet'],['blitz','Blitz'],['rapid','Rapid'],['classical','Classical']],'');
     const since=h('input',{type:'date'}), until=h('input',{type:'date'});
     const minimum=h('input',{type:'number',min:2,max:100,value:5});
