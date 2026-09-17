@@ -69,6 +69,15 @@ The search box matches players, event, opening, ECO, annotator, site, team, sour
 publication and variation name. Every word you type must match somewhere, so
 `karpov najdorf` finds Karpov's Najdorfs rather than everything by either name.
 
+> **On a very large library the box narrows what it reads**
+>
+> Past about two hundred thousand games, matching a word anywhere inside eleven columns
+> means reading every row — around forty seconds on ten million games. So above that
+> size the box matches players, tournaments and ECO codes **from the start** of the
+> value, while opening names still match anywhere inside. A forename, or a word from
+> the middle of a tournament's name, then needs the matching field in **Filters**,
+> which always searches anywhere. Below that size nothing changes.
+
 **Filters** opens the full form. Every field narrows the same search, and they combine:
 
 - **Player**, with colour and outcome read from the player you name. "Fischer, as

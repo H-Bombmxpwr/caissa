@@ -570,6 +570,10 @@
         .map(([n,t,sub])=>h('div.card.metric',[h('small',{text:t}),h('strong',{text:Number(n).toLocaleString()}),h('span',{text:sub})])));}
     await refreshStats();
     const q=h('input',{placeholder:'Search players, openings, events…',value:state.filters.q||'',type:'search','aria-label':'Search games'});
+    // A large library matches names from the start, so the box says so instead of
+    // quietly returning fewer results than the reader expects.
+    const searchNote=h('p.muted.search-note',{hidden:true,
+      text:'Names and tournaments match from the start; opening names match anywhere. Use Filters to search inside a name.'});
     let timer;q.addEventListener('input',()=>{clearTimeout(timer);timer=setTimeout(()=>{state.filters.q=q.value;state.offset=0;loadGames();},250);});
     const kind=select([...KINDS,['','Everything in the library']],state.filters.kind??'games',()=>{
       state.filters.kind=kind.value;state.offset=0;
@@ -591,13 +595,15 @@
       [['Index positions',()=>modal('Build the position index',(body,close)=>body.append(LibraryTools.indexControls(),button('Close',close)))],null,
        ['Delete matching games',()=>deleteMatching(async()=>{await refreshStats();await loadGames();}),'danger']])]);
     const table=h('div.table-scroll',[h('table.games',[h('thead',[h('tr',['#','White','Elo W','Black','Elo B','Result','Moves','ECO / Opening','Tournament','Date','Round','Annotator','Notes','Collections','Added'].map(t=>h('th',{text:t})))]),rows])]);
-    const list=h('section.card',[filters,table,pager]);
+    const list=h('section.card',[filters,searchNote,table,pager]);
     const aside=h('div.library-aside.section-stack');
     const previewBody=h('div.preview',[h('div.eyebrow',{text:'At the board'}),h('h3',{text:'Your next discovery'}),h('p.muted',{text:'Select a game to preview. Double-click to analyze.'})]);
     const holder=h('div.board-holder');previewBody.append(holder);preview=new Board(holder,{viewOnly:true,animationMs:0});preview.setPosition(new Chess());applyPrefs();
     const previewDetails=h('div');previewBody.append(previewDetails);aside.append(h('section.card',[previewBody]),h('section.note-card',[h('div.eyebrow',{text:'A connected workspace'}),h('h3',{text:'Follow the position.'}),h('p',{text:'Analyze a game, keep the critical line in your repertoire, and rehearse it without seeing the pieces.'}),button('Organize your studies',()=>go('studies'))]));
     content.append(h('div.library-grid',[list,aside]));let request=0;
-    async function loadGames(){const id=++request;const params=new URLSearchParams({kind:'games',...state.filters,limit:30,offset:state.offset});const data=await api('games?'+params);if(id!==request||state.view!=='database')return;rows.replaceChildren();
+    async function loadGames(){const id=++request;const params=new URLSearchParams({kind:'games',...state.filters,limit:30,offset:state.offset});const data=await api('games?'+params);if(id!==request||state.view!=='database')return;
+      searchNote.hidden=!(data.narrow_text&&(state.filters.q||'').trim());
+      rows.replaceChildren();
       data.games.forEach(g=>{const opening=openingLabel(g);const row=h('tr',{tabindex:0,ondblclick:act(()=>openGame(g.id)),onkeydown:act(e=>{if(e.key==='Enter')return openGame(g.id);}),onclick:()=>{rows.querySelectorAll('tr').forEach(r=>r.classList.remove('selected'));row.classList.add('selected');showPreview(g);}},[
         ...[g.id,
             [g.white_title,g.white].filter(Boolean).join(' '),g.white_elo||'—',

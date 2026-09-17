@@ -96,11 +96,14 @@ Names in most bases are stored *Surname, First*, so `Carlsen` finds Carlsen, Mag
 `Carlsen, M` narrows it further; a forename on its own finds nothing. Capitalisation does
 not matter. This is what keeps the search instant: a prefix is a range an index answers
 directly, while a substring means reading all ten million rows — about thirty-five
-seconds a search. The database's own free-text box still matches anywhere in a name, for
-when that is what you need.
+seconds a search.
 
-**Opponent or free text** searches the whole game record — both players, event, site,
-annotator — the same way the database's search box does.
+**Opponent or free text** searches names, tournaments, ECO codes and opening names. On a
+large library it matches names and tournaments from the start, for the same reason, but
+opening names still match anywhere inside — *Najdorf* sits in the middle of what that
+opening is called. To match a forename, or a word from the middle of a tournament's
+name, use the matching field in the database's filter dialog, which still searches
+anywhere.
 
 Results list the forty highest-rated matches; opening one puts it on the analysis board,
 read straight out of the base. **Open in the database** takes the same search to the
@@ -160,17 +163,19 @@ Measured on the setup above, with Lumbras GigaBase OTB Complete:
 | Database | about 600 bytes a game, roughly 6 GB |
 | Copied | nothing |
 
-Search timings on ten million games:
+Search timings measured on this base, through the running app:
 
-| Search | Time |
+| | |
 | --- | --- |
-| Player, or player with an opening, a rating floor and a year range | under a second |
-| Tournament by name | under a second |
-| Rating floor, year range or opening name **alone** | several seconds |
-| Free text alone | ten seconds or more |
+| Opening the Database view | 0.5 s |
+| Browsing the base, any page | 0.3 s |
+| Player, alone or with an opening, a rating floor and years | under 0.1 s |
+| Tournament, rating floor, opening name, year range | under 0.1 s |
+| The free-text box | 0.1 s |
+| Sorting ten million games by rating | 0.1 s |
 
-Naming a person or an event lets the search read an index and stop; everything else has
-to consider most of the base. So lead with a name, then narrow — which is how you would
-search anyway. Master games says which kind of search it is running.
+Every field the two search forms offer is answered from an index. The one thing that
+costs real time is the first search after launch, which reads index pages off disk;
+after that the library stays in the operating system's cache.
 
 Indexing a carved collection of a thousand games takes seconds.

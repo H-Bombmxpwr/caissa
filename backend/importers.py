@@ -376,6 +376,10 @@ def attach_reference(library, path, collection, progress=None, batch_size=20000,
                 conn.execute('DELETE FROM reference_bases WHERE collection_id=?', (info['id'],))
                 conn.commit()
             raise
+    if total.get('complete'):
+        # Millions of games arrived at once, so recounting the openings in one pass
+        # beats folding in ten million increments. Once, at the end, not per pass.
+        library.rebuild_opening_summary()
     if progress:
         progress(total['added'], 0)
     total.update(collection=info['name'], collection_id=info['id'], path=stored,

@@ -67,6 +67,7 @@ CREATE INDEX IF NOT EXISTS games_black ON games(black);
 CREATE INDEX IF NOT EXISTS games_eco ON games(eco);
 CREATE INDEX IF NOT EXISTS games_date ON games(date);
 CREATE INDEX IF NOT EXISTS games_event ON games(event);
+CREATE INDEX IF NOT EXISTS games_opening ON games(opening);
 
 -- A game belongs to the collection it was first imported into, and may be linked
 -- into others. Importing a game that is already in the library used to drop it
@@ -83,6 +84,17 @@ CREATE INDEX IF NOT EXISTS game_collections_collection ON game_collections(colle
 -- scanning games for source='reference' costs a full table scan — eight seconds on ten
 -- million rows, every time the Master games view opens. It is two rows of fact; it gets
 -- a table. Counting each base's games then goes through games(collection_id).
+-- One row per opening name in the library, with the ECO span it covers and how many
+-- games carry it. Deriving this with GROUP BY on demand reads every row — thirty-seven
+-- seconds on ten million games, per keystroke of the opening box. It changes only when
+-- games are imported, so it is computed then and read instantly after.
+CREATE TABLE IF NOT EXISTS opening_summary (
+  name TEXT PRIMARY KEY,
+  eco_from TEXT,
+  eco_to TEXT,
+  games INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS reference_bases (
   collection_id INTEGER PRIMARY KEY REFERENCES collections(id) ON DELETE CASCADE,
   path TEXT NOT NULL,
@@ -148,6 +160,18 @@ class Library:
             # A library that attached a base before the scan tracked completeness has
             # the table without the column, and CREATE TABLE IF NOT EXISTS will not add
             # it. Existing bases are taken as finished: they were, under the old rule.
+            # Sorting by rating used to sort on an expression, and an expression is
+            # something no index can answer: ten million rows gathered and sorted to
+            # return thirty, thirty-seven seconds a go. A generated column is the same
+            # expression given a name, so it can be indexed — and being generated it
+            # cannot drift from the two columns it reads, and no insert has to set it.
+            # table_info hides generated columns; table_xinfo is the one that lists them,
+            # and asking the wrong one adds the column a second time on every launch.
+            if 'top_elo' not in {r[1] for r in conn.execute('PRAGMA table_xinfo(games)')}:
+                conn.execute('ALTER TABLE games ADD COLUMN top_elo INTEGER '
+                             'GENERATED ALWAYS AS (MAX(COALESCE(white_elo,0),'
+                             'COALESCE(black_elo,0))) VIRTUAL')
+            conn.execute('CREATE INDEX IF NOT EXISTS games_top_elo ON games(top_elo)')
             registry = {r[1] for r in conn.execute('PRAGMA table_info(reference_bases)')}
             if 'complete' not in registry:
                 conn.execute('ALTER TABLE reference_bases ADD COLUMN complete INTEGER NOT NULL DEFAULT 1')
@@ -560,6 +584,8 @@ class Library:
                          meta['speed'],meta['rated'],cursor.lastrowid))
                 if batch and cursor.rowcount:
                     conn.execute('INSERT INTO import_members VALUES (?,?)', (batch, cursor.lastrowid))
+            self.merge_openings(conn, [(meta['opening'], meta['eco'])
+                                       for _, _, _, _, meta, _ in rows])
             conn.commit()
 
         if report:
@@ -602,7 +628,7 @@ class Library:
         "date_asc": "date ASC, id ASC",
         "white": "white COLLATE NOCASE ASC",
         "black": "black COLLATE NOCASE ASC",
-        "elo": "MAX(COALESCE(white_elo,0), COALESCE(black_elo,0)) DESC",
+        "elo": "top_elo DESC",
         "added": "added_at DESC, id DESC",
         "length": "ply_count DESC",
         "event": "event COLLATE NOCASE ASC, date DESC",
@@ -658,12 +684,19 @@ class Library:
                 where.append("collection_id = ?")
                 params.append(info["id"])
         if query:
+            # Eleven LIKE '%term%' columns cannot use an index, so every row is read:
+            # thirty-nine seconds on a ten-million-game library. That is affordable on
+            # an ordinary one, where it also matches a forename in the middle of
+            # "Carlsen, Magnus", so the honest answer depends on which library this is.
             for term in query.split():
-                like = "%" + term + "%"
-                where.append("(white LIKE ? OR black LIKE ? OR event LIKE ? OR opening LIKE ? "
-                             "OR eco LIKE ? OR annotator LIKE ? OR site LIKE ? OR white_team LIKE ? "
-                             "OR black_team LIKE ? OR source_title LIKE ? OR variation LIKE ?)")
-                params.extend([like] * 11)
+                if self.is_large():
+                    where.append(self._fast_text_clause(term, params))
+                else:
+                    like = "%" + term + "%"
+                    where.append("(white LIKE ? OR black LIKE ? OR event LIKE ? OR opening LIKE ? "
+                                 "OR eco LIKE ? OR annotator LIKE ? OR site LIKE ? OR white_team LIKE ? "
+                                 "OR black_team LIKE ? OR source_title LIKE ? OR variation LIKE ?)")
+                    params.extend([like] * 11)
         # "Kasparov, Garry" and ChessBase's "Kasparov,Garry" name the same person, so
         # both spellings are searched however the reader typed it.
         def spellings(name):
@@ -711,14 +744,24 @@ class Library:
             where.append("eco LIKE ?")
             params.append(eco.upper() + "%")
         if opening:
-            where.append("opening LIKE ?")
+            # The names are already gathered in opening_summary — a few hundred rows
+            # rather than ten million — so the substring match happens there and the
+            # games are found by an indexed equality. Same answer, without the scan.
+            # The summary only ever gains names, so it cannot lose a match; a library
+            # that has never imported through add_games falls back to the old way.
+            if self.connect().execute('SELECT 1 FROM opening_summary LIMIT 1').fetchone():
+                where.append('opening IN (SELECT name FROM opening_summary WHERE name LIKE ?)')
+            else:
+                where.append('opening LIKE ?')
             params.append("%" + opening + "%")
         if result:
             where.append("result = ?")
             params.append(result)
         if min_elo:
-            where.append("(COALESCE(white_elo,0) >= ? OR COALESCE(black_elo,0) >= ?)")
-            params.extend([int(min_elo), int(min_elo)])
+            # "either player at least this" is what top_elo already stores, and unlike
+            # the two-column OR it is a column an index can range over.
+            where.append("top_elo >= ?")
+            params.append(int(min_elo))
         if max_elo:
             # A ceiling means nobody above it; an unrated player is not treated as 9999.
             where.append("(COALESCE(white_elo,0) <= ? AND COALESCE(black_elo,0) <= ?)")
@@ -880,6 +923,113 @@ class Library:
                 continue
             found.append(dict(name=name, path=relative, bytes=os.path.getsize(full)))
         return found
+
+    LARGE_LIBRARY = 200000
+
+    def is_large(self):
+        """Is this library big enough that a full scan is felt rather than measured?
+
+        Asked as "is there a two-hundred-thousandth row", which an index answers, not
+        as a count, which reads the lot.
+        """
+        cached = getattr(self._local, 'is_large', None)
+        if cached is None:
+            cached = bool(self.connect().execute(
+                'SELECT 1 FROM games LIMIT 1 OFFSET ?', (self.LARGE_LIBRARY,)).fetchone())
+            self._local.is_large = cached
+        return cached
+
+    def _fast_text_clause(self, term, params):
+        """One search term, answered from indexes instead of by reading every row.
+
+        Names, events and ECO codes match from the start — the same bargain the Master
+        games search makes, and for the same reason. Opening names still match anywhere
+        inside, because "Najdorf" sits in the middle of what that opening is called:
+        the few hundred distinct names are filtered first and the games looked up by
+        the name itself, which is indexed.
+
+        What it gives up against the slow path is mid-string matching on people, events
+        and sites — a forename, or a word from the middle of a tournament's name. Those
+        have their own fields in the filter dialog, which still search anywhere.
+        """
+        reads = []
+        for column in ('white', 'black', 'event', 'eco'):
+            reads.append('SELECT id FROM games WHERE %s >= ? AND %s < ?' % (column, column))
+            params.extend([term, term + '\uffff'])
+            capital = term[:1].upper() + term[1:]
+            if capital != term:
+                reads.append('SELECT id FROM games WHERE %s >= ? AND %s < ?' % (column, column))
+                params.extend([capital, capital + '\uffff'])
+        reads.append('SELECT id FROM games WHERE opening IN '
+                     '(SELECT name FROM opening_summary WHERE name LIKE ?)')
+        params.append('%' + term + '%')
+        return 'id IN (' + ' UNION '.join(reads) + ')'
+
+    OPENING_SUMMARY_SQL = """
+        INSERT INTO opening_summary (name, eco_from, eco_to, games)
+        SELECT opening,
+               MIN(CASE WHEN eco GLOB '[A-E][0-9][0-9]*' THEN substr(eco,1,3) END),
+               MAX(CASE WHEN eco GLOB '[A-E][0-9][0-9]*' THEN substr(eco,1,3) END),
+               COUNT(*)
+        FROM games WHERE opening IS NOT NULL AND opening <> ''
+        GROUP BY opening"""
+
+    def merge_openings(self, conn, added):
+        """Fold newly imported games into the opening summary.
+
+        A rebuild is a full scan; an import knows exactly which openings it brought and
+        how many of each, so it adds those counts rather than recounting the library.
+        The ECO span widens to cover whatever arrived.
+        """
+        tally = {}
+        for opening, eco in added:
+            if not opening:
+                continue
+            code = eco[:3] if eco and len(eco) >= 3 and eco[0] in 'ABCDE' else None
+            count, low, high = tally.get(opening, (0, code, code))
+            tally[opening] = (count + 1,
+                              min(x for x in (low, code) if x) if (low or code) else None,
+                              max(x for x in (high, code) if x) if (high or code) else None)
+        for name, (count, low, high) in tally.items():
+            conn.execute("""INSERT INTO opening_summary (name, eco_from, eco_to, games)
+                VALUES (?,?,?,?) ON CONFLICT(name) DO UPDATE SET
+                    games = games + excluded.games,
+                    eco_from = CASE WHEN eco_from IS NULL THEN excluded.eco_from
+                                    WHEN excluded.eco_from IS NULL THEN eco_from
+                                    ELSE MIN(eco_from, excluded.eco_from) END,
+                    eco_to = CASE WHEN eco_to IS NULL THEN excluded.eco_to
+                                  WHEN excluded.eco_to IS NULL THEN eco_to
+                                  ELSE MAX(eco_to, excluded.eco_to) END""",
+                         (name, low, high, count))
+        if tally:
+            # The summary is being kept up to date, which is what the flag records —
+            # so the picker stops asking for a rebuild it does not need.
+            conn.execute("INSERT OR REPLACE INTO settings VALUES ('opening_summary_games','1')")
+
+    def rebuild_opening_summary(self):
+        """Recount the openings in the library. One full pass, run when games change."""
+        with self._write_lock:
+            conn = self.connect()
+            conn.execute('DELETE FROM opening_summary')
+            conn.execute(self.OPENING_SUMMARY_SQL)
+            conn.execute("INSERT OR REPLACE INTO settings VALUES ('opening_summary_games','1')")
+            conn.commit()
+        return conn.execute('SELECT COUNT(*) FROM opening_summary').fetchone()[0]
+
+    def openings(self, term='', limit=40):
+        """Opening names for the picker, and whether the summary behind them is current.
+
+        Never rebuilds inline: the caller is a keystroke, and a rebuild is a full scan.
+        A stale answer with `stale: True` beside it is worth more than a frozen box.
+        """
+        conn = self.connect()
+        sql = ('SELECT name, eco_from, eco_to, games FROM opening_summary'
+               + (' WHERE name LIKE ?' if term else '')
+               + ' ORDER BY games DESC, name LIMIT ?')
+        params = (['%' + term + '%'] if term else []) + [max(1, min(int(limit), 200))]
+        rows = [dict(r) for r in conn.execute(sql, params)]
+        built = conn.execute("SELECT value FROM settings WHERE key='opening_summary_games'").fetchone()
+        return rows, built is None
 
     def begin_import(self, label):
         batch = uuid.uuid4().hex

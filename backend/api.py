@@ -172,20 +172,44 @@ class Api:
         if method != 'GET':
             raise ApiError('unsupported openings request', 405)
         term = (query.get('q') or '').strip()
-        sql = ["SELECT opening AS name,",
-               # A big base subdivides ECO (B90a, E04a). The span an opening covers is
-               # still the three-letter code, so the suffix is trimmed rather than
-               # treated as a different code — or as no code at all.
-               "MIN(CASE WHEN eco GLOB '[A-E][0-9][0-9]*' THEN substr(eco,1,3) END) AS eco_from,",
-               "MAX(CASE WHEN eco GLOB '[A-E][0-9][0-9]*' THEN substr(eco,1,3) END) AS eco_to,",
-               "COUNT(*) AS games FROM games WHERE opening IS NOT NULL AND opening <> ''"]
-        params = []
-        if term:
-            sql.append('AND opening LIKE ?')
-            params.append('%' + term + '%')
-        sql.append('GROUP BY opening ORDER BY games DESC, name LIMIT 40')
-        rows = [dict(r) for r in self.library.connect().execute(' '.join(sql), params)]
-        return 200, {'openings': rows}
+        rows, never_built = self.library.openings(term)
+        if never_built:
+            # First ask on a library that predates the summary. Building it is a full
+            # scan, so it happens behind the request rather than inside it: this answer
+            # is empty, the next one is not.
+            self._start_opening_summary()
+        return 200, {'openings': rows, 'building': never_built}
+
+    OPENING_SUMMARY_INLINE = 50000
+
+    def _start_opening_summary(self):
+        """Recount openings: inline for an ordinary library, behind the request for a big one.
+
+        The scan is proportional to the library. For the few thousand games most people
+        have it is milliseconds and belongs in the request, where it cannot outlive what
+        it is reading. Only a library big enough for that to be felt gets a thread.
+        """
+        big = self.library.connect().execute(
+            'SELECT 1 FROM games LIMIT 1 OFFSET ?', (self.OPENING_SUMMARY_INLINE,)).fetchone()
+        if not big:
+            try:
+                self.library.rebuild_opening_summary()
+            except Exception:             # a summary is a convenience, never a crash
+                pass
+            return
+        if getattr(self, '_opening_summary_thread', None) and self._opening_summary_thread.is_alive():
+            return
+        self._opening_summary_thread = threading.Thread(
+            target=self._rebuild_opening_summary, daemon=True)
+        self._opening_summary_thread.start()
+
+    def _rebuild_opening_summary(self):
+        try:
+            self.library.rebuild_opening_summary()
+        except Exception:                 # a summary is a convenience; never a crash
+            pass
+        finally:
+            self.library.close()
 
     def _import_progress(self, done, total):
         if done < getattr(self, '_progress_last', 0):
@@ -437,7 +461,7 @@ class Api:
                     count += db.execute('DELETE FROM games WHERE id=? AND signature=? AND path=? AND byte_offset=? AND byte_length=?',identity).rowcount
             return 200, {'deleted': count}
         if method == "GET" and not rest:
-            return 200, self.library.search(
+            found = self.library.search(
                 query=query.get("q"),
                 collection=query.get("collection"),
                 player=query.get("player"),
@@ -459,6 +483,11 @@ class Api:
                 white_prefix=query.get('white_prefix'), black_prefix=query.get('black_prefix'),
                 **{key:query.get(key) for key in EXTRA_FILTERS},
             )
+            # A library big enough to take the indexed path searches names from the
+            # start rather than anywhere inside. The reader should be told, once, by
+            # the box itself rather than by wondering where a result went.
+            found['narrow_text'] = self.library.is_large()
+            return 200, found
         # /api/games/<id>/collections — the shelves one game sits on.
         if len(rest) >= 2 and rest[1] == "collections":
             game_id = int(rest[0])
