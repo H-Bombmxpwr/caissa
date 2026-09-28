@@ -45,7 +45,6 @@ class LargeLibraryTests(unittest.TestCase):
     def pretend_large(self):
         """Take the path a ten-million-game library takes, without ten million games."""
         self.lib.LARGE_LIBRARY = 0
-        self.lib._local.is_large = None
         self.assertTrue(self.lib.is_large())
 
     # ---- the opening picker ----------------------------------------------------
@@ -128,6 +127,78 @@ class LargeLibraryTests(unittest.TestCase):
         self.assertNotIn('SCAN games', plan)
         for index in ('games_white', 'games_black', 'games_event', 'games_opening'):
             self.assertIn(index, plan)
+
+    # ---- collection sizes ------------------------------------------------------
+
+    def assert_counts_are_exact(self):
+        db = self.lib.connect()
+        for c in self.lib.collections():
+            owned = db.execute('SELECT COUNT(*) FROM games WHERE collection_id=?', (c['id'],)).fetchone()[0]
+            linked = db.execute('SELECT COUNT(*) FROM game_collections WHERE collection_id=?',
+                                (c['id'],)).fetchone()[0]
+            self.assertEqual((c['games'], c['linked']), (owned + linked, linked), c['name'])
+        self.assertEqual(self.lib.game_count(), db.execute('SELECT COUNT(*) FROM games').fetchone()[0])
+
+    def test_collection_sizes_follow_every_kind_of_change_without_counting_games(self):
+        self.assert_counts_are_exact()
+        self.lib.add_games(pgn(date='2022.01.01'), 'Other')
+        other = self.lib.collection('Other')['id']
+        first = self.lib.search(collection='Tests', limit=1)['games'][0]['id']
+        self.lib.link_game(first, 'Other')
+        self.assert_counts_are_exact()
+        self.lib.unlink_game(first, 'Other')
+        self.lib.link_game(first, 'Other')
+        self.lib.delete_game(first)                     # takes its link with it
+        self.assert_counts_are_exact()
+        second = self.lib.search(collection='Tests', limit=1)['games'][0]['id']
+        self.lib.link_game(second, 'Other')
+        self.lib.delete_collection('Tests')             # the linked game moves to Other
+        self.assert_counts_are_exact()
+        self.assertEqual(self.lib.collection('Other')['id'], other)
+        self.assertEqual(self.lib.game_count(), 2)
+
+    def test_an_older_library_is_counted_once_on_opening(self):
+        db = self.lib.connect()
+        db.execute('DELETE FROM collection_counts')
+        db.execute("DELETE FROM settings WHERE key='backfill:collection_counts'")
+        db.commit()
+        self.lib.close()
+        reopened = Api(self.tmp.name).library
+        try:
+            self.assertEqual(reopened.game_count(), 4)
+        finally:
+            reopened.close()
+
+    # ---- the database view -----------------------------------------------------
+
+    def test_the_game_database_keeps_studies_out_but_shelved_games_in(self):
+        self.lib.ensure_collection('Notes', 'studies')
+        self.lib.add_games(pgn(date='2023.05.05', event='A study'), 'Notes')
+        study = self.lib.search(collection='Notes')['games'][0]['id']
+        self.assertEqual(self.lib.search(kind='games')['total'], 4)
+        self.assertEqual(self.lib.search(kind='studies')['total'], 1)
+        self.lib.link_game(study, 'Tests')              # shelved into a games collection
+        for kind in ('games', 'studies'):
+            found = self.lib.search(kind=kind, limit=50)
+            self.assertEqual(found['total'], len(found['games']), kind)
+        self.assertIn(study, [g['id'] for g in self.lib.search(kind='games')['games']])
+        self.assertEqual(self.lib.search(kind='games', collection='Tests')['total'], 5)
+        self.assertEqual(self.lib.search(kind='repertoire')['total'], 0)
+
+    def test_the_game_database_walks_the_date_index_rather_than_sorting_every_game(self):
+        self.lib.ensure_collection('Notes', 'studies')
+        self.lib.add_games(pgn(date='2023.05.05', event='A study'), 'Notes')
+        captured = []
+        self.lib.connect().set_trace_callback(captured.append)
+        try:
+            self.lib.search(kind='games', limit=30)
+        finally:
+            self.lib.connect().set_trace_callback(None)
+        listing = next(s for s in captured if 'ORDER BY' in s)
+        self.assertNotIn('game_collections', listing)
+        plan = ' '.join(r[-1] for r in self.lib.connect().execute('EXPLAIN QUERY PLAN ' + listing))
+        self.assertNotIn('TEMP B-TREE', plan)
+        self.assertFalse(any(s.startswith('SELECT COUNT(*) FROM games') for s in captured))
 
 
 if __name__ == '__main__':

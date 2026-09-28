@@ -87,7 +87,7 @@ class Api:
         self.delete_previews = {}
         # A starter collection for an empty library only. Re-creating one the user has
         # deleted would make "delete collection" look broken after every restart.
-        if not self.library.collections():
+        if not self.library.connect().execute('SELECT 1 FROM collections LIMIT 1').fetchone():
             self.library.ensure_collection("My games")
         self.import_status = {'running': False, 'label': '', 'done': 0, 'total': 0,
                               'added': 0, 'duplicates': 0, 'skipped': 0, 'error': None, 'batch_id': None}
@@ -263,7 +263,7 @@ class Api:
         return 200, {
             "ok": True,
             "data_dir": self.library.dir,
-            "games": self.library.connect().execute("SELECT COUNT(*) FROM games").fetchone()[0],
+            "games": self.library.game_count(),
             "time": int(time.time()),
         }
 

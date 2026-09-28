@@ -103,7 +103,7 @@ class Handler(SimpleHTTPRequestHandler):
             traceback.print_exc()
             self._send_json(500, {"error": "%s: %s" % (type(err).__name__, err)})
         finally:
-            api.library.close()
+            api.library.release()
 
     def do_GET(self):
         if __import__('re').fullmatch(r'/api/books/\d+/file(?:\?.*)?',self.path):
@@ -168,7 +168,7 @@ class Handler(SimpleHTTPRequestHandler):
         except (BrokenPipeError,ConnectionResetError):
             pass
         finally:
-            api.library.close()
+            api.library.release()
 
     def end_headers(self):
         if not self.path.startswith("/api/"):

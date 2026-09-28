@@ -383,15 +383,33 @@
     body.append(h('p',{text:'Choose a piece and click squares, or paste a FEN. Applying creates a new study.'}),field('Piece',piece),holder,field('Side to move',turn),field('Castling rights (KQkq or -)',castling),field('En passant square (or -)',ep),field('FEN',fenInput),
       h('div.toolbar',[button('Clear board',()=>{map={};castling.value='-';ep.value='-';sync();}),button('Starting position',()=>{map=new Chess().piecesMap();turn.value='w';castling.value='KQkq';ep.value='-';sync();})]),
       h('div.dialog-actions',[button('Cancel',close),button('Apply position',()=>{
-        const fen=fenInput.value.trim(),parts=fen.split(/\s+/),ranks=(parts[0]||'').split('/');
-        if(parts.length!==6||ranks.length!==8||ranks.some(r=>!/^[prnbqkPRNBQK1-8]+$/.test(r)||[...r].reduce((n,c)=>n+(Number(c)||1),0)!==8)||!/^[wb]$/.test(parts[1])||!/^(-|K?Q?k?q?)$/.test(parts[2])||!/^(-|[a-h][36])$/.test(parts[3])||!/^\d+$/.test(parts[4])||! /^[1-9]\d*$/.test(parts[5]))throw new Error('Enter a valid six-field FEN.');
-        if((parts[0].match(/K/g)||[]).length!==1||(parts[0].match(/k/g)||[]).length!==1||/[pP]/.test(ranks[0]+ranks[7]))throw new Error('Place one king of each color and no pawns on the first or eighth rank.');
-        const g=new Chess(fen),pieces=g.piecesMap(),wk=Object.keys(pieces).find(k=>pieces[k].color==='w'&&pieces[k].type==='k'),bk=Object.keys(pieces).find(k=>pieces[k].color==='b'&&pieces[k].type==='k');
-        if(Math.abs(wk.charCodeAt(0)-bk.charCodeAt(0))<=1&&Math.abs(Number(wk[1])-Number(bk[1]))<=1)throw new Error('Kings cannot be adjacent.');
+        const fen=readFen(fenInput.value);
         if(state.dirty&&!confirm('Discard unsaved analysis and use this position?'))return;
-        state.selected=null;state.parsed=PGN.parse('[Event "Edited position"]\n[White "White"]\n[Black "Black"]\n[SetUp "1"]\n[FEN "'+g.fen()+'"]\n[Result "*"]\n\n*');state.node=state.parsed.root;state.dirty=true;close();go('analysis');
+        state.selected=null;state.parsed=PGN.parse('[Event "Edited position"]\n[White "White"]\n[Black "Black"]\n[SetUp "1"]\n[FEN "'+fen+'"]\n[Result "*"]\n\n*');state.node=state.parsed.root;state.dirty=true;close();go('analysis');
       },'primary')]));b.setPieces(map);
   });}
+  // A FEN as people actually paste it: copied from a site that drops the two move
+  // counters, with stray spaces, or with castling rights the pieces no longer allow.
+  // Those are repaired; a position that cannot arise at all is refused with the reason.
+  function readFen(text){
+    const parts=String(text||'').trim().split(/\s+/),ranks=(parts[0]||'').split('/');
+    if(parts.length<2||parts.length>6||ranks.length!==8||ranks.some(r=>!/^[prnbqkPRNBQK1-8]+$/.test(r)||[...r].reduce((n,c)=>n+(Number(c)||1),0)!==8)||!/^[wb]$/.test(parts[1]))
+      throw new Error('That is not a FEN. It should look like: rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1');
+    let [placement,turn,castling='-',ep='-',half='0',full='1']=parts;
+    if((placement.match(/K/g)||[]).length!==1||(placement.match(/k/g)||[]).length!==1)throw new Error('A position needs exactly one king of each colour.');
+    if(/[pP]/.test(ranks[0]+ranks[7]))throw new Error('Pawns cannot stand on the first or eighth rank.');
+    if(!/^(-|[KQkq]{1,4})$/.test(castling))throw new Error('Castling rights should be some of KQkq, or -.');
+    const pieces=new Chess(placement+' w - - 0 1').piecesMap(),at=(sq,code)=>{const p=pieces[sq];return !!p&&p.color+p.type===code;};
+    // A right the pieces no longer allow would have the engine castle through thin air.
+    const allowed={K:at('e1','wk')&&at('h1','wr'),Q:at('e1','wk')&&at('a1','wr'),k:at('e8','bk')&&at('h8','br'),q:at('e8','bk')&&at('a8','br')};
+    castling=['K','Q','k','q'].filter(c=>castling.includes(c)&&allowed[c]).join('')||'-';
+    if(!/^(-|[a-h][36])$/.test(ep)||(ep!=='-'&&ep[1]!==(turn==='w'?'6':'3')))ep='-';
+    if(!/^\d+$/.test(half))half='0';
+    if(!/^[1-9]\d*$/.test(full))full='1';
+    const fen=[placement,turn,castling,ep,half,full].join(' '),g=new Chess(fen);
+    if(g.kingAttacked(turn==='w'?'b':'w'))throw new Error('The side that just moved is in check, so this position cannot arise.');
+    return fen;
+  }
   function filterDialog(reload){modal('Find the games that matter',(body,close)=>{
     const f=state.filters,inputs={};
     function text(key,label,extra){const el=h('input',Object.assign({value:f[key]||''},extra||{}));inputs[key]=el;return field(label,el);}
@@ -471,6 +489,16 @@
     state.parsed=PGN.parse('[Event "Opening exploration"]\n[White "White"]\n[Black "Black"]\n[SetUp "1"]\n[FEN "'+fen+'"]\n[Result "*"]\n\n*');
     state.node=state.parsed.root;state.selected=null;state.dirty=true;stashBoard();return go('analysis');
   }
+  // A pasted FEN. Like opening a game, it takes over a tab with nothing in it and
+  // leaves one holding work alone. A bare position has nothing to lose, so it is not
+  // marked unsaved until a move is made from it.
+  function pasteFen(text){
+    const fen=readFen(text),current=activeBoard();stashBoard();
+    if(current.selected||current.dirty||current.parsed?.root.children.length){state.boards.splice(++state.boardIndex,0,makeBoard());adoptBoard(state.boardIndex);}
+    state.parsed=PGN.parse('[Event "Position analysis"]\n[White "White"]\n[Black "Black"]\n[SetUp "1"]\n[FEN "'+fen+'"]\n[Result "*"]\n\n*');
+    state.node=state.parsed.root;state.selected=null;state.dirty=false;stashBoard();return go('analysis');
+  }
+  const looksLikeFen=text=>/^\s*[pnbrqkPNBRQK1-8]{1,8}(\/[pnbrqkPNBRQK1-8]{1,8}){7}\s+[wb]\b/.test(text||'');
   async function openGame(id,ply) {
     const {game}=await api('games/'+id);const parsed=PGN.parse(game.pgn);
     if(parsed.errors.length)throw new Error('This PGN contains unrecognized moves: '+parsed.errors.slice(0,5).join(', '));
@@ -532,15 +560,33 @@
     const strip=h('div.board-tabs',{role:'tablist','aria-label':'Analysis boards'});
     state.boards.forEach((b,index)=>{
       const title=boardTitle(b);
-      const tab=h('div.board-tab'+(index===state.boardIndex?'.active':''),[
-        h('button.tab-label',{type:'button',role:'tab','aria-selected':String(index===state.boardIndex),text:title+(b.dirty?' *':''),
-          onclick:act(async()=>{if(index===state.boardIndex)return;stashBoard();adoptBoard(index);await go('analysis');})})]);
+      const label=h('button.tab-label',{type:'button',role:'tab','aria-selected':String(index===state.boardIndex),text:title+(b.dirty?' *':''),
+          title:'Double-click to rename',
+          onclick:act(async()=>{if(index===state.boardIndex)return;stashBoard();adoptBoard(index);await go('analysis');}),
+          ondblclick:e=>{e.preventDefault();renameTab(strip,index);}});
+      const tab=h('div.board-tab'+(index===state.boardIndex?'.active':''),[label]);
       if(state.boards.length>1)tab.append(h('button.tab-close',{type:'button',text:'✕',title:'Close this board','aria-label':'Close '+title,onclick:act(()=>closeBoard(index))}));
       strip.append(tab);
     });
     strip.append(h('button.tab-new',{type:'button',text:'＋',title:'Open another analysis board','aria-label':'New analysis board',onclick:act(newBoard)}));
     return strip;
   }
+  // The name is the tab's own: it outlives the game in it being saved or renamed, and
+  // clearing it hands the tab back to naming itself after the players.
+  function renameTab(strip,index){
+    const b=state.boards[index],label=strip.querySelectorAll('.tab-label')[index];
+    if(!b||!label)return;
+    let done=false;
+    const input=h('input.tab-rename',{value:b.label||boardTitle(b),'aria-label':'Board name',maxlength:60,spellcheck:'false'});
+    const finish=keep=>{if(done)return;done=true;
+      if(keep){const name=input.value.trim();if(name)b.label=name;else delete b.label;}
+      const fresh=boardTabs();(input.isConnected?input.closest('.board-tabs'):strip).replaceWith(fresh);
+      fresh.querySelectorAll('.tab-label')[index]?.focus();};
+    input.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();finish(true);}else if(e.key==='Escape'){e.preventDefault();e.stopPropagation();finish(false);}});
+    input.addEventListener('blur',()=>finish(true));
+    label.replaceWith(input);input.focus();input.select();
+  }
+  function renameActiveTab(){const strip=content.querySelector('.board-tabs');if(strip)renameTab(strip,state.boardIndex);}
   function newBoard(){stashBoard();state.boards.splice(++state.boardIndex,0,makeBoard());adoptBoard(state.boardIndex);return go('analysis');}
   async function go(view) {
     if(state.analysisCleanup){state.analysisCleanup();state.analysisCleanup=null;}
@@ -636,7 +682,7 @@
     const saveBtn=button(state.dirty?'Save changes *':'Save game',saveGame,'primary');
     content.append(heading('Understand every move',parsed.headers.White+' — '+parsed.headers.Black,[parsed.headers.Event,parsed.headers.Date].filter(Boolean).join(' · ')||'An open board for your ideas',[
       ...actions(saveBtn,[button('Add to repertoire',addToRepertoire,'quiet'),button('Panels',panelDialog,'quiet')],
-        [['Board editor',boardEditor],['Export PGN',()=>download(serialize(parsed),'caissa-study.pgn')],null,
+        [['Board editor',boardEditor],['Rename board',renameActiveTab],['Export PGN',()=>download(serialize(parsed),'caissa-study.pgn')],null,
          ['Reset board',()=>{if(state.dirty&&!confirm('Discard unsaved analysis and reset to the starting position?'))return;newGame();return go('analysis');},'danger']])]));
     content.append(boardTabs());
     const holder=h('div.board-holder'),moves=h('div.move-tree'),engineBody=h('div',[h('p.muted',{style:{padding:'16px'},text:'Analyze a position with your bundled Stockfish.'})]),contextBody=h('div.context-body');
@@ -658,7 +704,14 @@
     const branches=h('div.branch-picker',{'aria-label':'Available continuations'});let branchIndex=0;
     const controls=h('div.board-navigation',[button('⏮',()=>jump(parsed.root)),button('←',()=>jump(state.node.parent||state.node)),button('→',()=>jump(state.node.children[branchIndex]||state.node)),button('⏭',()=>{let n=state.node;while(n.children.length)n=n.children[0];jump(n);}),button('Flip',()=>{board.toggleOrientation();activeBoard().orientation=board.opts.orientation;})]);
     controls.querySelectorAll('button').forEach((b,i)=>b.setAttribute('aria-label',['First position','Previous move','Next move','Last move','Flip board'][i]));
-    const fen=h('div.fen');const sanInput=h('input',{placeholder:'Enter a move, e.g. Nf3','aria-label':'Move in SAN'});
+    // The position's FEN, and the place to paste one: Enter analyzes what is typed here.
+    const fen=h('input.fen-input',{spellcheck:'false',autocomplete:'off','aria-label':'Position FEN. Paste a FEN and press Enter to analyze it.',
+      placeholder:'Paste a FEN and press Enter',onfocus:()=>fen.select(),
+      onkeydown:e=>{if(e.key==='Escape'){fen.value=state.node.fenAfter;fen.blur();}},
+      onblur:()=>{if(!fen.value.trim())fen.value=state.node.fenAfter;}});
+    const fenForm=h('form.fen-form',{onsubmit:act(e=>{e.preventDefault();if(fen.value.trim()===state.node.fenAfter)return;return pasteFen(fen.value);})},
+      [fen,h('button.btn',{type:'submit',text:'Analyze FEN',title:'Analyze the position in the FEN box'})]);
+    const sanInput=h('input',{placeholder:'Enter a move, e.g. Nf3','aria-label':'Move in SAN'});
     const moveForm=h('form.toolbar',{onsubmit:act(e=>{e.preventDefault();play(sanInput.value);sanInput.value='';})},[sanInput,h('button.btn',{text:'Play move',type:'submit'})]);
     const tablebaseBody=h('div.card-pad');const tablebaseToggle=h('input',{type:'checkbox',onchange:()=>renderTablebase()});
 
@@ -692,7 +745,7 @@
     const splitter=h('div.dock-splitter',{title:'Drag to divide the two columns'});
     const grid=h('div.analysis-grid',[h('div.analysis-board',[
       h('div.player-strip',[h('b',{text:parsed.headers.Black||'Black'}),h('span.muted',{text:parsed.headers.BlackElo||''})]),holder,
-      h('div.player-strip',[h('b',{text:parsed.headers.White||'White'}),h('span.muted',{text:parsed.headers.WhiteElo||''})]),controls,moveForm,h('div.toolbar',[button('Copy FEN',async()=>{await navigator.clipboard.writeText(state.node.fenAfter);App.toast('FEN copied');}),button('Clear arrows',()=>{board.setShapes([]);if(state.node.shapes){state.node.shapes=undefined;markDirty();renderMoves();}})]),h('p.muted',{text:'← / →: moves · ↑ / ↓: variations · Home / End: start / end · Wheel: moves · Right-drag or Shift-drag: arrow · Shift or Ctrl: red · Alt: blue · both: yellow · Click the board to clear'}),fen]),
+      h('div.player-strip',[h('b',{text:parsed.headers.White||'White'}),h('span.muted',{text:parsed.headers.WhiteElo||''})]),controls,moveForm,h('div.toolbar',[button('Copy FEN',async()=>{await navigator.clipboard.writeText(state.node.fenAfter);App.toast('FEN copied');}),button('Clear arrows',()=>{board.setShapes([]);if(state.node.shapes){state.node.shapes=undefined;markDirty();renderMoves();}})]),h('p.muted',{text:'← / →: moves · ↑ / ↓: variations · Home / End: start / end · Wheel: moves · Right-drag or Shift-drag: arrow · Shift or Ctrl: red · Alt: blue · both: yellow · Click the board to clear · Ctrl+V: analyze a copied FEN'}),fenForm]),
       h('div.analysis-panels',[dockWide,h('div.dock-columns',[dockMain,splitter,dockSide])])]);
     content.append(grid);
     function panelControls(id){
@@ -809,7 +862,7 @@
         body.append(h('div.dialog-actions',[button('Cancel',close)]));
       });
     }
-    function render(){if(!layout.hidden.includes('openingbook'))openingBook.refresh();const g=new Chess(state.node.fenAfter);board.setPosition(g);board.setLastMove(state.node.move?[state.node.move.from,state.node.move.to]:null);board.setMovable({color:g.turnColor(),dests:g.destinationsMap(),onMove:(from,to)=>{const p=g.get(from);if(p?.type==='p'&&/[18]$/.test(to)){modal('Promote pawn',(body,close)=>body.append(h('div.toolbar',['q','r','b','n'].map(promo=>button(promo.toUpperCase(),()=>{close();play({from,to,promotion:promo});})))));}else play({from,to});}});comment.value=state.node.comment||'';nag.value=state.node.nags[0]||'';fen.textContent=state.node.fenAfter;latestLines=[];board.setShapes(state.node.shapes||[]);board.setShapes([],{book:true});drawBest();renderTablebase();renderMoves();renderContext();clearTimeout(liveTimer);if(live)liveTimer=setTimeout(evaluate,350);}
+    function render(){if(!layout.hidden.includes('openingbook'))openingBook.refresh();const g=new Chess(state.node.fenAfter);board.setPosition(g);board.setLastMove(state.node.move?[state.node.move.from,state.node.move.to]:null);board.setMovable({color:g.turnColor(),dests:g.destinationsMap(),onMove:(from,to)=>{const p=g.get(from);if(p?.type==='p'&&/[18]$/.test(to)){modal('Promote pawn',(body,close)=>body.append(h('div.toolbar',['q','r','b','n'].map(promo=>button(promo.toUpperCase(),()=>{close();play({from,to,promotion:promo});})))));}else play({from,to});}});comment.value=state.node.comment||'';nag.value=state.node.nags[0]||'';if(document.activeElement!==fen)fen.value=state.node.fenAfter;latestLines=[];board.setShapes(state.node.shapes||[]);board.setShapes([],{book:true});drawBest();renderTablebase();renderMoves();renderContext();clearTimeout(liveTimer);if(live)liveTimer=setTimeout(evaluate,350);}
     // One brand per engine line, so a line's arrow, its border and its score all
     // carry the same colour. Map before filtering: a line with no PV still owns its slot.
     function brandFor(i){return ['green','blue','red','yellow','purple'][i%5];}
@@ -942,9 +995,14 @@
       if(e.key==='Home')next=parsed.root;if(e.key==='End'){next=state.node;while(next.children[0])next=next.children[0];}
       if(e.key==='ArrowUp'||e.key==='ArrowDown'){if(state.node.children.length>1){e.preventDefault();branchIndex=(branchIndex+(e.key==='ArrowDown'?1:-1)+state.node.children.length)%state.node.children.length;renderBranches();return;}const siblings=state.node.parent?.children||[];next=siblings[Math.max(0,Math.min(siblings.length-1,siblings.indexOf(state.node)+(e.key==='ArrowDown'?1:-1)))]||state.node;}
       if(next){e.preventDefault();jump(next);}};
+    // Ctrl+V anywhere on the board page analyzes a copied FEN. A paste into a text box
+    // is that box's business, and anything that is not a FEN is left alone.
+    const paste=e=>{if(state.view!=='analysis'||/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)||e.target.isContentEditable||document.querySelector('dialog[open]'))return;
+      const text=e.clipboardData?.getData('text/plain')||'';if(!looksLikeFen(text))return;
+      e.preventDefault();act(()=>pasteFen(text))();};
     const taskCompleted=event=>{if(event.detail.kind==='index'&&!closed)renderContext();};
     window.addEventListener('caissa-task-complete',taskCompleted);
-    document.addEventListener('keydown',key);const oldGoCleanup=()=>{closed=true;++evalRequest;++tbRequest;clearTimeout(livePoll);window.removeEventListener('caissa-task-complete',taskCompleted);document.removeEventListener('keydown',key);api('engine/live',null,'DELETE').catch(()=>{});};state.analysisCleanup=oldGoCleanup;
+    document.addEventListener('keydown',key);document.addEventListener('paste',paste);const oldGoCleanup=()=>{closed=true;++evalRequest;++tbRequest;clearTimeout(livePoll);window.removeEventListener('caissa-task-complete',taskCompleted);document.removeEventListener('keydown',key);document.removeEventListener('paste',paste);api('engine/live',null,'DELETE').catch(()=>{});};state.analysisCleanup=oldGoCleanup;
   }
   async function saveGame(){if(state.selected){await api('games/'+state.selected.id,{pgn:serialize(state.parsed)},'PUT');state.dirty=false;App.toast('Annotations saved to PGN');return go('analysis');}
     // A datalist only suggests once the box is empty, so every collection is listed outright.

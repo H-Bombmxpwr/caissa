@@ -10,6 +10,27 @@ own layout, and the layout is saved with your preferences.
 Panels available: notation, engine, position notes, PGN tags, endgame tablebase, opening
 book, position context, and the PDF reader.
 
+## Board tabs
+
+Each tab holds its own game. **＋** opens another. Double-click a tab, or choose
+**Rename board** from the **⋯** menu, to give it a name of your own. Enter keeps the
+name, Escape cancels, and an empty name goes back to naming the tab after the players.
+
+## Starting from a FEN
+
+The box under the board always shows the current position's FEN. To analyze a
+different position, paste a FEN into it and press Enter, or just press **Ctrl+V**
+anywhere on the analysis page with a FEN on the clipboard. An empty board takes the
+position. A board that already holds work is left alone, and the position opens in a
+new tab beside it.
+
+FENs copied from other sites often need small repairs, and these are made for you. The
+move counters can be missing. Castling rights are dropped when the king or rook they
+depend on is not on its home square, and an impossible en passant square is cleared. A
+position that cannot happen, such as one with a missing king or with the side that just
+moved in check, is refused, and a message says why. The **Board editor** reads FENs
+the same way.
+
 ## Moving around
 
 | Key | Move |

@@ -1,5 +1,63 @@
 PERFORMANCE — ALL THREE ITEMS DONE
-Updated 2026-09-16. Nothing here is outstanding; this is the record of what changed.
+Updated 2026-09-27. Nothing here is outstanding; this is the record of what changed.
+
+===============================================================================
+2026-09-27: THE APP ITSELF WAS STILL SLOW
+===============================================================================
+
+The 09-16 numbers were measured through the API without the arguments the UI sends.
+The UI always sends kind=games, and every page change calls /api/collections. Measured
+again the way the app runs, against the same 10.36M-game library, with a new thread
+per request as the server uses:
+
+                                          before (cold / warm)     after
+  App launch (Api.__init__) ............ 38 s / 17 s               0.13 s
+  Database view, first page ............ 6 min / 57 s              2 ms
+  /api/collections, every page change .. 5.3 s / 0.36 s            32 ms
+  /api/stats, /api/health .............. 2.6 s / 0.4 s             <1 ms
+  Position context at the start ........ 16 s / 9 s                17-37 ms
+  Free-text "Carlsen" with kind=games .. (not measured)            36 ms warm
+
+COLLECTION SIZES — a counts table kept by triggers
+  collections() ran COUNT(*) per collection, which reads one index entry per game.
+  Api.__init__ called it just to ask "is the library empty?", and the UI called it on
+  every navigation. collection_counts (collection_id, owned, linked) now holds the
+  answer. Triggers on games (insert, delete, UPDATE OF collection_id), game_collections
+  and collections keep it exact, whatever code or connection makes the change, and a
+  rollback undoes their writes too. An existing library is counted once on open
+  ('backfill:collection_counts'). game_count(), owned_count(), is_large(), stats(),
+  health and references() all read it.
+
+THE KIND FILTER — the real cause of the slow database view
+  "collection_id IN (kind) OR id IN (linked into kind)" became a MULTI-INDEX OR over
+  all 10M rows plus a TEMP B-TREE sort to return 30. The kinds are now resolved in
+  Python. When the wanted kind holds most games, the filter is
+  "+collection_id NOT IN (the others)". The unary + keeps the planner off the
+  collection index, so it walks the sort's own index (games_date, games_top_elo) and
+  stops after a page. When the wanted kind is the minority, it is "collection_id IN
+  (...)". The total comes from collection_counts, plus a COUNT over the small link
+  table, whenever kind and collection are the only filters.
+
+POSITION CONTEXT — one pass, covered
+  Three joins that each fetched the same games became one query, summarized in Python.
+  positions_hash_next (hash, game_id, next_san) covers it.
+
+CONNECTIONS — pooled between requests
+  The server closed the SQLite connection after every request, and it runs every
+  request on a new thread, so each request started with an empty page cache. Now
+  server.py calls library.release(), which parks up to 4 connections (32 MB cache
+  each, temp_store=MEMORY) for the next request. close() still closes, and it closes
+  the idle pooled connections too, because tests and background jobs rely on it to let
+  go of the file on Windows.
+
+WHY EVERYTHING FELT SLOW, NOT ONLY THOSE VIEWS
+  The 10M-row scans also pushed everything else out of the OS file cache, so unrelated
+  small queries went cold as well. The position context lookup took 5 s cold and 20 ms
+  warm. Remove the big scans and the rest of the app stays warm.
+
+  Regression tests: tests/test_large_library.py (counts after every kind of change,
+  the one-time count on open, kind filtering with links, and the database view
+  running no COUNT and no TEMP B-TREE).
 
 ===============================================================================
 THE THREE ITEMS, AND TWO MORE FOUND ON THE WAY

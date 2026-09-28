@@ -121,6 +121,40 @@ CREATE TABLE IF NOT EXISTS settings (
   value TEXT NOT NULL
 );
 
+-- How many games each collection owns and how many are linked onto it. COUNT(*) over
+-- games reads one index entry per game: a ten-million-game base made every question
+-- of "how big is this collection?" thirty-five seconds cold, and the app asked it at
+-- launch and on every page change. Triggers keep the answer exact on every insert,
+-- delete and move, whichever code path or connection makes the change.
+CREATE TABLE IF NOT EXISTS collection_counts (
+  collection_id INTEGER PRIMARY KEY,
+  owned INTEGER NOT NULL DEFAULT 0,
+  linked INTEGER NOT NULL DEFAULT 0
+);
+CREATE TRIGGER IF NOT EXISTS count_game_insert AFTER INSERT ON games BEGIN
+  INSERT INTO collection_counts (collection_id, owned) VALUES (NEW.collection_id, 1)
+    ON CONFLICT(collection_id) DO UPDATE SET owned = owned + 1;
+END;
+CREATE TRIGGER IF NOT EXISTS count_game_delete AFTER DELETE ON games BEGIN
+  UPDATE collection_counts SET owned = owned - 1 WHERE collection_id = OLD.collection_id;
+END;
+CREATE TRIGGER IF NOT EXISTS count_game_move AFTER UPDATE OF collection_id ON games
+  WHEN OLD.collection_id IS NOT NEW.collection_id BEGIN
+  UPDATE collection_counts SET owned = owned - 1 WHERE collection_id = OLD.collection_id;
+  INSERT INTO collection_counts (collection_id, owned) VALUES (NEW.collection_id, 1)
+    ON CONFLICT(collection_id) DO UPDATE SET owned = owned + 1;
+END;
+CREATE TRIGGER IF NOT EXISTS count_link_insert AFTER INSERT ON game_collections BEGIN
+  INSERT INTO collection_counts (collection_id, linked) VALUES (NEW.collection_id, 1)
+    ON CONFLICT(collection_id) DO UPDATE SET linked = linked + 1;
+END;
+CREATE TRIGGER IF NOT EXISTS count_link_delete AFTER DELETE ON game_collections BEGIN
+  UPDATE collection_counts SET linked = linked - 1 WHERE collection_id = OLD.collection_id;
+END;
+CREATE TRIGGER IF NOT EXISTS count_collection_delete AFTER DELETE ON collections BEGIN
+  DELETE FROM collection_counts WHERE collection_id = OLD.id;
+END;
+
 CREATE TABLE IF NOT EXISTS explorer_cache (
   fen TEXT PRIMARY KEY,
   db TEXT NOT NULL,
@@ -145,6 +179,7 @@ class Library:
         os.makedirs(self.collections_dir, exist_ok=True)
         self.db_path = os.path.join(self.dir, "library.db")
         self._local = threading.local()
+        self._pool = []
         self._write_lock = threading.Lock()
         self._active_imports = set()
         with self.connect() as conn:
@@ -206,6 +241,16 @@ class Library:
                 'SELECT id FROM games WHERE signature IS NULL',
                 lambda cx, ident, text: cx.execute('UPDATE games SET signature=? WHERE id=?',
                                                    (self.signature(text), ident)))
+            # The triggers keep collection_counts exact from the moment they exist; a
+            # library written before them is counted once, here, and never again.
+            if not conn.execute("SELECT 1 FROM settings WHERE key='backfill:collection_counts'").fetchone():
+                conn.execute('DELETE FROM collection_counts')
+                conn.execute('''INSERT INTO collection_counts (collection_id, owned)
+                    SELECT collection_id, COUNT(*) FROM games GROUP BY collection_id''')
+                conn.execute('''INSERT INTO collection_counts (collection_id, linked)
+                    SELECT collection_id, COUNT(*) FROM game_collections WHERE true GROUP BY collection_id
+                    ON CONFLICT(collection_id) DO UPDATE SET linked = excluded.linked''')
+                conn.execute("INSERT OR REPLACE INTO settings VALUES ('backfill:collection_counts','1')")
 
     def _backfill_once(self, conn, name, finder, apply):
         """Run a one-time repair over old rows, and remember that it ran.
@@ -244,31 +289,71 @@ class Library:
 
     # ---------- plumbing ----------
 
+    # Connections kept between requests. The server runs every request on a new thread,
+    # and a connection opened per request throws away SQLite's page cache each time, so
+    # every page change began by re-reading index pages off a seven-gigabyte file.
+    POOL_SIZE = 4
+
     def connect(self):
         conn = getattr(self._local, "conn", None)
         if conn is None:
-            conn = sqlite3.connect(self.db_path, timeout=30)
-            conn.row_factory = sqlite3.Row
-            conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute("PRAGMA foreign_keys=ON")
+            try:
+                conn = self._pool.pop()      # list.pop is atomic; no lock needed
+            except IndexError:
+                # check_same_thread=False only because a pooled connection passes from
+                # one request thread to the next; it is never used by two at once.
+                conn = sqlite3.connect(self.db_path, timeout=30, check_same_thread=False)
+                conn.row_factory = sqlite3.Row
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute("PRAGMA foreign_keys=ON")
+                conn.execute("PRAGMA cache_size=-32768")      # 32 MB, not the default 2
+                conn.execute("PRAGMA temp_store=MEMORY")
             self._local.conn = conn
         return conn
 
+    def release(self):
+        """Hand this thread's connection back for the next request to reuse."""
+        conn = getattr(self._local, "conn", None)
+        if conn is None:
+            return
+        self._local.conn = None
+        try:
+            if conn.in_transaction:
+                conn.rollback()
+        except sqlite3.Error:
+            conn.close()
+            return
+        if len(self._pool) < self.POOL_SIZE:
+            self._pool.append(conn)
+        else:
+            conn.close()
+
     def close(self):
+        """Close this thread's connection and every idle pooled one.
+
+        Callers rely on close() letting go of the file — Windows will not delete a
+        library folder while any connection holds it — so the pool goes too. It
+        refills on the next requests.
+        """
         conn = getattr(self._local, "conn", None)
         if conn is not None:
             conn.close()
             self._local.conn = None
+        while self._pool:
+            try:
+                self._pool.pop().close()
+            except IndexError:          # another thread took the last one first
+                break
 
     # ---------- collections ----------
 
     def collections(self):
         rows = self.connect().execute(
             """SELECT c.id, c.name, c.kind, c.created_at,
-                      (SELECT COUNT(*) FROM games g WHERE g.collection_id = c.id)
-                      + (SELECT COUNT(*) FROM game_collections l WHERE l.collection_id = c.id) AS games,
-                      (SELECT COUNT(*) FROM game_collections l WHERE l.collection_id = c.id) AS linked
-               FROM collections c ORDER BY c.name"""
+                      COALESCE(n.owned, 0) + COALESCE(n.linked, 0) AS games,
+                      COALESCE(n.linked, 0) AS linked
+               FROM collections c LEFT JOIN collection_counts n ON n.collection_id = c.id
+               ORDER BY c.name"""
         ).fetchall()
         result = [dict(r) for r in rows]
         db = self.connect()
@@ -652,21 +737,78 @@ class Library:
                kind=None, team=None, title=None, fide_id=None, source_title=None,
                variation=None, event_type=None, event_date_from=None, event_date_to=None):
         where, params = [], []
+        conn = self.connect()
+        # When nothing but kind and collection narrows the search, the total is already
+        # known from collection_counts and the ten-million-row COUNT is skipped.
+        known_total = None
 
         # Collections carry a kind: ordinary games, saved study positions, or imported
         # opening trees. The game database asks for 'games' so studies and repertoire
         # trees stay out of it; every other caller can still reach them by naming a kind
         # or by passing none at all, which searches the whole library.
+        #
+        # Written as an OR of two subqueries this made SQLite gather every matching row
+        # and sort them all to return thirty: a minute to open the database view once a
+        # reference base was attached. The kinds are resolved here instead, and the
+        # clause is phrased so the sort order's own index can answer it and stop early.
         if kind:
-            where.append("(collection_id IN (SELECT id FROM collections WHERE kind = ?)"
-                         " OR id IN (SELECT l.game_id FROM game_collections l"
-                         " JOIN collections c ON c.id = l.collection_id WHERE c.kind = ?))")
-            params.extend([str(kind), str(kind)])
+            sizes = conn.execute('''SELECT c.id, c.kind = ? AS wanted, COALESCE(n.owned, 0)
+                FROM collections c LEFT JOIN collection_counts n ON n.collection_id = c.id''',
+                (str(kind),)).fetchall()
+            wanted = [r[0] for r in sizes if r[1]]
+            others = [r[0] for r in sizes if not r[1]]
+            linked_in = conn.execute(
+                'SELECT 1 FROM game_collections WHERE collection_id IN (%s) LIMIT 1'
+                % ','.join('?' * len(wanted)), wanted).fetchone() if wanted else None
+            if not wanted:
+                where.append('0')
+                known_total = 0
+            elif others:
+                wanted_games = sum(r[2] for r in sizes if r[1])
+                other_games = sum(r[2] for r in sizes if not r[1])
+                # Membership of the few is an index lookup; membership of the many is
+                # best tested row by row while walking the sort index, which stops as
+                # soon as a page is full.
+                if wanted_games <= other_games:
+                    clause = 'collection_id IN (%s)' % ','.join('?' * len(wanted))
+                    params.extend(wanted)
+                else:
+                    clause = '+collection_id NOT IN (%s)' % ','.join('?' * len(others))
+                    params.extend(others)
+                if linked_in:
+                    clause = ('(%s OR id IN (SELECT game_id FROM game_collections WHERE collection_id IN (%s)))'
+                              % (clause, ','.join('?' * len(wanted))))
+                    params.extend(wanted)
+                where.append(clause)
+                known_total = wanted_games
+                if linked_in:
+                    # Games shelved here from a collection of another kind. Links are
+                    # few, so these are counted from the link table, not from games.
+                    marks = ','.join('?' * len(wanted))
+                    known_total += conn.execute(
+                        '''SELECT COUNT(DISTINCT l.game_id) FROM game_collections l
+                           JOIN games g ON g.id = l.game_id
+                           WHERE l.collection_id IN (%s) AND g.collection_id NOT IN (%s)'''
+                        % (marks, marks), wanted + wanted).fetchone()[0]
+            else:
+                known_total = sum(r[2] for r in sizes)   # every collection is this kind
 
         if collection:
             info = self.collection(collection)
             if not info:
                 return {"total": 0, "games": []}
+            if not kind or info['kind'] == str(kind):
+                # Every game shelved in a collection of the asked-for kind passes the
+                # kind test, so that test is dropped rather than left for the planner
+                # to trip over, and the total is the collection's own.
+                if kind and where:
+                    params = params[where[0].count('?'):]
+                    where = where[1:]
+                known_total = self.owned_count(info['id']) + (conn.execute(
+                    'SELECT linked FROM collection_counts WHERE collection_id=?',
+                    (info['id'],)).fetchone() or [0])[0]
+            else:
+                known_total = None
             # A collection holds the games it owns plus any linked onto it. Asking for
             # both with an OR costs the index: SQLite cannot walk one index for a query
             # that reaches into two, so it gathers every match and sorts — thirty-seven
@@ -683,6 +825,7 @@ class Library:
             else:
                 where.append("collection_id = ?")
                 params.append(info["id"])
+        scoped_clauses = len(where)
         if query:
             # Eleven LIKE '%term%' columns cannot use an index, so every row is read:
             # thirty-nine seconds on a ten-million-game library. That is affordable on
@@ -857,8 +1000,10 @@ class Library:
 
         clause = (" WHERE " + " AND ".join(where)) if where else ""
         order = self.SORTS.get(sort, self.SORTS["date"])
-        conn = self.connect()
-        total = conn.execute("SELECT COUNT(*) FROM games" + clause, params).fetchone()[0]
+        if known_total is not None and len(where) == scoped_clauses:
+            total = known_total
+        else:
+            total = conn.execute("SELECT COUNT(*) FROM games" + clause, params).fetchone()[0]
         rows = conn.execute(
             "SELECT id, collection_id, white, black, white_elo, black_elo, result, date, "
             "event, site, round, annotator, termination, has_annotations, eco, opening, ply_count, "
@@ -892,8 +1037,7 @@ class Library:
         out = []
         for row in rows:
             full = os.path.join(self.dir, row['path'])
-            games = db.execute('SELECT COUNT(*) FROM games WHERE collection_id=?',
-                               (row['id'],)).fetchone()[0]
+            games = self.owned_count(row['id'])
             size = os.path.getsize(full) if os.path.isfile(full) else 0
             out.append(dict(id=row['id'], name=row['name'], games=games,
                             path=row['path'], missing=not os.path.isfile(full),
@@ -929,15 +1073,19 @@ class Library:
     def is_large(self):
         """Is this library big enough that a full scan is felt rather than measured?
 
-        Asked as "is there a two-hundred-thousandth row", which an index answers, not
-        as a count, which reads the lot.
+        Read from collection_counts, which the triggers keep exact.
         """
-        cached = getattr(self._local, 'is_large', None)
-        if cached is None:
-            cached = bool(self.connect().execute(
-                'SELECT 1 FROM games LIMIT 1 OFFSET ?', (self.LARGE_LIBRARY,)).fetchone())
-            self._local.is_large = cached
-        return cached
+        return self.game_count() > self.LARGE_LIBRARY
+
+    def game_count(self):
+        """Every game in the library, without counting ten million rows to find out."""
+        return self.connect().execute(
+            'SELECT COALESCE(SUM(owned), 0) FROM collection_counts').fetchone()[0]
+
+    def owned_count(self, collection_id):
+        row = self.connect().execute('SELECT owned FROM collection_counts WHERE collection_id=?',
+                                     (collection_id,)).fetchone()
+        return row[0] if row else 0
 
     def _fast_text_clause(self, term, params):
         """One search term, answered from indexes instead of by reading every row.
@@ -1125,7 +1273,7 @@ class Library:
         """
         conn = self.connect()
         out = {
-            "games": conn.execute("SELECT COUNT(*) FROM games").fetchone()[0],
+            "games": self.game_count(),
             "data_dir": self.dir,
         }
         if not full:

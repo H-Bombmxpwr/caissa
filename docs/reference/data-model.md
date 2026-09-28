@@ -71,7 +71,16 @@ where it lies.
 The table exists because the same fact derived by scanning `games` for that source costs
 a full table scan — about eight seconds on ten million rows, every time the Master games
 view opens. Two rows of fact deserve two rows. Each base's game count is then read
-through `games(collection_id)`, which is indexed.
+from `collection_counts`.
+
+### `collection_counts`
+
+`(collection_id, owned, linked)` holds how many games each collection owns and how many
+are linked onto it. `COUNT(*)` over `games` reads one index entry per game. With a
+ten-million-game base that took seconds, and the app asked on launch and on every page
+change. Triggers on `games`, `game_collections` and `collections` keep the table exact
+through every insert, delete and ownership move, whichever connection makes the change.
+A library created before the table existed is counted once when it opens.
 
 ### `positions`
 

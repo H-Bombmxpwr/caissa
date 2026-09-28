@@ -32,6 +32,12 @@
 .board-tab .tab-close:hover{color:#a44c42}
 .tab-new{border:1px dashed var(--border);border-radius:7px;background:none;color:var(--text-dim);padding:0 14px}
 .tab-new:hover{color:var(--text-strong);border-color:var(--accent)}
+.board-tab .tab-rename{border:0;border-radius:0;background:none;color:var(--text-strong);font-weight:600;padding:8px 6px 8px 13px;width:190px;outline:none}
+/* The FEN under the board doubles as the place to paste one. */
+.fen-form{display:flex;gap:6px;align-items:stretch;padding:8px 0}
+.fen-form .fen-input{flex:1;min-width:0;font:11px Consolas,monospace;color:var(--text-dim);padding:7px 9px}
+.fen-form .fen-input:focus{color:var(--text-strong)}
+.fen-form .btn{white-space:nowrap}
 .dock{display:grid;gap:18px;align-content:start;min-width:0}
 .dock:empty{display:none}
 .dock-splitter{width:9px;cursor:col-resize;border-radius:5px;background:linear-gradient(var(--border),var(--border)) center/2px 46px no-repeat;align-self:stretch;touch-action:none}

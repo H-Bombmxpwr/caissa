@@ -11,6 +11,9 @@ CREATE TABLE IF NOT EXISTS positions (
  hash TEXT NOT NULL, game_id INTEGER REFERENCES games(id) ON DELETE CASCADE,
  ply INTEGER NOT NULL, next_san TEXT, PRIMARY KEY(hash, game_id, ply));
 CREATE INDEX IF NOT EXISTS positions_game ON positions(game_id);
+-- Covers the position lookup, which reads the next move as well as the game: without
+-- it every game reaching a position is a separate fetch from the positions table.
+CREATE INDEX IF NOT EXISTS positions_hash_next ON positions(hash, game_id, next_san);
 CREATE TABLE IF NOT EXISTS pins (
  id INTEGER PRIMARY KEY, hash TEXT NOT NULL, fen TEXT NOT NULL,
  title TEXT NOT NULL, url TEXT NOT NULL DEFAULT '', note TEXT NOT NULL DEFAULT '');
@@ -93,17 +96,39 @@ class Study:
     def position(self, fen):
         key = Chess(fen).key()
         db = self.library.connect()
-        games = [dict(r) for r in db.execute('''SELECT DISTINCT g.id,g.white,g.black,g.date,g.event,
-            g.result,g.eco,g.opening FROM positions p JOIN games g ON g.id=p.game_id
-            WHERE p.hash=? ORDER BY CASE WHEN g.date LIKE '0000%' OR g.date='' THEN 1 ELSE 0 END,
-            g.date, g.id LIMIT 100''', (key,))]
-        moves = [dict(r) for r in db.execute('''SELECT next_san AS san, COUNT(*) AS games,
-            SUM(result='1-0') AS white, SUM(result='1/2-1/2') AS draws, SUM(result='0-1') AS black
-            FROM (SELECT DISTINCT p.game_id,p.next_san,g.result FROM positions p JOIN games g ON g.id=p.game_id WHERE hash=? AND next_san IS NOT NULL)
-            GROUP BY next_san ORDER BY games DESC''', (key,))]
-        decades = [dict(r) for r in db.execute('''SELECT CAST(substr(g.date,1,4) AS INTEGER)/10*10 AS decade,
-            COUNT(DISTINCT g.id) AS games FROM positions p JOIN games g ON g.id=p.game_id
-            WHERE hash=? AND substr(g.date,1,4) > '0000' GROUP BY decade ORDER BY decade''', (key,))]
+        # One read of the games reaching this position, summarised here, rather than
+        # three joins that each fetched the same rows: the starting position is reached
+        # by every indexed game, and this runs on every move made on the board.
+        rows = db.execute('''SELECT p.game_id, p.next_san, g.white, g.black, g.date, g.event,
+            g.result, g.eco, g.opening FROM positions p JOIN games g ON g.id = p.game_id
+            WHERE p.hash = ?''', (key,)).fetchall()
+        seen, unique, continuations = set(), [], set()
+        for r in rows:
+            if r['next_san'] is not None:
+                continuations.add((r['game_id'], r['next_san'], r['result']))
+            if r['game_id'] not in seen:
+                seen.add(r['game_id'])
+                unique.append(r)
+        undated = lambda d: not d or d.startswith('0000')
+        ordered = sorted(unique, key=lambda r: (undated(r['date']), r['date'] or '', r['game_id']))
+        games = [dict(id=r['game_id'], white=r['white'], black=r['black'], date=r['date'],
+                      event=r['event'], result=r['result'], eco=r['eco'], opening=r['opening'])
+                 for r in ordered[:100]]
+        tally = {}
+        for _, san, result in continuations:
+            m = tally.setdefault(san, dict(san=san, games=0, white=0, draws=0, black=0))
+            m['games'] += 1
+            m['white'] += result == '1-0'
+            m['draws'] += result == '1/2-1/2'
+            m['black'] += result == '0-1'
+        moves = sorted(tally.values(), key=lambda m: -m['games'])
+        by_decade = {}
+        for r in unique:
+            year = (r['date'] or '')[:4]
+            if year > '0000' and year[:1].isdigit():
+                decade = int(''.join(c for c in year if c.isdigit()) or 0) // 10 * 10
+                by_decade[decade] = by_decade.get(decade, 0) + 1
+        decades = [dict(decade=d, games=n) for d, n in sorted(by_decade.items())]
         return dict(hash=key, games=games, moves=moves, decades=decades,
                     pins=[dict(r) for r in db.execute('SELECT * FROM pins WHERE hash=?', (key,))],
                     indexed_games=db.execute('SELECT COUNT(DISTINCT game_id) FROM positions').fetchone()[0])
